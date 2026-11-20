@@ -4127,15 +4127,20 @@ export default function App() {
         {/* ==================================================================== */}
         {activeSection === 'import' && (
           <div className="space-y-6">
+            {/* Upload / Sample Header Bar */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-cyan-700 mb-1">
+                  <FolderUp className="w-4 h-4" />
+                  SDIF / CL2 Meet Results Analyzer
+                </div>
                 <h2 className="text-lg sm:text-xl font-extrabold text-slate-900">
-                  {parsedData ? parsedData.meet.name : 'Import Hy-Tek SDIF / CL2 Meet Results'}
+                  {parsedData ? parsedData.meet.name : 'Upload Hy-Tek .CL2 or .SD3 File'}
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
                   {parsedData
-                    ? `${parsedData.meet.location || 'Pool'} • ${parsedData.meet.startDate || ''} • ${parsedData.meet.course}`
-                    : 'Upload a .cl2 or .sd3 results file or load the sample Gettysburg v Carnegie Mellon meet.'}
+                    ? `${parsedData.meet.location || 'Pool'} • ${parsedData.meet.startDate || ''} • Course: ${parsedData.meet.course}`
+                    : 'Drop a Hy-Tek .cl2 / .sd3 results file or load the sample dual meet to inspect team scores, event results, and splits.'}
                 </p>
               </div>
 
@@ -4164,164 +4169,195 @@ export default function App() {
               </div>
             </div>
 
-            {parsedData && (
-              <>
-                {/* Master Competition Link & Quick-Commit Status Bar */}
-                {(() => {
-                  const matchedMeet = resolveMasterCompetition(
-                    parsedData.meet.name,
-                    parsedData.meet.startDate
-                  );
-                  return (
-                    <div
-                      className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                        matchedMeet
-                          ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
-                          : 'bg-amber-50/80 border-amber-200 text-amber-950'
-                      }`}
-                    >
-                      <div className="flex items-start sm:items-center gap-2.5 text-xs">
-                        {matchedMeet ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
-                        ) : (
-                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
-                        )}
-                        <div>
-                          {matchedMeet ? (
-                            <span>
-                              Matched Master Competition:{' '}
-                              <strong>{matchedMeet.canonicalName}</strong> ({matchedMeet.date})
-                            </span>
-                          ) : (
-                            <span>
-                              Meet <strong>"{parsedData.meet.name}"</strong> (
-                              {parsedData.meet.startDate || 'No date'}) is not in{' '}
-                              <strong>Master Competitions</strong> yet.
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {!matchedMeet && (
-                          <button
-                            onClick={() => {
-                              const created = {
-                                id: `comp-${Date.now()}`,
-                                canonicalName: parsedData.meet.name,
-                                date: normalizeDateIso(parsedData.meet.startDate),
-                                defaultLocation: parsedData.meet.location || '',
-                                aliases: [],
-                              };
-                              updateMasterCompetitions(
-                                [...masterCompetitions, created],
-                                [created]
-                              );
-                              setBenchmarkStatusMsg(
-                                `Added "${created.canonicalName}" (${created.date}) to Master Competitions.`
-                              );
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white transition cursor-pointer"
-                          >
-                            <Calendar className="w-3.5 h-3.5" />
-                            Add to Master Competitions
-                          </button>
-                        )}
-                        <button
-                          onClick={() => setActiveSection('postmeet')}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
-                        >
-                          <ArrowRight className="w-3.5 h-3.5 text-cyan-400" />
-                          Post-Meet & Commit
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {Object.values(parsedData.teams).map((team) => (
-                    <div
-                      key={team.code}
-                      onClick={() => {
-                        setSelectedTeam(team.code);
-                        try {
-                          localStorage.setItem('swimmeet_primary_team_v1', team.code);
-                        } catch {}
-                      }}
-                      className={`p-4 rounded-2xl border transition cursor-pointer flex items-center justify-between ${
-                        selectedTeam === team.code
-                          ? 'bg-slate-900 text-white border-cyan-500 shadow-md'
-                          : 'bg-white text-slate-900 border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <div>
-                        <div className="text-[10px] font-bold uppercase tracking-wider opacity-70">
-                          {selectedTeam === team.code ? '★ Primary Program Focus' : 'Competing Team'}
-                        </div>
-                        <div className="text-base font-extrabold mt-0.5">{team.name}</div>
-                      </div>
-                      <div className="text-2xl font-black text-cyan-400">
-                        {team.points % 1 === 0 ? team.points : team.points.toFixed(1)}
-                      </div>
-                    </div>
-                  ))}
+            {!parsedData ? (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="bg-white border-2 border-dashed border-slate-300 hover:border-cyan-500 rounded-2xl p-12 text-center cursor-pointer transition group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-cyan-50 text-cyan-600 flex items-center justify-center mx-auto mb-3 group-hover:scale-105 transition">
+                  <Upload className="w-6 h-6" />
                 </div>
+                <div className="text-base font-extrabold text-slate-900">
+                  Click to select a Hy-Tek .CL2 or .SD3 file
+                </div>
+                <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                  Automatically parses B1 Meet Headers, C1 Team Scores, D0/D3 Individual Results,
+                  G0 50-Yard Splits, and E0/F0 Relay Lineups.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Meet Hero Banner + Team Scoreboard Cards */}
+                <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950 text-white rounded-2xl p-5 sm:p-6 shadow-lg border border-slate-800 space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-cyan-400">
+                        Meet Scoreboard & Primary Team Focus
+                      </div>
+                      <h3 className="text-xl sm:text-2xl font-extrabold mt-0.5">
+                        {parsedData.meet.name}
+                      </h3>
+                      <div className="text-xs text-slate-300 mt-1">
+                        {parsedData.meet.location || 'Pool'} • {parsedData.meet.startDate || 'Date TBD'} • {parsedData.meet.course}
+                      </div>
+                    </div>
 
-                {/* Filters Bar */}
-                <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {['ALL', 'WOMEN', 'MEN'].map((g) => (
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
-                        key={g}
-                        onClick={() => setGenderFilter(g)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                          genderFilter === g
-                            ? 'bg-slate-900 text-white'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
+                        onClick={() => setActiveSection('postmeet')}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition cursor-pointer"
                       >
-                        {g === 'ALL' ? 'All Genders' : g}
+                        <Award className="w-4 h-4" />
+                        Post-Meet Wins & Commit
                       </button>
-                    ))}
-                    <span className="text-slate-300">|</span>
-                    {['ALL', 'INDIVIDUAL', 'RELAY'].map((t) => (
-                      <button
-                        key={t}
-                        onClick={() => setTypeFilter(t)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                          typeFilter === t
-                            ? 'bg-cyan-600 text-white'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        {t === 'ALL' ? 'All Types' : t}
-                      </button>
-                    ))}
+                    </div>
                   </div>
 
-                  <div className="relative flex-1 min-w-[200px] max-w-xs">
+                  {/* Team Score Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                    {Object.values(parsedData.teams).map((team) => {
+                      const isSelected = selectedTeam === team.code;
+                      return (
+                        <div
+                          key={team.code}
+                          onClick={() => {
+                            setSelectedTeam(team.code);
+                            try {
+                              localStorage.setItem('swimmeet_primary_team_v1', team.code);
+                            } catch {}
+                          }}
+                          className={`p-4 rounded-xl border transition cursor-pointer flex items-center justify-between ${
+                            isSelected
+                              ? 'bg-cyan-500/20 border-cyan-400 shadow-md'
+                              : 'bg-white/5 border-white/10 hover:bg-white/10'
+                          }`}
+                        >
+                          <div>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+                              {isSelected ? '★ Primary Program Focus' : `Team Code: ${team.code}`}
+                            </div>
+                            <div className="text-base font-extrabold text-white mt-0.5">
+                              {team.name}
+                            </div>
+                          </div>
+                          <div className="text-2xl sm:text-3xl font-black text-cyan-300 font-mono">
+                            {team.points % 1 === 0 ? team.points : team.points.toFixed(1)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3-Card Summary KPI Strip */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3.5">
+                    <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center shrink-0">
+                      <Timer className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-bold uppercase text-slate-400">
+                        Total Events Parsed
+                      </div>
+                      <div className="text-xl font-black text-slate-900">
+                        {parsedData.events.length} Events
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3.5">
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                      <Trophy className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-bold uppercase text-slate-400">
+                        Event Victories ({parsedData.teams[selectedTeam]?.shortName || 'Selected'})
+                      </div>
+                      <div className="text-xl font-black text-slate-900">
+                        {winSummary.totalWins} Wins
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3.5">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-bold uppercase text-slate-400">
+                        Swimmers & Relays
+                      </div>
+                      <div className="text-xl font-black text-slate-900">
+                        {parsedData.events.reduce((sum, e) => sum + e.entries.length, 0)} Entries
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Filters & Search Bar */}
+                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                      {['ALL', 'WOMEN', 'MEN'].map((g) => (
+                        <button
+                          key={g}
+                          onClick={() => setGenderFilter(g)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                            genderFilter === g
+                              ? 'bg-white text-slate-900 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {g === 'ALL' ? 'All Genders' : g}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                      {['ALL', 'INDIVIDUAL', 'RELAY'].map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => setTypeFilter(t)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                            typeFilter === t
+                              ? 'bg-cyan-600 text-white shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {t === 'ALL' ? 'All Events' : t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="relative flex-1 min-w-[220px] max-w-xs">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Filter event or swimmer..."
-                      className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      placeholder="Search swimmer or event..."
+                      className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     />
                   </div>
                 </div>
 
-                {/* Event Result Cards */}
+                {/* Event-by-Event Result Cards */}
                 <div className="space-y-4">
                   {filteredEvents.map((ev) => (
                     <div
                       key={ev.key}
                       className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
                     >
-                      <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
-                        <div className="font-extrabold text-sm">{ev.eventLabel}</div>
-                        <span className="text-[11px] text-slate-400 font-semibold">
-                          {ev.entries.length} Entries
+                      <div className="bg-slate-900 text-white px-5 py-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                            {ev.type}
+                          </span>
+                          <h4 className="font-extrabold text-sm">{ev.eventLabel}</h4>
+                        </div>
+                        <span className="text-xs text-slate-400 font-semibold">
+                          {ev.entries.length} {ev.type === 'Relay' ? 'Relays' : 'Swimmers'}
                         </span>
                       </div>
 
@@ -4329,13 +4365,14 @@ export default function App() {
                         <table className="w-full text-left text-xs">
                           <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200">
                             <tr>
-                              <th className="py-2.5 px-4 w-14">Place</th>
-                              <th className="py-2.5 px-4">Swimmer / Relay</th>
+                              <th className="py-2.5 px-4 w-16">Place</th>
+                              <th className="py-2.5 px-4">
+                                {ev.type === 'Relay' ? 'Relay Team & Legs' : 'Athlete'}
+                              </th>
                               <th className="py-2.5 px-4">Team</th>
                               <th className="py-2.5 px-4">Seed</th>
-                              <th className="py-2.5 px-4">Prelims</th>
                               <th className="py-2.5 px-4">Finals</th>
-                              <th className="py-2.5 px-4 text-right">Pts</th>
+                              <th className="py-2.5 px-4 text-right">Points</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -4350,52 +4387,6 @@ export default function App() {
                                       entry.classYear
                                     )
                                   : [];
-                              // Also evaluate any legal flat-start opening splits (e.g., 50 Back off 100 Back, 1000 Free off 1650 Free)
-                              const openingSplitTags =
-                                ev.type === 'Individual' && isPrimary && entry.splits?.length > 0
-                                  ? extractLegalOpeningSplits(ev, entry.splits).flatMap((spItem) =>
-                                      benchmarkIndex
-                                        .evaluateSwim(
-                                          entry.swimmerName,
-                                          spItem.eventLabel,
-                                          spItem.time,
-                                          entry.classYear,
-                                          true
-                                        )
-                                        .map((t) => ({
-                                          ...t,
-                                          label: `${spItem.splitDistance} Split (${spItem.time}) ${t.label}`,
-                                        }))
-                                    )
-                                  : [];
-                              // Evaluate Relay Lead-Off (Leg 1) for primary team relays
-                              const legDist = ev.type === 'Relay' ? Math.round(ev.distance / 4) : 0;
-                              const legStroke =
-                                ev.stroke === 'Medley' ? 'Backstroke' : 'Freestyle';
-                              const leadOffLeg =
-                                ev.type === 'Relay'
-                                  ? (entry.legs || []).find((l) => l.leg === 1)
-                                  : null;
-                              const leadOffTags =
-                                ev.type === 'Relay' &&
-                                isPrimary &&
-                                leadOffLeg &&
-                                leadOffLeg.name &&
-                                leadOffLeg.split
-                                  ? benchmarkIndex
-                                      .evaluateSwim(
-                                        leadOffLeg.name,
-                                        `${ev.gender} ${legDist} ${legStroke}`,
-                                        leadOffLeg.split,
-                                        leadOffLeg.classYear || '',
-                                        false
-                                      )
-                                      .map((t) => ({
-                                        ...t,
-                                        label: `Lead-Off ${t.label}`,
-                                      }))
-                                  : [];
-
                               const hasSplits = entry.splits && entry.splits.length > 0;
                               const isExpanded = Boolean(expandedSplits[entry.id]);
 
@@ -4403,24 +4394,32 @@ export default function App() {
                                 <React.Fragment key={entry.id}>
                                   <tr
                                     className={
-                                      isPrimary ? 'bg-cyan-50/30 font-medium' : 'hover:bg-slate-50'
+                                      isPrimary
+                                        ? 'bg-cyan-50/40 font-medium'
+                                        : 'hover:bg-slate-50'
                                     }
                                   >
-                                    <td className="py-2.5 px-4 font-extrabold text-slate-900">
-                                      {entry.place || '—'}
+                                    <td className="py-3 px-4 font-black text-slate-900">
+                                      {entry.place === '1' ? (
+                                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-900 font-black">
+                                          1
+                                        </span>
+                                      ) : (
+                                        entry.place || '—'
+                                      )}
                                     </td>
-                                    <td className="py-2.5 px-4">
+                                    <td className="py-3 px-4">
                                       {ev.type === 'Individual' ? (
-                                        <div className="flex flex-wrap items-center gap-1.5">
+                                        <div className="flex flex-wrap items-center gap-2">
                                           <span className="font-bold text-slate-900">
                                             {entry.swimmerName}
                                           </span>
-                                          {entry.round === 'Prelims' && (
-                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
-                                              Prelims (SF)
+                                          {entry.classYear && (
+                                            <span className="text-[11px] text-slate-400 font-semibold">
+                                              ({entry.classYear})
                                             </span>
                                           )}
-                                          {[...tags, ...openingSplitTags].map((t, i) => (
+                                          {tags.map((t, i) => (
                                             <span
                                               key={i}
                                               className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
@@ -4436,9 +4435,9 @@ export default function App() {
                                                   [entry.id]: !prev[entry.id],
                                                 }))
                                               }
-                                              className="inline-flex items-center gap-0.5 text-[10px] font-bold text-cyan-700 hover:underline cursor-pointer"
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-50 text-cyan-700 hover:bg-cyan-100 text-[11px] font-bold transition cursor-pointer"
                                             >
-                                              {isExpanded ? 'Hide Splits' : 'Splits'}
+                                              {isExpanded ? 'Hide Splits' : `Splits (${entry.splits.length})`}
                                               {isExpanded ? (
                                                 <ChevronUp className="w-3 h-3" />
                                               ) : (
@@ -4449,24 +4448,17 @@ export default function App() {
                                         </div>
                                       ) : (
                                         <div className="space-y-1">
-                                          <div className="flex flex-wrap items-center gap-1.5">
-                                            <span className="font-bold text-slate-900">
-                                              Relay {entry.relayLetter}
-                                            </span>
-                                            {leadOffTags.map((t, i) => (
-                                              <span
-                                                key={i}
-                                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-100 text-cyan-900"
-                                              >
-                                                {t.label}
-                                              </span>
-                                            ))}
+                                          <div className="font-bold text-slate-900">
+                                            {entry.teamName} — Relay {entry.relayLetter}
                                           </div>
                                           {entry.legs && entry.legs.length > 0 && (
                                             <div className="text-[11px] text-slate-600 flex flex-wrap gap-x-3 gap-y-0.5">
                                               {entry.legs.map((l) => (
                                                 <span key={l.leg}>
-                                                  {l.leg}. {l.name}
+                                                  <strong className="text-slate-700">
+                                                    {l.leg}.
+                                                  </strong>{' '}
+                                                  {l.name}
                                                   {l.split ? ` (${l.split})` : ''}
                                                 </span>
                                               ))}
@@ -4475,40 +4467,42 @@ export default function App() {
                                         </div>
                                       )}
                                     </td>
-                                    <td className="py-2.5 px-4 text-slate-600">{entry.teamName}</td>
-                                    <td className="py-2.5 px-4 font-mono text-slate-500">
+                                    <td className="py-3 px-4 text-slate-600 font-medium">
+                                      {entry.teamName}
+                                    </td>
+                                    <td className="py-3 px-4 font-mono text-slate-500">
                                       {entry.seedTime || '—'}
                                     </td>
-                                    <td className="py-2.5 px-4 font-mono text-slate-500">
-                                      {entry.prelimTime || '—'}
-                                    </td>
-                                    <td className="py-2.5 px-4 font-mono font-extrabold text-slate-900">
+                                    <td className="py-3 px-4 font-mono font-extrabold text-slate-900">
                                       {entry.finalsTime || '—'}
                                     </td>
-                                    <td className="py-2.5 px-4 text-right font-bold text-slate-700">
+                                    <td className="py-3 px-4 text-right font-bold text-slate-700">
                                       {entry.points > 0 ? entry.points : '—'}
                                     </td>
                                   </tr>
 
                                   {hasSplits && isExpanded && (
-                                    <tr className="bg-slate-50">
-                                      <td colSpan={7} className="px-4 py-3">
-                                        <div className="flex flex-wrap gap-2">
+                                    <tr className="bg-slate-50/90">
+                                      <td colSpan={6} className="px-4 py-3">
+                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                                          Cumulative & 50-Yard Lap Splits
+                                        </div>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
                                           {entry.splits.map((sp) => (
                                             <div
                                               key={sp.splitNumber}
-                                              className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-[11px] font-mono"
+                                              className="bg-white border border-slate-200 rounded-lg p-2 text-center font-mono"
                                             >
-                                              <span className="text-slate-400 mr-1">
-                                                #{sp.splitNumber}:
-                                              </span>
-                                              <span className="font-bold text-slate-900">
+                                              <div className="text-[10px] text-slate-400 font-sans font-bold">
+                                                Split #{sp.splitNumber}
+                                              </div>
+                                              <div className="text-xs font-extrabold text-slate-900 mt-0.5">
                                                 {sp.cumulative}
-                                              </span>
+                                              </div>
                                               {sp.lap && (
-                                                <span className="text-cyan-700 ml-1">
+                                                <div className="text-[10px] font-bold text-cyan-700">
                                                   ({sp.lap})
-                                                </span>
+                                                </div>
                                               )}
                                             </div>
                                           ))}
