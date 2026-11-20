@@ -3927,7 +3927,8 @@ export default function App() {
                         </button>
                       )}
                     </div>
-                  </div>)
+                  </div>
+          )}
 
                   {/* Unmatched Master List Reconciliation Panel */}
                   {(stagingUnmatched.athletes.length > 0 ||
