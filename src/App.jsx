@@ -626,7 +626,8 @@ function parseSDIFContent(content) {
       }
       roster.get(swimmerName).events.push(`${distance} ${strokeName} (${finalsTimeRaw || 'NT'})`);
     } else if (recType === 'D3') {
-      const prefFirst = sliceCol(line, 17, 31).replace(/^[0-9A-F]{2,}/i, '').trim();
+      // Cols 17-31 hold Preferred First Name directly after the 14-char swimmer ID/checksum (cols 3-16)
+      const prefFirst = sliceCol(line, 17, 31).trim();
       if (prefFirst && lastD0) {
         lastD0.preferredFirst = prefFirst;
         const roster = teamsMap.get(lastD0.teamCode)?.swimmers;
@@ -698,7 +699,8 @@ function parseSDIFContent(content) {
         : ['FR', 'SO', 'JR', 'SR', 'GR'].includes(altClassYear)
         ? altClassYear
         : '';
-      const prefFirst = sliceCol(line, 99, 113).replace(/^[0-9A-F]{2,}/i, '').trim();
+      // Cols 99-113 hold Preferred First Name directly after the 14-char swimmer ID/checksum (cols 85-98)
+      const prefFirst = sliceCol(line, 99, 113).trim();
 
       const parsedLegOrder = /^[1-4]$/.test(legOrderRaw)
         ? parseInt(legOrderRaw, 10)
