@@ -613,6 +613,7 @@ export default function App() {
   const [newAthleteActive, setNewAthleteActive] = useState(true);
   const [bulkRosterText, setBulkRosterText] = useState('');
   const [newCompName, setNewCompName] = useState('');
+  const [newCompDate, setNewCompDate] = useState('');
   const [newCompLocation, setNewCompLocation] = useState('');
   const [bulkCompText, setBulkCompText] = useState('');
   const [reconcileSelections, setReconcileSelections] = useState({});
@@ -757,23 +758,21 @@ export default function App() {
         items.slice(i, i + 450).forEach((item) => {
           const clean = { ...item };
           delete clean.dateObj;
-          const safeId = String(clean.id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`).replace(
-            /\//g,
-            '_'
-          );
-          batch.set(doc(db, colName, safeId), clean);
+          const safeId = String(
+            clean.id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+          ).replace(/\//g, '_');
+          batch.set(doc(db, colName, safeId), clean, { merge: true });
         });
         await batch.commit();
       }
       setCloudSyncStatus('synced');
-      setCloudErrorMsg('');
     } catch (err) {
       setCloudSyncStatus('offline');
-      setCloudErrorMsg(err?.code || err?.message || 'Firestore write failed');
+      setCloudErrorMsg(err?.code || err?.message || 'Cloud sync write error');
     }
   };
 
-  // Master List Lookups & Helpers
+  // Master List Lookups
   const resolveMasterAthlete = (rawName) => {
     const key = normalizeSwimmerKey(rawName);
     if (!key) return null;
@@ -786,14 +785,29 @@ export default function App() {
     );
   };
 
-  const resolveMasterCompetition = (rawComp) => {
+  const resolveMasterCompetition = (rawComp, rawDate = '') => {
     const key = String(rawComp || '').trim().toLowerCase();
+    const dateKey = String(rawDate || '').trim();
     if (!key) return null;
+
+    // 1. Exact match on Name/Alias + Date
+    if (dateKey) {
+      const exactDated = masterCompetitions.find(
+        (c) =>
+          (c.date || '').trim() === dateKey &&
+          (c.canonicalName.trim().toLowerCase() === key ||
+            (c.aliases || []).some((al) => al.trim().toLowerCase() === key))
+      );
+      if (exactDated) return exactDated;
+    }
+
+    // 2. Fallback match on undated competition entry (or when no date is supplied)
     return (
       masterCompetitions.find(
         (c) =>
-          c.canonicalName.trim().toLowerCase() === key ||
-          (c.aliases || []).some((al) => al.trim().toLowerCase() === key)
+          (!dateKey || !(c.date || '').trim()) &&
+          (c.canonicalName.trim().toLowerCase() === key ||
+            (c.aliases || []).some((al) => al.trim().toLowerCase() === key))
       ) || null
     );
   };
@@ -923,7 +937,7 @@ export default function App() {
     );
   };
 
-  // Bulk Competitions Importer: accepts pasted lines or TSV/CSV ("Competition Name, Location, Aliases")
+  // Bulk Competitions Importer: accepts pasted lines or TSV/CSV ("Competition Name, Date, Location, Aliases")
   const handleBulkImportCompetitions = () => {
     const lines = bulkCompText
       .split(/\r?\n/)
@@ -949,17 +963,19 @@ export default function App() {
 
       const rawComp = cols[0] || '';
       if (!rawComp) return;
-      const defaultLocation = cols[1] || '';
+      const compDate = cols[1] || '';
+      const defaultLocation = cols[2] || '';
       const extraAliases = cols
-        .slice(2)
+        .slice(3)
         .flatMap((c) => c.split(/[;|]/))
         .map((a) => a.trim())
         .filter(Boolean);
 
       const existingIdx = nextComps.findIndex(
         (c) =>
-          c.canonicalName.trim().toLowerCase() === rawComp.toLowerCase() ||
-          (c.aliases || []).some((al) => al.trim().toLowerCase() === rawComp.toLowerCase())
+          (c.date || '').trim() === compDate.trim() &&
+          (c.canonicalName.trim().toLowerCase() === rawComp.toLowerCase() ||
+            (c.aliases || []).some((al) => al.trim().toLowerCase() === rawComp.toLowerCase()))
       );
 
       if (existingIdx >= 0) {
@@ -973,6 +989,7 @@ export default function App() {
         );
         const updatedItem = {
           ...existing,
+          date: compDate || existing.date || '',
           defaultLocation: defaultLocation || existing.defaultLocation,
           aliases: mergedAliases,
         };
@@ -983,6 +1000,7 @@ export default function App() {
         const createdItem = {
           id: `comp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
           canonicalName: rawComp,
+          date: compDate,
           defaultLocation,
           aliases: extraAliases,
         };
@@ -1024,14 +1042,17 @@ export default function App() {
           newAthletes.push(created);
         }
       }
-      if (r.competition && !resolveMasterCompetition(r.competition)) {
+      if (r.competition && !resolveMasterCompetition(r.competition, r.date)) {
         const alreadyAdded = newComps.some(
-          (c) => c.canonicalName.toLowerCase() === r.competition.trim().toLowerCase()
+          (c) =>
+            c.canonicalName.toLowerCase() === r.competition.trim().toLowerCase() &&
+            (c.date || '').trim() === (r.date || '').trim()
         );
         if (!alreadyAdded) {
           const created = {
             id: `comp-${Date.now()}-${nextComps.length + newComps.length}`,
             canonicalName: r.competition.trim(),
+            date: (r.date || '').trim(),
             defaultLocation: r.location || '',
             aliases: [],
           };
@@ -1109,16 +1130,19 @@ export default function App() {
 
     const staged = parsed.map((row) => {
       const matchedAth = resolveMasterAthlete(row.swimmerName);
-      const matchedComp = resolveMasterCompetition(row.competition);
+      const matchedComp = resolveMasterCompetition(row.competition, row.date);
       const resolvedName = matchedAth ? matchedAth.canonicalName : row.swimmerName;
       const resolvedComp = matchedComp ? matchedComp.canonicalName : row.competition;
-      const hash = `${normalizeSwimmerKey(resolvedName)}|${row.eventKey}|${row.seconds.toFixed(2)}|${row.date}|${row.place}`;
+      const resolvedDate = row.date || matchedComp?.date || '';
+      const hash = `${normalizeSwimmerKey(resolvedName)}|${row.eventKey}|${row.seconds.toFixed(2)}|${resolvedDate}|${row.place}`;
       const isDuplicate = existingHashes.has(hash);
       return {
         ...row,
         swimmerName: resolvedName,
         swimmerKey: normalizeSwimmerKey(resolvedName),
         competition: resolvedComp,
+        date: resolvedDate,
+        dateObj: parseFlexibleDate(resolvedDate),
         location: row.location || matchedComp?.defaultLocation || '',
         isDuplicate,
         selected: !isDuplicate,
@@ -1150,11 +1174,12 @@ export default function App() {
           athletes.get(key).count += 1;
         }
       }
-      if (row.competition && !resolveMasterCompetition(row.competition)) {
-        const cKey = row.competition.trim().toLowerCase();
+      if (row.competition && !resolveMasterCompetition(row.competition, row.date)) {
+        const cKey = `${row.competition.trim().toLowerCase()}|${(row.date || '').trim()}`;
         if (!competitions.has(cKey)) {
           competitions.set(cKey, {
             rawName: row.competition.trim(),
+            sampleDate: (row.date || '').trim(),
             sampleLocation: row.location || '',
             count: 1,
           });
@@ -1203,12 +1228,13 @@ export default function App() {
     });
 
     stagingUnmatched.competitions.forEach((item) => {
-      const selKey = `comp:${item.rawName.toLowerCase()}`;
+      const selKey = `comp:${item.rawName.toLowerCase()}|${item.sampleDate}`;
       const choice = reconcileSelections[selKey] || '__NEW__';
       if (choice === '__NEW__') {
         const created = {
           id: `comp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           canonicalName: item.rawName,
+          date: item.sampleDate,
           defaultLocation: item.sampleLocation,
           aliases: [],
         };
@@ -1239,16 +1265,26 @@ export default function App() {
           (a.aliases || []).some((al) => normalizeSwimmerKey(al) === key)
       );
       const cKey = row.competition.trim().toLowerCase();
-      const comp = nextComps.find(
-        (c) =>
-          c.canonicalName.trim().toLowerCase() === cKey ||
-          (c.aliases || []).some((al) => al.trim().toLowerCase() === cKey)
-      );
+      const dKey = (row.date || '').trim();
+      const comp =
+        nextComps.find(
+          (c) =>
+            (c.date || '').trim() === dKey &&
+            (c.canonicalName.trim().toLowerCase() === cKey ||
+              (c.aliases || []).some((al) => al.trim().toLowerCase() === cKey))
+        ) ||
+        nextComps.find(
+          (c) =>
+            !(c.date || '').trim() &&
+            (c.canonicalName.trim().toLowerCase() === cKey ||
+              (c.aliases || []).some((al) => al.trim().toLowerCase() === cKey))
+        );
       return {
         ...row,
         swimmerName: ath ? ath.canonicalName : row.swimmerName,
         swimmerKey: ath ? normalizeSwimmerKey(ath.canonicalName) : row.swimmerKey,
         competition: comp ? comp.canonicalName : row.competition,
+        date: row.date || comp?.date || '',
         location: row.location || comp?.defaultLocation || '',
       };
     });
@@ -1316,7 +1352,7 @@ export default function App() {
           if (sec === null) return;
 
           const resolvedAth = resolveMasterAthlete(entry.swimmerName);
-          const resolvedComp = resolveMasterCompetition(meetComp);
+          const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
           const finalName = resolvedAth ? resolvedAth.canonicalName : entry.swimmerName;
           const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
 
@@ -1390,7 +1426,7 @@ export default function App() {
             if (splitSec === null || !legEvKey) return;
 
             const resolvedAth = resolveMasterAthlete(leg.name);
-            const resolvedComp = resolveMasterCompetition(meetComp);
+            const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
             const finalName = resolvedAth ? resolvedAth.canonicalName : leg.name;
             const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
             const placeTag = isLeadOff ? '1' : 'R';
@@ -2240,7 +2276,7 @@ export default function App() {
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                             {stagingUnmatched.competitions.map((item) => {
-                              const selKey = `comp:${item.rawName.toLowerCase()}`;
+                              const selKey = `comp:${item.rawName.toLowerCase()}|${item.sampleDate}`;
                               return (
                                 <div
                                   key={selKey}
@@ -2251,6 +2287,7 @@ export default function App() {
                                       {item.rawName}
                                     </div>
                                     <div className="text-[11px] text-slate-500">
+                                      {item.sampleDate || 'No date'} •{' '}
                                       {item.sampleLocation || 'No location'} • {item.count} row(s)
                                     </div>
                                   </div>
@@ -2262,12 +2299,13 @@ export default function App() {
                                         [selKey]: e.target.value,
                                       }))
                                     }
-                                    className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 max-w-[210px]"
+                                    className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 max-w-[220px]"
                                   >
                                     <option value="__NEW__">+ Create New Competition</option>
                                     {masterCompetitions.map((c) => (
                                       <option key={c.id} value={c.id}>
                                         Alias → {c.canonicalName}
+                                        {c.date ? ` (${c.date})` : ''}
                                       </option>
                                     ))}
                                   </select>
@@ -2583,7 +2621,7 @@ export default function App() {
                       <span className="text-[11px] text-indigo-800 font-medium">
                         Columns:{' '}
                         <code className="bg-white px-1 rounded">
-                          Competition Name, Location, Aliases
+                          Competition Name, Date (YYYY-MM-DD), Location, Aliases
                         </code>
                       </span>
                     </div>
@@ -2591,7 +2629,7 @@ export default function App() {
                       rows={4}
                       value={bulkCompText}
                       onChange={(e) => setBulkCompText(e.target.value)}
-                      placeholder={`Competition, Location, Aliases\nCentennial Conference Championships, Lancaster PA, CC Championships; Centennial Conf. Champs\nGettysburg Invitational, Gettysburg PA, Gettysburg Invite\nGettysburg vs Dickinson, Gettysburg PA, Dickinson Dual`}
+                      placeholder={`Competition, Date, Location, Aliases\nCentennial Conference Championships, 2026-02-20, Lancaster PA, CC Championships; Centennial Conf. Champs\nGettysburg Invitational, 2026-10-24, Gettysburg PA, Gettysburg Invite\nGettysburg vs Dickinson, 2026-11-14, Gettysburg PA, Dickinson Dual`}
                       className="w-full p-3 text-xs font-mono bg-white border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2618,10 +2656,10 @@ export default function App() {
 
                   {/* Single Competition Quick-Add Bar */}
                   <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 flex-1">
                       <div>
                         <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                          Quick-Add Single Competition
+                          Competition Name
                         </label>
                         <input
                           type="text"
@@ -2633,7 +2671,18 @@ export default function App() {
                       </div>
                       <div>
                         <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                          Default Location
+                          Meet Date
+                        </label>
+                        <input
+                          type="date"
+                          value={newCompDate}
+                          onChange={(e) => setNewCompDate(e.target.value)}
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                          Location
                         </label>
                         <input
                           type="text"
@@ -2647,23 +2696,35 @@ export default function App() {
                         <button
                           onClick={() => {
                             if (!newCompName.trim()) return;
-                            if (resolveMasterCompetition(newCompName)) {
+                            const existsSameDate = masterCompetitions.some(
+                              (c) =>
+                                (c.date || '').trim() === newCompDate.trim() &&
+                                (c.canonicalName.trim().toLowerCase() ===
+                                  newCompName.trim().toLowerCase() ||
+                                  (c.aliases || []).some(
+                                    (al) =>
+                                      al.trim().toLowerCase() === newCompName.trim().toLowerCase()
+                                  ))
+                            );
+                            if (existsSameDate) {
                               setBenchmarkStatusMsg(
-                                `"${newCompName.trim()}" already exists in Master Competitions.`
+                                `"${newCompName.trim()}" on ${newCompDate || 'this date'} already exists in Master Competitions.`
                               );
                               return;
                             }
                             const created = {
                               id: `comp-${Date.now()}`,
                               canonicalName: newCompName.trim(),
+                              date: newCompDate.trim(),
                               defaultLocation: newCompLocation.trim(),
                               aliases: [],
                             };
                             updateMasterCompetitions([...masterCompetitions, created], [created]);
                             setNewCompName('');
+                            setNewCompDate('');
                             setNewCompLocation('');
                           }}
-                          className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white transition cursor-pointer"
+                          className="w-full px-4 py-2 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white transition cursor-pointer"
                         >
                           Add Competition
                         </button>
@@ -2683,7 +2744,8 @@ export default function App() {
                         <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
                           <tr>
                             <th className="py-2.5 px-4">Canonical Competition</th>
-                            <th className="py-2.5 px-4">Default Location</th>
+                            <th className="py-2.5 px-4">Date</th>
+                            <th className="py-2.5 px-4">Location</th>
                             <th className="py-2.5 px-4">Saved Aliases</th>
                             <th className="py-2.5 px-4 text-center">Remove</th>
                           </tr>
@@ -2691,11 +2753,19 @@ export default function App() {
                         <tbody className="divide-y divide-slate-100">
                           {masterCompetitions
                             .slice()
-                            .sort((a, b) => a.canonicalName.localeCompare(b.canonicalName))
+                            .sort((a, b) => {
+                              const dateCmp = (b.date || '').localeCompare(a.date || '');
+                              return dateCmp !== 0
+                                ? dateCmp
+                                : a.canonicalName.localeCompare(b.canonicalName);
+                            })
                             .map((comp) => (
                               <tr key={comp.id} className="hover:bg-slate-50">
                                 <td className="py-2.5 px-4 font-bold text-slate-900">
                                   {comp.canonicalName}
+                                </td>
+                                <td className="py-2.5 px-4 font-mono text-slate-700">
+                                  {comp.date || '—'}
                                 </td>
                                 <td className="py-2.5 px-4 text-slate-600">
                                   {comp.defaultLocation || '—'}
