@@ -37,7 +37,11 @@ import {
   FileSpreadsheet,
   ArrowRight,
   ShieldCheck,
-  AlertTriangle
+  AlertTriangle,
+  UserCheck,
+  Link2,
+  Building2,
+  UserPlus
 } from 'lucide-react';
 
 // Import the functions you need from the SDKs you need
@@ -1684,8 +1688,125 @@ export default function App() {
   const [recordBookGender, setRecordBookGender] = useState('Women');
   const [recordBookEventKey, setRecordBookEventKey] = useState('');
 
+  // Master Lists (Master Athlete Roster & Master Competitions) persisted in localStorage
+  const [masterRoster, setMasterRoster] = useState(() => {
+    try {
+      const saved = localStorage.getItem('swimmeet_master_roster_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [masterCompetitions, setMasterCompetitions] = useState(() => {
+    try {
+      const saved = localStorage.getItem('swimmeet_master_competitions_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [historySubTab, setHistorySubTab] = useState('import'); // 'import' | 'roster' | 'competitions' | 'committed'
+  const [rosterSearch, setRosterSearch] = useState('');
+  const [rosterActiveOnly, setRosterActiveOnly] = useState(false);
+  const [newAthleteName, setNewAthleteName] = useState('');
+  const [newAthleteGender, setNewAthleteGender] = useState('Women');
+  const [newAthleteActive, setNewAthleteActive] = useState(true);
+  const [newCompName, setNewCompName] = useState('');
+  const [newCompLocation, setNewCompLocation] = useState('');
+  const [reconcileSelections, setReconcileSelections] = useState({}); // key -> targetMasterId or '__NEW__'
+
   const fileInputRef = useRef(null);
   const historyCsvInputRef = useRef(null);
+
+  const updateMasterRoster = (next) => {
+    setMasterRoster(next);
+    try {
+      localStorage.setItem('swimmeet_master_roster_v1', JSON.stringify(next));
+    } catch {
+      // Ignore storage quota errors
+    }
+  };
+
+  const updateMasterCompetitions = (next) => {
+    setMasterCompetitions(next);
+    try {
+      localStorage.setItem('swimmeet_master_competitions_v1', JSON.stringify(next));
+    } catch {
+      // Ignore storage quota errors
+    }
+  };
+
+  // Resolve an incoming swimmer name against Master Roster (canonical name or aliases)
+  const resolveMasterAthlete = (rawName, rosterList = masterRoster) => {
+    const key = normalizeSwimmerKey(rawName);
+    if (!key) return null;
+    return (
+      rosterList.find(
+        (ath) =>
+          normalizeSwimmerKey(ath.canonicalName) === key ||
+          (ath.aliases || []).some((al) => normalizeSwimmerKey(al) === key)
+      ) || null
+    );
+  };
+
+  // Resolve an incoming competition string against Master Competitions (canonical name or aliases)
+  const resolveMasterCompetition = (rawComp, compList = masterCompetitions) => {
+    const key = String(rawComp || '').trim().toLowerCase();
+    if (!key) return null;
+    return (
+      compList.find(
+        (c) =>
+          c.canonicalName.trim().toLowerCase() === key ||
+          (c.aliases || []).some((al) => al.trim().toLowerCase() === key)
+      ) || null
+    );
+  };
+
+  // Re-evaluate staged rows against current Master Roster & Master Competitions
+  const refreshStagedMatches = (
+    rowsToCheck,
+    rosterList = masterRoster,
+    compList = masterCompetitions,
+    dbRecords = historicalRecords
+  ) => {
+    const existingSigs = new Set(
+      dbRecords.map(
+        (h) => `${h.nameKey}|${h.eventKey}|${h.seconds.toFixed(2)}|${h.competition}`
+      )
+    );
+    const seenInBatch = new Set();
+
+    return rowsToCheck.map((row) => {
+      const matchedAth = resolveMasterAthlete(row.rawImportedName || row.nameRaw, rosterList);
+      const matchedComp = resolveMasterCompetition(
+        row.rawImportedCompetition || row.competition,
+        compList
+      );
+      const resolvedName = matchedAth ? matchedAth.canonicalName : row.nameRaw;
+      const resolvedNameKey = normalizeSwimmerKey(resolvedName);
+      const resolvedComp = matchedComp ? matchedComp.canonicalName : row.competition;
+      const resolvedLoc =
+        row.location || (matchedComp && matchedComp.defaultLocation ? matchedComp.defaultLocation : '');
+
+      const sig = `${resolvedNameKey}|${row.eventKey}|${row.seconds.toFixed(2)}|${resolvedComp}`;
+      const isDuplicate = existingSigs.has(sig) || seenInBatch.has(sig);
+      seenInBatch.add(sig);
+
+      return {
+        ...row,
+        rawImportedName: row.rawImportedName || row.nameRaw,
+        rawImportedCompetition: row.rawImportedCompetition || row.competition,
+        nameRaw: resolvedName,
+        nameKey: resolvedNameKey,
+        competition: resolvedComp,
+        location: resolvedLoc,
+        matchedAthleteId: matchedAth ? matchedAth.id : null,
+        matchedAthleteActive: matchedAth ? matchedAth.isActive : null,
+        matchedCompId: matchedComp ? matchedComp.id : null,
+        isDuplicate,
+      };
+    });
+  };
 
   // Save historical benchmarks helper
   const updateHistoricalRecords = (records) => {
@@ -1742,28 +1863,204 @@ export default function App() {
       return;
     }
 
-    const existingSigs = new Set(
-      historicalRecords.map(
-        (h) => `${h.nameKey}|${h.eventKey}|${h.seconds.toFixed(2)}|${h.competition}`
-      )
-    );
-    const seenInBatch = new Set();
-
-    const annotated = parsed.map((row) => {
-      const sig = `${row.nameKey}|${row.eventKey}|${row.seconds.toFixed(2)}|${row.competition}`;
-      const isDuplicate = existingSigs.has(sig) || seenInBatch.has(sig);
-      seenInBatch.add(sig);
-      return {
-        ...row,
-        isDuplicate,
-        selected: !isDuplicate,
-      };
-    });
+    const annotated = refreshStagedMatches(parsed).map((row) => ({
+      ...row,
+      selected: !row.isDuplicate,
+    }));
 
     setStagedHistoryRows(annotated);
     setStagedFilter('all');
+    setReconcileSelections({});
+    const unmatchedAthCount = new Set(
+      annotated.filter((r) => !r.matchedAthleteId).map((r) => r.rawImportedName)
+    ).size;
+    const unmatchedCompCount = new Set(
+      annotated
+        .filter((r) => r.rawImportedCompetition && !r.matchedCompId)
+        .map((r) => r.rawImportedCompetition)
+    ).size;
+
     setBenchmarkStatusMsg(
-      `Staged ${annotated.length} rows for review (${annotated.filter((r) => r.isDuplicate).length} duplicates flagged).`
+      `Staged ${annotated.length} rows (${annotated.filter((r) => r.isDuplicate).length} duplicates, ${unmatchedAthCount} unmatched athletes, ${unmatchedCompCount} unmatched competitions).`
+    );
+  };
+
+  // Unmatched unique athletes & competitions currently in staging
+  const stagedUnmatchedSummary = useMemo(() => {
+    const athMap = new Map();
+    const compMap = new Map();
+
+    stagedHistoryRows.forEach((r) => {
+      if (!r.matchedAthleteId && r.rawImportedName) {
+        const k = normalizeSwimmerKey(r.rawImportedName);
+        if (!athMap.has(k)) {
+          const inferredGender = r.eventKey.startsWith('men ')
+            ? 'Men'
+            : r.eventKey.startsWith('women ')
+            ? 'Women'
+            : 'Women';
+          athMap.set(k, {
+            key: k,
+            rawName: r.rawImportedName,
+            inferredGender,
+            count: 0,
+          });
+        }
+        athMap.get(k).count += 1;
+      }
+
+      if (!r.matchedCompId && r.rawImportedCompetition) {
+        const ck = r.rawImportedCompetition.trim().toLowerCase();
+        if (!compMap.has(ck)) {
+          compMap.set(ck, {
+            key: ck,
+            rawComp: r.rawImportedCompetition,
+            sampleLocation: r.location || '',
+            count: 0,
+          });
+        }
+        compMap.get(ck).count += 1;
+      }
+    });
+
+    return {
+      athletes: Array.from(athMap.values()),
+      competitions: Array.from(compMap.values()),
+    };
+  }, [stagedHistoryRows]);
+
+  // Reconcile a single unmatched athlete (either map as alias to existing or create new)
+  const handleReconcileAthlete = (item, targetSelection, activeFlag = true) => {
+    let nextRoster = [...masterRoster];
+    if (!targetSelection || targetSelection === '__NEW__') {
+      const created = {
+        id: `ath-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        canonicalName: item.rawName.trim(),
+        gender: item.inferredGender || 'Women',
+        isActive: activeFlag,
+        aliases: [],
+      };
+      nextRoster.push(created);
+    } else {
+      nextRoster = nextRoster.map((ath) => {
+        if (ath.id !== targetSelection) return ath;
+        const existingAliases = ath.aliases || [];
+        const alreadyHas = existingAliases.some(
+          (a) => normalizeSwimmerKey(a) === normalizeSwimmerKey(item.rawName)
+        );
+        return {
+          ...ath,
+          aliases: alreadyHas ? existingAliases : [...existingAliases, item.rawName.trim()],
+        };
+      });
+    }
+    updateMasterRoster(nextRoster);
+    setStagedHistoryRows((prev) =>
+      refreshStagedMatches(prev, nextRoster, masterCompetitions, historicalRecords)
+    );
+  };
+
+  // Reconcile a single unmatched competition (either map as alias or create new)
+  const handleReconcileCompetition = (item, targetSelection) => {
+    let nextComps = [...masterCompetitions];
+    if (!targetSelection || targetSelection === '__NEW__') {
+      const created = {
+        id: `comp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        canonicalName: item.rawComp.trim(),
+        defaultLocation: item.sampleLocation || '',
+        aliases: [],
+      };
+      nextComps.push(created);
+    } else {
+      nextComps = nextComps.map((c) => {
+        if (c.id !== targetSelection) return c;
+        const existingAliases = c.aliases || [];
+        const alreadyHas = existingAliases.some(
+          (a) => a.trim().toLowerCase() === item.rawComp.trim().toLowerCase()
+        );
+        return {
+          ...c,
+          aliases: alreadyHas ? existingAliases : [...existingAliases, item.rawComp.trim()],
+        };
+      });
+    }
+    updateMasterCompetitions(nextComps);
+    setStagedHistoryRows((prev) =>
+      refreshStagedMatches(prev, masterRoster, nextComps, historicalRecords)
+    );
+  };
+
+  // Bulk-create all remaining unmatched athletes & competitions in staging
+  const handleAutoCreateAllUnmatched = (markAthletesActive = true) => {
+    let nextRoster = [...masterRoster];
+    stagedUnmatchedSummary.athletes.forEach((item) => {
+      if (!resolveMasterAthlete(item.rawName, nextRoster)) {
+        nextRoster.push({
+          id: `ath-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          canonicalName: item.rawName.trim(),
+          gender: item.inferredGender || 'Women',
+          isActive: markAthletesActive,
+          aliases: [],
+        });
+      }
+    });
+
+    let nextComps = [...masterCompetitions];
+    stagedUnmatchedSummary.competitions.forEach((item) => {
+      if (!resolveMasterCompetition(item.rawComp, nextComps)) {
+        nextComps.push({
+          id: `comp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          canonicalName: item.rawComp.trim(),
+          defaultLocation: item.sampleLocation || '',
+          aliases: [],
+        });
+      }
+    });
+
+    updateMasterRoster(nextRoster);
+    updateMasterCompetitions(nextComps);
+    setStagedHistoryRows((prev) =>
+      refreshStagedMatches(prev, nextRoster, nextComps, historicalRecords)
+    );
+    setBenchmarkStatusMsg(
+      `Created ${stagedUnmatchedSummary.athletes.length} roster entries & ${stagedUnmatchedSummary.competitions.length} competitions.`
+    );
+  };
+
+  // Seed Master Roster & Master Competitions from already-committed historical records
+  const handleSyncMasterListsFromDatabase = () => {
+    let nextRoster = [...masterRoster];
+    let addedAthletes = 0;
+    let nextComps = [...masterCompetitions];
+    let addedComps = 0;
+
+    historicalRecords.forEach((h) => {
+      if (h.nameRaw && !resolveMasterAthlete(h.nameRaw, nextRoster)) {
+        const g = h.eventKey?.startsWith('men ') ? 'Men' : 'Women';
+        nextRoster.push({
+          id: `ath-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          canonicalName: h.nameRaw.trim(),
+          gender: g,
+          isActive: true,
+          aliases: [],
+        });
+        addedAthletes++;
+      }
+      if (h.competition && !resolveMasterCompetition(h.competition, nextComps)) {
+        nextComps.push({
+          id: `comp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          canonicalName: h.competition.trim(),
+          defaultLocation: h.location || '',
+          aliases: [],
+        });
+        addedComps++;
+      }
+    });
+
+    updateMasterRoster(nextRoster);
+    updateMasterCompetitions(nextComps);
+    setBenchmarkStatusMsg(
+      `Synced Master Lists from database: added ${addedAthletes} athletes and ${addedComps} competitions.`
     );
   };
 
@@ -1886,7 +2183,9 @@ export default function App() {
     const meetLocation = [parsedData.meetInfo.city, parsedData.meetInfo.state]
       .filter(Boolean)
       .join(' ');
-    const meetComp = parsedData.meetInfo.name || 'Swim Meet';
+    const rawMeetComp = parsedData.meetInfo.name || 'Swim Meet';
+    const matchedMasterComp = resolveMasterCompetition(rawMeetComp);
+    const meetComp = matchedMasterComp ? matchedMasterComp.canonicalName : rawMeetComp;
     const meetDateRaw = parsedData.meetInfo.startDate || new Date().toISOString().slice(0, 10);
     const meetDateParsed = parseFlexibleDate(meetDateRaw);
     const isoDateStr = meetDateParsed
@@ -1916,7 +2215,11 @@ export default function App() {
     }) => {
       if (!isFinite(timeSec) || timeSec <= 0) return;
       const evKey = normalizeEventKey(eventCanonical);
-      const nmKey = normalizeSwimmerKey(swimmerDisplay);
+      const matchedMasterAth = resolveMasterAthlete(swimmerDisplay);
+      const resolvedDisplay = matchedMasterAth
+        ? matchedMasterAth.canonicalName
+        : swimmerDisplay;
+      const nmKey = normalizeSwimmerKey(resolvedDisplay);
       if (!evKey || !nmKey) return;
 
       const sig = `${nmKey}|${evKey}|${timeSec.toFixed(2)}|${meetComp}`;
@@ -1931,7 +2234,7 @@ export default function App() {
         source: 'meet',
         eventRaw: eventCanonical,
         eventKey: evKey,
-        nameRaw: swimmerDisplay,
+        nameRaw: resolvedDisplay,
         nameKey: nmKey,
         classYear: classYear || '',
         time: timeStr || secondsToTime(timeSec),
@@ -3249,19 +3552,24 @@ export default function App() {
                     <div className="w-12 h-12 rounded-xl bg-cyan-50 border border-cyan-200 flex items-center justify-center text-cyan-700 group-hover:bg-cyan-600 group-hover:text-white transition">
                       <Database className="w-6 h-6" />
                     </div>
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-800 border border-cyan-200">
-                      {historicalRecords.length} Records
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
+                        {masterRoster.length} Roster
+                      </span>
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-800 border border-cyan-200">
+                        {historicalRecords.length} Swims
+                      </span>
+                    </div>
                   </div>
                   <h3 className="text-lg font-bold text-slate-900 group-hover:text-cyan-700 transition">
                     1. Import / Review Historical Data
                   </h3>
                   <p className="text-sm text-slate-600 mt-1.5 leading-relaxed">
-                    Stage, validate, and deduplicate your 12-column Google Sheet rows, inspect official vs. <code className="text-xs bg-slate-100 px-1 rounded">R/S</code> split flags, and manage your master database.
+                    Reconcile athletes and competitions against your Master Lists, track active roster status, and review staged Google Sheet imports.
                   </p>
                 </div>
                 <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-cyan-700">
-                  <span>Open Historical Importer & Staging</span>
+                  <span>Open Historical Importer & Master Lists</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
@@ -3382,18 +3690,19 @@ export default function App() {
         {/* ================================================================== */}
         {activeSection === 'history' && (
           <div className="space-y-6">
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-5">
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-slate-100 pb-4">
+            {/* Section 1 Header & Sub-Tabs */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-slate-100">
                 <div>
                   <div className="text-xs font-bold uppercase tracking-wider text-cyan-700 mb-1">
-                    Section 1 • Master Historical Database
+                    Section 1 • Master Historical Database & Canonical Lists
                   </div>
                   <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                     <Database className="w-5 h-5 text-cyan-600" />
-                    Import & Review Historical Data
+                    Import, Reconcile & Manage Master Lists
                   </h2>
                   <p className="text-sm text-slate-600 mt-1">
-                    Paste rows from your 12-column Google Sheet (<code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded font-mono">Name | Class | Event | Min | Sec | Date | Location | Competition | Place | Time | Event | Seconds</code>), review them in the staging table, and commit to your database.
+                    Match incoming rows against your <strong>Master Roster</strong> and <strong>Master Competitions</strong> so aliases unify automatically while preserving imported class years (<code className="text-xs bg-slate-100 px-1 rounded">Fr./So./Jr./Sr.</code>).
                   </p>
                 </div>
 
@@ -3408,18 +3717,14 @@ export default function App() {
                     </button>
                   )}
                   <button
-                    onClick={() => handleStageHistoryText(SAMPLE_GOOGLE_SHEET_CSV)}
+                    onClick={() => {
+                      setHistorySubTab('import');
+                      handleStageHistoryText(SAMPLE_GOOGLE_SHEET_CSV);
+                    }}
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 transition cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     Stage Sample History
-                  </button>
-                  <button
-                    onClick={handleDownloadSampleSheetCSV}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Template CSV
                   </button>
                   <button
                     onClick={() => historyCsvInputRef.current?.click()}
@@ -3431,93 +3736,66 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Season Cutoff & Settings */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200/80">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    Current Season Start Date (For SB)
-                  </label>
-                  <input
-                    type="date"
-                    value={seasonStartDate}
-                    onChange={(e) => handleSeasonStartChange(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    Active Database Count
-                  </label>
-                  <div className="px-3 py-2 text-sm font-bold bg-white border border-slate-200 rounded-lg text-slate-900 flex items-center justify-between">
-                    <span>{historicalRecords.length} Stored Performances</span>
-                    <span className="text-xs font-normal text-slate-500">
-                      {historicalRecords.filter((h) => h.isOfficial !== false).length} official
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col justify-end">
-                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-3 py-2.5 rounded-lg cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={countRelayLeadOffs}
-                      onChange={(e) => setCountRelayLeadOffs(e.target.checked)}
-                      className="rounded text-cyan-600 focus:ring-cyan-500"
-                    />
-                    Include Flat-Start Relay Leg 1 Lead-Offs
-                  </label>
-                </div>
-              </div>
-
-              {/* Direct Copy-Paste Box from Google Sheets */}
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                  Paste Rows Directly from Google Sheets (Tab-Separated or CSV)
-                </label>
-                <textarea
-                  rows={5}
-                  value={pasteSheetText}
-                  onChange={(e) => setPasteSheetText(e.target.value)}
-                  placeholder={`Name\tClass\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nAva Berry\tFr.\t1000 Free\t10\t45.10\t2026-02-14\tLancaster PA\tCentennial Conference Championships\t3\t10:45.10\tWomen 1000 Freestyle\t645.10`}
-                  className="w-full p-3 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:bg-white"
-                />
-                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
+              {/* Section 1 Sub-Navigation Bar */}
+              <div className="px-4 sm:px-6 bg-slate-50/90 flex items-center gap-1 overflow-x-auto border-b border-slate-200">
+                {[
+                  {
+                    id: 'import',
+                    label: 'Import & Reconcile',
+                    icon: FileSpreadsheet,
+                    badge: stagedHistoryRows.length > 0 ? stagedHistoryRows.length : null,
+                  },
+                  {
+                    id: 'roster',
+                    label: 'Master Roster',
+                    icon: UserCheck,
+                    badge: masterRoster.length,
+                  },
+                  {
+                    id: 'competitions',
+                    label: 'Master Competitions',
+                    icon: Building2,
+                    badge: masterCompetitions.length,
+                  },
+                  {
+                    id: 'committed',
+                    label: 'Committed Database',
+                    icon: Database,
+                    badge: historicalRecords.length,
+                  },
+                ].map((tab) => {
+                  const Icon = tab.icon;
+                  const active = historySubTab === tab.id;
+                  return (
                     <button
-                      onClick={() => handleStageHistoryText(pasteSheetText)}
-                      disabled={!pasteSheetText.trim()}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white transition cursor-pointer"
+                      key={tab.id}
+                      onClick={() => setHistorySubTab(tab.id)}
+                      className={`px-4 py-3 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 cursor-pointer ${
+                        active
+                          ? 'border-cyan-600 text-cyan-700'
+                          : 'border-transparent text-slate-600 hover:text-slate-900'
+                      }`}
                     >
-                      <FileSpreadsheet className="w-3.5 h-3.5" />
-                      Stage & Review Rows
+                      <Icon className="w-4 h-4" />
+                      <span>{tab.label}</span>
+                      {tab.badge !== null && (
+                        <span
+                          className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
+                            active
+                              ? 'bg-cyan-100 text-cyan-800'
+                              : 'bg-slate-200/80 text-slate-700'
+                          }`}
+                        >
+                          {tab.badge}
+                        </span>
+                      )}
                     </button>
-                    <button
-                      onClick={() => handleImportHistoryText(pasteSheetText, 'replace')}
-                      disabled={!pasteSheetText.trim()}
-                      className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white transition cursor-pointer"
-                    >
-                      Quick Replace All
-                    </button>
-                  </div>
-
-                  {historicalRecords.length > 0 && (
-                    <button
-                      onClick={() => {
-                        updateHistoricalRecords([]);
-                        setBenchmarkStatusMsg('Cleared historical benchmark database.');
-                      }}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 transition cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Clear Database ({historicalRecords.length})
-                    </button>
-                  )}
-                </div>
+                  );
+                })}
               </div>
 
               {benchmarkStatusMsg && (
-                <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 flex items-center justify-between gap-2">
+                <div className="mx-5 mt-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>{benchmarkStatusMsg}</span>
@@ -3530,7 +3808,788 @@ export default function App() {
                   </button>
                 </div>
               )}
+
+              {/* SUB-TAB A: IMPORT & RECONCILE */}
+              {historySubTab === 'import' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  {/* Season Cutoff & Settings */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200/80">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                        Current Season Start Date (For SB)
+                      </label>
+                      <input
+                        type="date"
+                        value={seasonStartDate}
+                        onChange={(e) => handleSeasonStartChange(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                        Master Lists Coverage
+                      </label>
+                      <div className="px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg text-slate-900 flex items-center justify-between">
+                        <span>
+                          {masterRoster.filter((a) => a.isActive).length} Active / {masterRoster.length} Roster
+                        </span>
+                        <span className="text-cyan-700">{masterCompetitions.length} Meets</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col justify-end">
+                      <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-3 py-2.5 rounded-lg cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={countRelayLeadOffs}
+                          onChange={(e) => setCountRelayLeadOffs(e.target.checked)}
+                          className="rounded text-cyan-600 focus:ring-cyan-500"
+                        />
+                        Include Flat-Start Relay Leg 1 Lead-Offs
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Direct Copy-Paste Box from Google Sheets */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Paste Rows Directly from Google Sheets (12-Column Format)
+                      </label>
+                      <button
+                        onClick={handleDownloadSampleSheetCSV}
+                        className="text-xs font-semibold text-cyan-700 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Download className="w-3 h-3" />
+                        Download Template CSV
+                      </button>
+                    </div>
+                    <textarea
+                      rows={5}
+                      value={pasteSheetText}
+                      onChange={(e) => setPasteSheetText(e.target.value)}
+                      placeholder={`Name\tClass\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nAva Berry\tFr.\t1000 Free\t10\t45.10\t2026-02-14\tLancaster PA\tCentennial Conference Championships\t3\t10:45.10\tWomen 1000 Freestyle\t645.10`}
+                      className="w-full p-3 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:bg-white"
+                    />
+                    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => handleStageHistoryText(pasteSheetText)}
+                          disabled={!pasteSheetText.trim()}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white transition cursor-pointer"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                          Stage & Reconcile Rows
+                        </button>
+                        <button
+                          onClick={() => handleImportHistoryText(pasteSheetText, 'replace')}
+                          disabled={!pasteSheetText.trim()}
+                          className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white transition cursor-pointer"
+                        >
+                          Quick Replace All
+                        </button>
+                      </div>
+
+                      {historicalRecords.length > 0 && masterRoster.length === 0 && (
+                        <button
+                          onClick={handleSyncMasterListsFromDatabase}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          Seed Master Lists from Existing DB ({historicalRecords.length})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-TAB B: MASTER ATHLETE ROSTER */}
+              {historySubTab === 'roster' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 flex-1">
+                      <div className="sm:col-span-2">
+                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                          Add Canonical Athlete Name
+                        </label>
+                        <input
+                          type="text"
+                          value={newAthleteName}
+                          onChange={(e) => setNewAthleteName(e.target.value)}
+                          placeholder="e.g., Kathleen Miller"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                          Gender
+                        </label>
+                        <select
+                          value={newAthleteGender}
+                          onChange={(e) => setNewAthleteGender(e.target.value)}
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                          <option value="Women">Women</option>
+                          <option value="Men">Men</option>
+                        </select>
+                      </div>
+                      <div className="flex items-end gap-2">
+                        <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-3 py-2.5 rounded-lg cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={newAthleteActive}
+                            onChange={(e) => setNewAthleteActive(e.target.checked)}
+                            className="rounded text-cyan-600 focus:ring-cyan-500"
+                          />
+                          Active
+                        </label>
+                        <button
+                          onClick={() => {
+                            if (!newAthleteName.trim()) return;
+                            if (resolveMasterAthlete(newAthleteName)) {
+                              setBenchmarkStatusMsg(
+                                `"${newAthleteName.trim()}" already exists in the Master Roster.`
+                              );
+                              return;
+                            }
+                            updateMasterRoster([
+                              ...masterRoster,
+                              {
+                                id: `ath-${Date.now()}`,
+                                canonicalName: newAthleteName.trim(),
+                                gender: newAthleteGender,
+                                isActive: newAthleteActive,
+                                aliases: [],
+                              },
+                            ]);
+                            setNewAthleteName('');
+                          }}
+                          className="px-4 py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white transition cursor-pointer"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
+
+                    {historicalRecords.length > 0 && (
+                      <button
+                        onClick={handleSyncMasterListsFromDatabase}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer shrink-0"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                        Sync Missing from DB
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Roster Filter Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="relative w-full sm:w-72">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={rosterSearch}
+                        onChange={(e) => setRosterSearch(e.target.value)}
+                        placeholder="Search athlete or alias..."
+                        className="w-full pl-9 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      />
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={rosterActiveOnly}
+                        onChange={(e) => setRosterActiveOnly(e.target.checked)}
+                        className="rounded text-cyan-600 focus:ring-cyan-500"
+                      />
+                      Show Active Roster Only ({masterRoster.filter((a) => a.isActive).length})
+                    </label>
+                  </div>
+
+                  {masterRoster.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No athletes in the Master Roster yet. Add athletes above, sync from your committed database, or stage a Google Sheet import to reconcile new swimmers.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500">
+                          <tr>
+                            <th className="py-2.5 px-4 w-20 text-center">Active</th>
+                            <th className="py-2.5 px-4">Canonical Name</th>
+                            <th className="py-2.5 px-4">Gender</th>
+                            <th className="py-2.5 px-4">Mapped Aliases (Nicknames / Spelling Variants)</th>
+                            <th className="py-2.5 px-4 w-16 text-center">Delete</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {masterRoster
+                            .filter((a) => {
+                              if (rosterActiveOnly && !a.isActive) return false;
+                              if (rosterSearch.trim()) {
+                                const q = rosterSearch.toLowerCase();
+                                const hay = `${a.canonicalName} ${(a.aliases || []).join(' ')}`.toLowerCase();
+                                if (!hay.includes(q)) return false;
+                              }
+                              return true;
+                            })
+                            .sort((a, b) => a.canonicalName.localeCompare(b.canonicalName))
+                            .map((ath) => (
+                              <tr key={ath.id} className="hover:bg-slate-50">
+                                <td className="py-2.5 px-4 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!ath.isActive}
+                                    onChange={() =>
+                                      updateMasterRoster(
+                                        masterRoster.map((item) =>
+                                          item.id === ath.id
+                                            ? { ...item, isActive: !item.isActive }
+                                            : item
+                                        )
+                                      )
+                                    }
+                                    className="rounded text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                  />
+                                </td>
+                                <td className="py-2.5 px-4 font-bold text-slate-900">
+                                  {ath.canonicalName}
+                                </td>
+                                <td className="py-2.5 px-4">
+                                  <span
+                                    className={`px-2 py-0.5 rounded font-semibold ${
+                                      ath.gender === 'Women'
+                                        ? 'bg-pink-50 text-pink-700'
+                                        : 'bg-sky-50 text-sky-700'
+                                    }`}
+                                  >
+                                    {ath.gender}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-4">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {(ath.aliases || []).map((al, idx) => (
+                                      <span
+                                        key={idx}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-800 border border-cyan-200 font-medium"
+                                      >
+                                        {al}
+                                        <button
+                                          onClick={() =>
+                                            updateMasterRoster(
+                                              masterRoster.map((item) =>
+                                                item.id === ath.id
+                                                  ? {
+                                                      ...item,
+                                                      aliases: item.aliases.filter(
+                                                        (_, i) => i !== idx
+                                                      ),
+                                                    }
+                                                  : item
+                                              )
+                                            )
+                                          }
+                                          className="text-cyan-600 hover:text-red-600 cursor-pointer"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </span>
+                                    ))}
+                                    <button
+                                      onClick={() => {
+                                        const aliasInput = window.prompt(
+                                          `Add an alias/nickname that should automatically resolve to "${ath.canonicalName}":`
+                                        );
+                                        if (aliasInput && aliasInput.trim()) {
+                                          updateMasterRoster(
+                                            masterRoster.map((item) =>
+                                              item.id === ath.id
+                                                ? {
+                                                    ...item,
+                                                    aliases: [
+                                                      ...(item.aliases || []),
+                                                      aliasInput.trim(),
+                                                    ],
+                                                  }
+                                                : item
+                                            )
+                                          );
+                                        }
+                                      }}
+                                      className="text-[11px] font-semibold text-slate-500 hover:text-cyan-700 px-1.5 py-0.5 rounded border border-dashed border-slate-300 cursor-pointer"
+                                    >
+                                      + Alias
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-4 text-center">
+                                  <button
+                                    onClick={() =>
+                                      updateMasterRoster(
+                                        masterRoster.filter((item) => item.id !== ath.id)
+                                      )
+                                    }
+                                    className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* SUB-TAB C: MASTER COMPETITIONS */}
+              {historySubTab === 'competitions' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1">
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                          Canonical Competition Name
+                        </label>
+                        <input
+                          type="text"
+                          value={newCompName}
+                          onChange={(e) => setNewCompName(e.target.value)}
+                          placeholder="e.g., Centennial Conference Championships"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                          Default Location
+                        </label>
+                        <input
+                          type="text"
+                          value={newCompLocation}
+                          onChange={(e) => setNewCompLocation(e.target.value)}
+                          placeholder="e.g., Lancaster PA"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button
+                          onClick={() => {
+                            if (!newCompName.trim()) return;
+                            if (resolveMasterCompetition(newCompName)) {
+                              setBenchmarkStatusMsg(
+                                `"${newCompName.trim()}" already exists in Master Competitions.`
+                              );
+                              return;
+                            }
+                            updateMasterCompetitions([
+                              ...masterCompetitions,
+                              {
+                                id: `comp-${Date.now()}`,
+                                canonicalName: newCompName.trim(),
+                                defaultLocation: newCompLocation.trim(),
+                                aliases: [],
+                              },
+                            ]);
+                            setNewCompName('');
+                            setNewCompLocation('');
+                          }}
+                          className="px-4 py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white transition cursor-pointer"
+                        >
+                          Add Competition
+                        </button>
+                      </div>
+                    </div>
+
+                    {historicalRecords.length > 0 && (
+                      <button
+                        onClick={handleSyncMasterListsFromDatabase}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer shrink-0"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                        Sync Missing from DB
+                      </button>
+                    )}
+                  </div>
+
+                  {masterCompetitions.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No canonical competitions added yet. Add recurring meets above or stage a Google Sheet import to reconcile meet names.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500">
+                          <tr>
+                            <th className="py-2.5 px-4">Canonical Competition</th>
+                            <th className="py-2.5 px-4">Default Location</th>
+                            <th className="py-2.5 px-4">Mapped Aliases</th>
+                            <th className="py-2.5 px-4 w-16 text-center">Delete</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {masterCompetitions
+                            .slice()
+                            .sort((a, b) => a.canonicalName.localeCompare(b.canonicalName))
+                            .map((comp) => (
+                              <tr key={comp.id} className="hover:bg-slate-50">
+                                <td className="py-2.5 px-4 font-bold text-slate-900">
+                                  {comp.canonicalName}
+                                </td>
+                                <td className="py-2.5 px-4 text-slate-600">
+                                  {comp.defaultLocation || '-'}
+                                </td>
+                                <td className="py-2.5 px-4">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {(comp.aliases || []).map((al, idx) => (
+                                      <span
+                                        key={idx}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 font-medium"
+                                      >
+                                        {al}
+                                        <button
+                                          onClick={() =>
+                                            updateMasterCompetitions(
+                                              masterCompetitions.map((item) =>
+                                                item.id === comp.id
+                                                  ? {
+                                                      ...item,
+                                                      aliases: item.aliases.filter(
+                                                        (_, i) => i !== idx
+                                                      ),
+                                                    }
+                                                  : item
+                                              )
+                                            )
+                                          }
+                                          className="text-indigo-600 hover:text-red-600 cursor-pointer"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </span>
+                                    ))}
+                                    <button
+                                      onClick={() => {
+                                        const aliasInput = window.prompt(
+                                          `Add a competition name alias that should map to "${comp.canonicalName}":`
+                                        );
+                                        if (aliasInput && aliasInput.trim()) {
+                                          updateMasterCompetitions(
+                                            masterCompetitions.map((item) =>
+                                              item.id === comp.id
+                                                ? {
+                                                    ...item,
+                                                    aliases: [
+                                                      ...(item.aliases || []),
+                                                      aliasInput.trim(),
+                                                    ],
+                                                  }
+                                                : item
+                                            )
+                                          );
+                                        }
+                                      }}
+                                      className="text-[11px] font-semibold text-slate-500 hover:text-cyan-700 px-1.5 py-0.5 rounded border border-dashed border-slate-300 cursor-pointer"
+                                    >
+                                      + Alias
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-4 text-center">
+                                  <button
+                                    onClick={() =>
+                                      updateMasterCompetitions(
+                                        masterCompetitions.filter((item) => item.id !== comp.id)
+                                      )
+                                    }
+                                    className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* SUB-TAB D: COMMITTED DATABASE */}
+              {historySubTab === 'committed' && (
+                <div className="p-5 sm:p-6 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-slate-900">
+                      Committed Database Records ({historicalRecords.length})
+                    </span>
+                    {historicalRecords.length > 0 && (
+                      <button
+                        onClick={() => {
+                          updateHistoricalRecords([]);
+                          setBenchmarkStatusMsg('Cleared historical benchmark database.');
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-200 transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Clear Entire Database
+                      </button>
+                    )}
+                  </div>
+
+                  {historicalRecords.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No performances committed yet. Stage and commit rows from the Import & Reconcile tab.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto max-h-96 border border-slate-200 rounded-xl">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500">
+                          <tr>
+                            <th className="py-2.5 px-4">Name</th>
+                            <th className="py-2.5 px-4">Class</th>
+                            <th className="py-2.5 px-4">Event</th>
+                            <th className="py-2.5 px-4 text-right">Time</th>
+                            <th className="py-2.5 px-4">Type</th>
+                            <th className="py-2.5 px-4">Date</th>
+                            <th className="py-2.5 px-4">Competition</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {historicalRecords.slice(0, 100).map((h) => (
+                            <tr key={h.id} className="hover:bg-slate-50">
+                              <td className="py-2 px-4 font-semibold text-slate-800">{h.nameRaw}</td>
+                              <td className="py-2 px-4">
+                                {h.classYear ? (
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
+                                    {h.classYear}
+                                  </span>
+                                ) : (
+                                  '-'
+                                )}
+                              </td>
+                              <td className="py-2 px-4 text-slate-700">{h.eventRaw}</td>
+                              <td className="py-2 px-4 text-right font-mono font-bold text-slate-900">
+                                {h.time}
+                              </td>
+                              <td className="py-2 px-4">
+                                {h.isOfficial === false ? (
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold">
+                                    Split ({h.place})
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold">
+                                    Official
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2 px-4 text-slate-500">{h.date || '-'}</td>
+                              <td className="py-2 px-4 text-slate-600">{h.competition || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
+
+            {/* RECONCILIATION PROMPT PANEL (Appears whenever staged rows have unmatched athletes or competitions) */}
+            {stagedHistoryRows.length > 0 &&
+              (stagedUnmatchedSummary.athletes.length > 0 ||
+                stagedUnmatchedSummary.competitions.length > 0) && (
+                <div className="bg-white rounded-2xl border-2 border-amber-400/80 shadow-sm overflow-hidden">
+                  <div className="bg-amber-950 px-5 py-3.5 text-white flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                      <div>
+                        <h3 className="text-sm sm:text-base font-bold">
+                          Reconciliation Required ({stagedUnmatchedSummary.athletes.length} New/Unmatched Athletes • {stagedUnmatchedSummary.competitions.length} Competitions)
+                        </h3>
+                        <p className="text-xs text-amber-200/90">
+                          Map spelling/nickname variants as an alias to an existing Master entry, or create a new Master entry before committing.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => handleAutoCreateAllUnmatched(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-400 hover:bg-amber-300 text-amber-950 transition cursor-pointer"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        Create All New (Active)
+                      </button>
+                      <button
+                        onClick={() => handleAutoCreateAllUnmatched(false)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-900 hover:bg-amber-800 text-amber-100 border border-amber-700 transition cursor-pointer"
+                      >
+                        Create All New (Alumni/Inactive)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Unmatched Athletes Reconciliation List */}
+                    {stagedUnmatchedSummary.athletes.length > 0 && (
+                      <div className="space-y-2.5">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                          <UserCheck className="w-4 h-4 text-cyan-600" />
+                          Unmatched Athletes ({stagedUnmatchedSummary.athletes.length})
+                        </h4>
+                        <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl max-h-72 overflow-y-auto">
+                          {stagedUnmatchedSummary.athletes.map((item) => {
+                            const selKey = `ath-${item.key}`;
+                            const selectedTarget = reconcileSelections[selKey] || '__NEW__';
+                            const activeState =
+                              reconcileSelections[`${selKey}-active`] !== undefined
+                                ? reconcileSelections[`${selKey}-active`]
+                                : true;
+
+                            return (
+                              <div
+                                key={item.key}
+                                className="p-3 bg-slate-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                              >
+                                <div>
+                                  <div className="text-xs font-bold text-slate-900">
+                                    {item.rawName}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500">
+                                    {item.count} {item.count === 1 ? 'swim' : 'swims'} • {item.inferredGender}
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <select
+                                    value={selectedTarget}
+                                    onChange={(e) =>
+                                      setReconcileSelections((prev) => ({
+                                        ...prev,
+                                        [selKey]: e.target.value,
+                                      }))
+                                    }
+                                    className="px-2 py-1 text-xs bg-white border border-slate-200 rounded-lg max-w-[180px]"
+                                  >
+                                    <option value="__NEW__">+ Create New Athlete</option>
+                                    {masterRoster
+                                      .slice()
+                                      .sort((a, b) =>
+                                        a.canonicalName.localeCompare(b.canonicalName)
+                                      )
+                                      .map((ath) => (
+                                        <option key={ath.id} value={ath.id}>
+                                          Alias → {ath.canonicalName}
+                                        </option>
+                                      ))}
+                                  </select>
+
+                                  {selectedTarget === '__NEW__' && (
+                                    <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 px-2 py-1 rounded-lg cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={activeState}
+                                        onChange={(e) =>
+                                          setReconcileSelections((prev) => ({
+                                            ...prev,
+                                            [`${selKey}-active`]: e.target.checked,
+                                          }))
+                                        }
+                                        className="rounded text-cyan-600"
+                                      />
+                                      Active
+                                    </label>
+                                  )}
+
+                                  <button
+                                    onClick={() =>
+                                      handleReconcileAthlete(item, selectedTarget, activeState)
+                                    }
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white transition cursor-pointer"
+                                  >
+                                    <Link2 className="w-3 h-3" />
+                                    Apply
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Unmatched Competitions Reconciliation List */}
+                    {stagedUnmatchedSummary.competitions.length > 0 && (
+                      <div className="space-y-2.5">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                          <Building2 className="w-4 h-4 text-indigo-600" />
+                          Unmatched Competitions ({stagedUnmatchedSummary.competitions.length})
+                        </h4>
+                        <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl max-h-72 overflow-y-auto">
+                          {stagedUnmatchedSummary.competitions.map((item) => {
+                            const selKey = `comp-${item.key}`;
+                            const selectedTarget = reconcileSelections[selKey] || '__NEW__';
+
+                            return (
+                              <div
+                                key={item.key}
+                                className="p-3 bg-slate-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                              >
+                                <div>
+                                  <div className="text-xs font-bold text-slate-900">
+                                    {item.rawComp}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500">
+                                    {item.count} {item.count === 1 ? 'row' : 'rows'}
+                                    {item.sampleLocation ? ` • ${item.sampleLocation}` : ''}
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <select
+                                    value={selectedTarget}
+                                    onChange={(e) =>
+                                      setReconcileSelections((prev) => ({
+                                        ...prev,
+                                        [selKey]: e.target.value,
+                                      }))
+                                    }
+                                    className="px-2 py-1 text-xs bg-white border border-slate-200 rounded-lg max-w-[180px]"
+                                  >
+                                    <option value="__NEW__">+ Create New Meet</option>
+                                    {masterCompetitions
+                                      .slice()
+                                      .sort((a, b) =>
+                                        a.canonicalName.localeCompare(b.canonicalName)
+                                      )
+                                      .map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                          Alias → {c.canonicalName}
+                                        </option>
+                                      ))}
+                                  </select>
+
+                                  <button
+                                    onClick={() =>
+                                      handleReconcileCompetition(item, selectedTarget)
+                                    }
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer"
+                                  >
+                                    <Link2 className="w-3 h-3" />
+                                    Apply
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
             {/* Staging & Review Inspector Table */}
             {stagedHistoryRows.length > 0 && (
@@ -3542,7 +4601,7 @@ export default function App() {
                       Staging Review ({stagedHistoryRows.filter((r) => r.selected).length} of {stagedHistoryRows.length} selected)
                     </h3>
                     <p className="text-xs text-slate-300 mt-0.5">
-                      Verify normalized class years, official vs. <code className="text-cyan-300">R/S</code> split exclusions, and duplicate warnings before committing.
+                      Verify canonical athlete & competition matches, class years, official vs. <code className="text-cyan-300">R/S</code> split flags, and duplicates before committing.
                     </p>
                   </div>
 
@@ -3574,6 +4633,16 @@ export default function App() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     {[
                       { id: 'all', label: `All Staged (${stagedHistoryRows.length})` },
+                      {
+                        id: 'unmatched',
+                        label: `Unmatched (${
+                          stagedHistoryRows.filter(
+                            (r) =>
+                              !r.matchedAthleteId ||
+                              (r.rawImportedCompetition && !r.matchedCompId)
+                          ).length
+                        })`,
+                      },
                       { id: 'official', label: `Official Marks (${stagedHistoryRows.filter((r) => r.isOfficial).length})` },
                       { id: 'splits', label: `R/S Splits (${stagedHistoryRows.filter((r) => !r.isOfficial).length})` },
                       { id: 'duplicates', label: `Duplicates (${stagedHistoryRows.filter((r) => r.isDuplicate).length})` },
@@ -3621,17 +4690,22 @@ export default function App() {
                       <tr>
                         <th className="py-2.5 px-4 w-10 text-center">Import</th>
                         <th className="py-2.5 px-4">Status</th>
-                        <th className="py-2.5 px-4">Name</th>
+                        <th className="py-2.5 px-4">Resolved Athlete</th>
                         <th className="py-2.5 px-4">Class</th>
                         <th className="py-2.5 px-4">Normalized Event</th>
                         <th className="py-2.5 px-4 text-right">Time</th>
                         <th className="py-2.5 px-4">Date</th>
-                        <th className="py-2.5 px-4">Competition</th>
+                        <th className="py-2.5 px-4">Resolved Competition</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {stagedHistoryRows
                         .filter((r) => {
+                          if (stagedFilter === 'unmatched')
+                            return (
+                              !r.matchedAthleteId ||
+                              (r.rawImportedCompetition && !r.matchedCompId)
+                            );
                           if (stagedFilter === 'official') return r.isOfficial;
                           if (stagedFilter === 'splits') return !r.isOfficial;
                           if (stagedFilter === 'duplicates') return r.isDuplicate;
@@ -3678,7 +4752,36 @@ export default function App() {
                                 )}
                               </div>
                             </td>
-                            <td className="py-2 px-4 font-semibold text-slate-900">{row.nameRaw}</td>
+                            <td className="py-2 px-4">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-slate-900">{row.nameRaw}</span>
+                                {row.matchedAthleteId ? (
+                                  <span
+                                    title={
+                                      row.matchedAthleteActive
+                                        ? 'Matched Active Roster Athlete'
+                                        : 'Matched Alumni/Inactive Athlete'
+                                    }
+                                    className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${
+                                      row.matchedAthleteActive
+                                        ? 'bg-cyan-50 text-cyan-700 border border-cyan-200'
+                                        : 'bg-slate-100 text-slate-600'
+                                    }`}
+                                  >
+                                    {row.matchedAthleteActive ? 'Active' : 'Alumni'}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-bold">
+                                    New
+                                  </span>
+                                )}
+                              </div>
+                              {row.rawImportedName && row.rawImportedName !== row.nameRaw && (
+                                <div className="text-[10px] text-slate-400">
+                                  Sheet: {row.rawImportedName}
+                                </div>
+                              )}
+                            </td>
                             <td className="py-2 px-4">
                               {row.classYear ? (
                                 <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
@@ -3699,71 +4802,20 @@ export default function App() {
                               {row.time}
                             </td>
                             <td className="py-2 px-4 text-slate-500">{row.date || '-'}</td>
-                            <td className="py-2 px-4 text-slate-600">{row.competition || '-'}</td>
+                            <td className="py-2 px-4">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-slate-700 font-medium">
+                                  {row.competition || '-'}
+                                </span>
+                                {row.competition && !row.matchedCompId && (
+                                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 font-bold">
+                                    New
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                           </tr>
                         ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* Loaded Historical Records Preview Table */}
-            {historicalRecords.length > 0 && (
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="bg-slate-900 px-5 py-3 text-white flex items-center justify-between">
-                  <span className="text-sm font-bold">
-                    Committed Database Records ({historicalRecords.length})
-                  </span>
-                  <span className="text-xs text-slate-400">
-                    Showing first 100 entries • Saved in browser storage
-                  </span>
-                </div>
-                <div className="overflow-x-auto max-h-96">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 font-bold uppercase text-slate-500">
-                      <tr>
-                        <th className="py-2.5 px-4">Name</th>
-                        <th className="py-2.5 px-4">Class</th>
-                        <th className="py-2.5 px-4">Event</th>
-                        <th className="py-2.5 px-4 text-right">Time</th>
-                        <th className="py-2.5 px-4">Type</th>
-                        <th className="py-2.5 px-4">Date</th>
-                        <th className="py-2.5 px-4">Competition</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {historicalRecords.slice(0, 100).map((h) => (
-                        <tr key={h.id} className="hover:bg-slate-50">
-                          <td className="py-2 px-4 font-semibold text-slate-800">{h.nameRaw}</td>
-                          <td className="py-2 px-4">
-                            {h.classYear ? (
-                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
-                                {h.classYear}
-                              </span>
-                            ) : (
-                              '-'
-                            )}
-                          </td>
-                          <td className="py-2 px-4 text-slate-700">{h.eventRaw}</td>
-                          <td className="py-2 px-4 text-right font-mono font-bold text-slate-900">
-                            {h.time}
-                          </td>
-                          <td className="py-2 px-4">
-                            {h.isOfficial === false ? (
-                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold">
-                                Split ({h.place})
-                              </span>
-                            ) : (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold">
-                                Official
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-2 px-4 text-slate-500">{h.date || '-'}</td>
-                          <td className="py-2 px-4 text-slate-600">{h.competition || '-'}</td>
-                        </tr>
-                      ))}
                     </tbody>
                   </table>
                 </div>
