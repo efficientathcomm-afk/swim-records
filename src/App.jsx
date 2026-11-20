@@ -561,11 +561,28 @@ function parseGoogleSheetHistory(rawText, genderLookupMap = {}) {
     const secVal = parseFloat(cols[4]);
     const dateStr = cols[5] || '';
     const location = cols[6] || '';
-    const competition = cols[7] || '';
+    const rawCompetition = cols[7] || '';
     const placeRaw = (cols[8] || '').trim().toUpperCase();
     const timeCol = cols[9] || '';
     const longEvent = cols[10] || shortEvent;
     const totalSecondsCol = parseFloat(cols[11]);
+
+    // Extract round markers like "(SF)", "(P)", "(Prelims)", or "(Time Trial)" from Competition string
+    let round = 'Finals';
+    let competition = rawCompetition;
+    if (/\((sf|p|prelim|prelims|preliminary)\)/i.test(rawCompetition)) {
+      round = 'Prelims';
+      competition = rawCompetition
+        .replace(/\((sf|p|prelim|prelims|preliminary)\)/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    } else if (/\((tt|time\s*trial)\)/i.test(rawCompetition)) {
+      round = 'Time Trial';
+      competition = rawCompetition
+        .replace(/\((tt|time\s*trial)\)/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
 
     let seconds = !Number.isNaN(totalSecondsCol) ? totalSecondsCol : timeToSeconds(timeCol);
     if ((seconds === null || Number.isNaN(seconds)) && !Number.isNaN(secVal)) {
@@ -601,6 +618,7 @@ function parseGoogleSheetHistory(rawText, genderLookupMap = {}) {
       dateObj: parseFlexibleDate(dateStr),
       location,
       competition,
+      round,
       place: placeRaw === 'LR' ? 'R' : placeRaw,
       swimType,
       isOfficial: true,
@@ -1208,7 +1226,7 @@ export default function App() {
     const existingHashes = new Set(
       historicalRecords.map(
         (r) =>
-          `${r.swimmerKey}|${r.eventKey}|${r.seconds.toFixed(2)}|${r.date}|${r.place}`
+          `${r.swimmerKey}|${r.eventKey}|${r.seconds.toFixed(2)}|${r.date}|${r.round || 'Finals'}|${r.place}`
       )
     );
 
@@ -1226,7 +1244,7 @@ export default function App() {
       const resolvedEventKey = matchedEv ? matchedEv.eventKey : row.eventKey;
       const resolvedEventLabel = matchedEv ? matchedEv.canonicalName : row.eventLabel;
 
-      const hash = `${normalizeSwimmerKey(resolvedName)}|${resolvedEventKey}|${row.seconds.toFixed(2)}|${resolvedDate}|${row.place}`;
+      const hash = `${normalizeSwimmerKey(resolvedName)}|${resolvedEventKey}|${row.seconds.toFixed(2)}|${resolvedDate}|${row.round || 'Finals'}|${row.place}`;
       const isDuplicate = existingHashes.has(hash);
       return {
         ...row,
@@ -2648,7 +2666,19 @@ export default function App() {
                                 </td>
                                 <td className="py-2 px-3 font-mono font-semibold">{row.time}</td>
                                 <td className="py-2 px-3 text-slate-700 font-medium">
-                                  {row.competition || '—'}
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span>{row.competition || '—'}</span>
+                                    {row.round === 'Prelims' && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                        Prelims (SF)
+                                      </span>
+                                    )}
+                                    {row.round === 'Time Trial' && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">
+                                        TT
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="py-2 px-3 text-slate-500">{row.date || '—'}</td>
                                 <td className="py-2 px-3">
@@ -3258,7 +3288,16 @@ export default function App() {
                               <td className="py-2 px-3 font-mono font-bold text-cyan-800">
                                 {r.time}
                               </td>
-                              <td className="py-2 px-3 text-slate-600">{r.competition || '—'}</td>
+                              <td className="py-2 px-3 text-slate-600">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span>{r.competition || '—'}</span>
+                                  {r.round === 'Prelims' && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                      Prelims (SF)
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
                               <td className="py-2 px-3 text-slate-500">{r.date || '—'}</td>
                               <td className="py-2 px-3">
                                 {r.swimType === 'RELAY_LEADOFF' ||
@@ -3424,7 +3463,16 @@ export default function App() {
                           <td className="py-3 px-4 font-mono font-extrabold text-cyan-800">
                             {row.time}
                           </td>
-                          <td className="py-3 px-4 text-slate-600">{row.competition || '—'}</td>
+                          <td className="py-3 px-4 text-slate-600">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span>{row.competition || '—'}</span>
+                              {row.round === 'Prelims' && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                  Prelims (SF)
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="py-3 px-4 text-slate-500">{row.date || '—'}</td>
                         </tr>
                       ))}
