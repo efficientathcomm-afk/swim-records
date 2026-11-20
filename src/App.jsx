@@ -3024,7 +3024,7 @@ const rRowId = `cl2-lo-${entry.id}`;
         }
       }
 
-// All-Time Top 10 (includes full-distance, R lead-offs, and S intermediate splits)
+      // All-Time Top 10 (includes full-distance, R lead-offs, and S intermediate splits)
       const athleteBestMap = new Map();
       eventPool.forEach((r) => {
         const currentBest = athleteBestMap.get(r.swimmerKey);
@@ -3032,11 +3032,6 @@ const rRowId = `cl2-lo-${entry.id}`;
           athleteBestMap.set(r.swimmerKey, Number(r.seconds));
         }
       });
-
-      const prevSortedTop10 = Array.from(athleteBestMap.entries())
-        .filter(([, bestSec]) => Number.isFinite(bestSec) && bestSec > 0)
-        .sort((a, b) => a[1] - b[1]);
-      const prevRankIdx = prevSortedTop10.findIndex(([k]) => k === swKey);
 
       const existingBestForSwimmer = athleteBestMap.get(swKey);
       const effectiveBestForSwimmer =
@@ -3048,12 +3043,7 @@ const rRowId = `cl2-lo-${entry.id}`;
         .sort((a, b) => a[1] - b[1]);
 
       const rankIdx = sortedTop10.findIndex(([k]) => k === swKey);
-      const improvedRank =
-        rankIdx >= 0 &&
-        rankIdx < 10 &&
-        (prevRankIdx === -1 || rankIdx < prevRankIdx || (rankIdx === 0 && sec < (prevSortedTop10[0]?.[1] ?? Infinity) - 0.005));
-
-      if (improvedRank) {
+      if (rankIdx >= 0 && rankIdx < 10) {
         const isRecordHolder =
           rankIdx === 0 ||
           (sortedTop10[0] && sec <= sortedTop10[0][1] + 0.005);
@@ -6113,22 +6103,42 @@ const rRowId = `cl2-lo-${entry.id}`;
 
                       {/* Event & Heat Selector */}
                       {(() => {
-                        const eventOptions = Array.from(
-                          new Map(
-                            parsedData.individualResults.map((r) => [r.eventLabel, r.eventNumber])
-                          ).entries()
-                        )
-                          .sort((a, b) => a[1] - b[1])
-                          .map(([label, num]) => ({ label, num }));
+                        const eventOptionMap = new Map();
+                        parsedData.individualResults.forEach((r) => {
+                          if (!eventOptionMap.has(r.eventLabel)) {
+                            eventOptionMap.set(r.eventLabel, {
+                              label: r.eventLabel,
+                              num: r.eventNumber,
+                              isRelay: false,
+                            });
+                          }
+                        });
+                        parsedData.relayResults.forEach((r) => {
+                          if (!eventOptionMap.has(r.eventLabel)) {
+                            eventOptionMap.set(r.eventLabel, {
+                              label: r.eventLabel,
+                              num: r.eventNumber,
+                              isRelay: true,
+                            });
+                          }
+                        });
 
-                        const activeEvLabel =
-                          eventOptions.find((e) => e.label === selectedHeatEventLabel)?.label ||
-                          eventOptions[0]?.label ||
-                          '';
-
-                        const evSwims = parsedData.individualResults.filter(
-                          (r) => r.eventLabel === activeEvLabel
+                        const eventOptions = Array.from(eventOptionMap.values()).sort(
+                          (a, b) => a.num - b.num
                         );
+
+                        const activeEvObj =
+                          eventOptions.find((e) => e.label === selectedHeatEventLabel) ||
+                          eventOptions[0] ||
+                          null;
+                        const activeEvLabel = activeEvObj?.label || '';
+                        const isRelayEvent = Boolean(activeEvObj?.isRelay);
+
+                        const evSwims = isRelayEvent
+                          ? parsedData.relayResults.filter((r) => r.eventLabel === activeEvLabel)
+                          : parsedData.individualResults.filter(
+                              (r) => r.eventLabel === activeEvLabel
+                            );
 
                         const heatOptions = Array.from(
                           new Set(evSwims.map((r) => r.heat).filter(Boolean))
@@ -6146,8 +6156,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                           }
                         });
 
+                        const activeEvKey = normalizeEventKey(activeEvLabel);
                         const officialEvPool = historicalRecords.filter(
-                          (r) => r.isOfficial !== false && r.eventKey === normalizeEventKey(activeEvLabel)
+                          (r) => r.isOfficial !== false && r.eventKey === activeEvKey
                         );
 
                         const allTimeRankBySwimmer = new Map();
@@ -6175,7 +6186,6 @@ const rRowId = `cl2-lo-${entry.id}`;
                           officialEvPool
                             .filter((r) => normalizeClass(r.classYear) === 'FR')
                             .sort((a, b) => a.seconds - b.seconds)[0] || null;
-                        const activeEvKey = normalizeEventKey(activeEvLabel);
                         const matchingStandards = qualStandards.filter(
                           (s) => s.eventKey === activeEvKey
                         );
@@ -6203,7 +6213,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                                 onChange={(e) => setSelectedHeatNum(e.target.value)}
                                 className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
                               >
-                                <option value="ALL">All Heats ({evSwims.length} swims)</option>
+                                <option value="ALL">
+                                  All Heats ({evSwims.length} {isRelayEvent ? 'relays' : 'swims'})
+                                </option>
                                 {heatOptions.map((h) => (
                                   <option key={h} value={h}>
                                     Heat {h}
@@ -6246,7 +6258,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                                   ) : (
                                     <span className="text-slate-500 font-normal">
                                       {sortedEvBests.length > 0
-                                        ? `Open spot (${sortedEvBests.length}/10 athletes)`
+                                        ? `Open spot (${sortedEvBests.length}/10 ${
+                                            isRelayEvent ? 'relays' : 'athletes'
+                                          })`
                                         : 'No mark in DB'}
                                     </span>
                                   )}
@@ -6257,7 +6271,11 @@ const rRowId = `cl2-lo-${entry.id}`;
                                   Freshman (FR) Record
                                 </div>
                                 <div className="font-extrabold text-slate-900 mt-0.5 truncate">
-                                  {frRec ? (
+                                  {isRelayEvent ? (
+                                    <span className="text-slate-500 font-normal">
+                                      N/A for Relays
+                                    </span>
+                                  ) : frRec ? (
                                     <>
                                       <span className="font-mono text-cyan-900">{frRec.time}</span>{' '}
                                       — {frRec.swimmerName}
@@ -6299,7 +6317,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                                 <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
                                   <tr>
                                     <th className="py-2.5 px-3 w-20 text-center">Lane</th>
-                                    <th className="py-2.5 px-3">Swimmer / Team</th>
+                                    <th className="py-2.5 px-3">
+                                      {isRelayEvent ? 'Relay Squad / Lineup' : 'Swimmer / Team'}
+                                    </th>
                                     <th className="py-2.5 px-3">PB / SB</th>
                                     <th className="py-2.5 px-3 text-center">Wins</th>
                                     <th className="py-2.5 px-3">Last Swim in Event</th>
@@ -6323,31 +6343,78 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       );
                                     }
 
-                                    const displaySw = formatSwimmerDisplay(
-                                      entry.swimmerName,
-                                      entry.preferredFirst
-                                    );
-                                    const resolvedAth = resolveMasterAthlete(displaySw);
-                                    const canonicalName = resolvedAth
-                                      ? resolvedAth.canonicalName
-                                      : displaySw;
-                                    const swKey = normalizeSwimmerKey(canonicalName);
-                                    const evKey = normalizeEventKey(entry.eventLabel);
                                     const teamHex = getTeamHexColor(
                                       entry.teamCode,
                                       entry.teamName
                                     );
+                                    const isGettysburgEntry =
+                                      String(entry.teamName || '')
+                                        .toLowerCase()
+                                        .includes('gettysburg') ||
+                                      String(entry.teamCode || '')
+                                        .toLowerCase()
+                                        .includes('gett');
 
-                                    const swEventHistory = historicalRecords
-                                      .filter(
-                                        (r) =>
-                                          r.isOfficial !== false &&
-                                          r.swimmerKey === swKey &&
-                                          r.eventKey === evKey &&
-                                          r.swimType !== 'INTERMEDIATE_SPLIT' &&
-                                          String(r.place || '').toUpperCase() !== 'S'
-                                      )
-                                      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                                    const resolvedLegs = isRelayEvent
+                                      ? (entry.legs || []).map((l) => {
+                                          const disp = formatSwimmerDisplay(
+                                            l.swimmerName,
+                                            l.preferredFirst
+                                          );
+                                          const m = resolveMasterAthlete(disp);
+                                          return {
+                                            legOrder: l.legOrder,
+                                            name: m ? m.canonicalName : disp,
+                                            classYear: l.classYear,
+                                          };
+                                        })
+                                      : [];
+
+                                    const displaySw = isRelayEvent
+                                      ? entry.relayTitle ||
+                                        `${entry.teamName} "${entry.relayLetter || 'A'}"`
+                                      : formatSwimmerDisplay(
+                                          entry.swimmerName,
+                                          entry.preferredFirst
+                                        );
+                                    const resolvedAth = !isRelayEvent
+                                      ? resolveMasterAthlete(displaySw)
+                                      : null;
+                                    const canonicalName = resolvedAth
+                                      ? resolvedAth.canonicalName
+                                      : displaySw;
+                                    const swKey = isRelayEvent
+                                      ? normalizeSwimmerKey(
+                                          resolvedLegs.map((l) => l.name).join(', ')
+                                        )
+                                      : normalizeSwimmerKey(canonicalName);
+                                    const evKey = normalizeEventKey(entry.eventLabel);
+
+                                    const swEventHistory = isRelayEvent
+                                      ? isGettysburgEntry
+                                        ? historicalRecords
+                                            .filter(
+                                              (r) =>
+                                                r.isOfficial !== false &&
+                                                r.eventKey === evKey &&
+                                                r.swimType === 'RELAY_TEAM'
+                                            )
+                                            .sort((a, b) =>
+                                              (b.date || '').localeCompare(a.date || '')
+                                            )
+                                        : []
+                                      : historicalRecords
+                                          .filter(
+                                            (r) =>
+                                              r.isOfficial !== false &&
+                                              r.swimmerKey === swKey &&
+                                              r.eventKey === evKey &&
+                                              r.swimType !== 'INTERMEDIATE_SPLIT' &&
+                                              String(r.place || '').toUpperCase() !== 'S'
+                                          )
+                                          .sort((a, b) =>
+                                            (b.date || '').localeCompare(a.date || '')
+                                          );
 
                                     const pbRec =
                                       swEventHistory.length > 0
@@ -6367,17 +6434,32 @@ const rRowId = `cl2-lo-${entry.id}`;
                                           )
                                         : null;
 
-                                    const eventWinsCount = historicalRecords.filter(
-                                      (r) =>
-                                        r.eventKey === evKey &&
-                                        normalizeSwimmerKey(
-                                          resolveMasterAthlete(r.swimmerName)?.canonicalName ||
-                                            r.swimmerName
-                                        ) === swKey &&
-                                        String(r.place || '').trim() === '1' &&
-                                        String(r.round || 'Finals').toLowerCase() !== 'prelims' &&
-                                        String(r.round || 'Finals').toLowerCase() !== 'time trial'
-                                    ).length;
+                                    const eventWinsCount = isRelayEvent
+                                      ? isGettysburgEntry
+                                        ? historicalRecords.filter(
+                                            (r) =>
+                                              r.eventKey === evKey &&
+                                              r.swimType === 'RELAY_TEAM' &&
+                                              String(r.place || '').trim() === '1' &&
+                                              String(r.round || 'Finals').toLowerCase() !==
+                                                'prelims' &&
+                                              String(r.round || 'Finals').toLowerCase() !==
+                                                'time trial'
+                                          ).length
+                                        : 0
+                                      : historicalRecords.filter(
+                                          (r) =>
+                                            r.eventKey === evKey &&
+                                            normalizeSwimmerKey(
+                                              resolveMasterAthlete(r.swimmerName)?.canonicalName ||
+                                                r.swimmerName
+                                            ) === swKey &&
+                                            String(r.place || '').trim() === '1' &&
+                                            String(r.round || 'Finals').toLowerCase() !==
+                                              'prelims' &&
+                                            String(r.round || 'Finals').toLowerCase() !==
+                                              'time trial'
+                                        ).length;
 
                                     const lastSwim = swEventHistory[0] || null;
                                     const curSec = timeToSeconds(entry.finalsTime);
@@ -6396,7 +6478,11 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       }
                                     }
 
-                                    const rankNum = allTimeRankBySwimmer.get(swKey);
+                                    const rankNum = isRelayEvent
+                                      ? isGettysburgEntry
+                                        ? allTimeRankBySwimmer.get(swKey)
+                                        : undefined
+                                      : allTimeRankBySwimmer.get(swKey);
                                     const hitStandards = evaluateStandardsForSwim(
                                       entry.eventLabel,
                                       entry.finalsTime
@@ -6426,8 +6512,22 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         <td className="py-3 px-3">
                                           <div className="font-bold text-slate-900">
                                             {canonicalName}
-                                            {entry.classYear ? ` (${entry.classYear})` : ''}
+                                            {!isRelayEvent && entry.classYear
+                                              ? ` (${entry.classYear})`
+                                              : ''}
                                           </div>
+                                          {isRelayEvent && resolvedLegs.length > 0 && (
+                                            <div className="text-[11px] text-slate-700 mt-0.5">
+                                              {resolvedLegs
+                                                .map(
+                                                  (l) =>
+                                                    `${l.legOrder}) ${l.name}${
+                                                      l.classYear ? ` (${l.classYear})` : ''
+                                                    }`
+                                                )
+                                                .join(' • ')}
+                                            </div>
+                                          )}
                                           <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
                                             <span
                                               className="w-2 h-2 rounded-full inline-block"
@@ -7527,29 +7627,18 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       row.swimmerName,
                                       row.preferredFirst
                                     );
-                                    const isPrimaryProgramRow =
-                                      selectedTeam !== 'ALL'
-                                        ? row.teamCode === selectedTeam
-                                        : String(row.teamName || '')
-                                            .toLowerCase()
-                                            .includes('gettysburg') ||
-                                          String(row.teamCode || '')
-                                            .toLowerCase()
-                                            .includes('gett');
-                                    const tags = isPrimaryProgramRow
-                                      ? benchmarkIndex.evaluateSwim(
-                                          displaySwimmer,
-                                          row.eventLabel,
-                                          row.finalsTime,
-                                          row.classYear
-                                        )
-                                      : [];
+                                    const tags = benchmarkIndex.evaluateSwim(
+                                      displaySwimmer,
+                                      row.eventLabel,
+                                      row.finalsTime,
+                                      row.classYear
+                                    );
                                     const hitStds = evaluateStandardsForSwim(
                                       row.eventLabel,
                                       row.finalsTime
                                     );
                                     const teamHex = getTeamHexColor(row.teamCode, row.teamName);
-                            
+
                                     return (
                                       <React.Fragment key={row.id}>
                                         <tr
