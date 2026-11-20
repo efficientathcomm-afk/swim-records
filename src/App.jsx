@@ -575,11 +575,12 @@ function parseSDIFContent(content) {
       const distance = sliceCol(line, 68, 71);
       const strokeCode = sliceCol(line, 72, 72);
       const eventNumber = sliceCol(line, 73, 76);
-      const rawSwimDate = sliceCol(line, 95, 102);
+const rawSwimDate = sliceCol(line, 95, 102);
       const swimIsoDate =
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
+      const seedTimeRaw = sliceCol(line, 103, 110);
       const finalsTimeRaw = sliceCol(line, 116, 123);
       const courseCode = sliceCol(line, 124, 124);
 
@@ -595,6 +596,7 @@ function parseSDIFContent(content) {
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
       const parsedSec = timeToSeconds(finalsTimeRaw);
+      const parsedSeedSec = timeToSeconds(seedTimeRaw);
 
       const record = {
         id: `ind-${i}-${swimmerName}-${eventNumber}`,
@@ -612,6 +614,8 @@ function parseSDIFContent(content) {
         eventNumber: parseInt(eventNumber, 10) || eventNumber,
         eventLabel,
         swimDate: swimIsoDate || meetInfo.isoDate || '',
+        seedTime: seedTimeRaw || '',
+        seedSeconds: parsedSeedSec === null ? Infinity : parsedSeedSec,
         finalsTime: finalsTimeRaw || 'NT',
         timeSeconds: parsedSec === null ? Infinity : parsedSec,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
@@ -624,7 +628,7 @@ function parseSDIFContent(content) {
         splitPages: [],
         splits: [],
       };
-
+      
       individualResults.push(record);
       lastD0 = record;
       lastRecordType = 'D0';
@@ -659,13 +663,14 @@ function parseSDIFContent(content) {
           roster.get(lastD0.swimmerName).preferredFirst = prefFirst;
         }
       }
-    } else if (recType === 'E0') {
+} else if (recType === 'E0') {
       const relayLetter = sliceCol(line, 12, 12) || 'A';
       const teamCode = sliceCol(line, 13, 18) || currentTeamContext || 'UNAT';
       const genderCode = sliceCol(line, 21, 21);
       const distance = sliceCol(line, 23, 25);
       const strokeCode = sliceCol(line, 26, 26);
       const eventNumber = sliceCol(line, 27, 30);
+      const seedTimeRaw = sliceCol(line, 59, 67);
       const finalsTimeRaw = sliceCol(line, 72, 80);
       const courseCode = sliceCol(line, 81, 81);
 
@@ -681,6 +686,7 @@ function parseSDIFContent(content) {
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
       const parsedSec = timeToSeconds(finalsTimeRaw);
+      const parsedSeedSec = timeToSeconds(seedTimeRaw);
 
       const relayObj = {
         id: `rel-${i}-${teamCode}-${relayLetter}-${eventNumber}`,
@@ -696,6 +702,8 @@ function parseSDIFContent(content) {
         strokeName,
         eventNumber: parseInt(eventNumber, 10) || eventNumber,
         eventLabel,
+        seedTime: seedTimeRaw || '',
+        seedSeconds: parsedSeedSec === null ? Infinity : parsedSeedSec,
         finalsTime: finalsTimeRaw || 'NT',
         timeSeconds: parsedSec === null ? Infinity : parsedSec,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
@@ -709,7 +717,7 @@ function parseSDIFContent(content) {
         legs: [],
         splits: [],
       };
-
+      
       relayResults.push(relayObj);
       lastE0 = relayObj;
       lastRecordType = 'E0';
@@ -6314,19 +6322,19 @@ const rRowId = `cl2-lo-${entry.id}`;
                               </div>
                             </div>
 
-                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+<div className="overflow-x-auto border border-slate-200 rounded-xl">
                               <table className="w-full text-left text-xs">
                                 <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
                                   <tr>
-                                    <th className="py-2.5 px-3 w-20 text-center">Lane</th>
+                                    <th className="py-2.5 px-3 w-16 text-center">Lane</th>
                                     <th className="py-2.5 px-3">
                                       {isRelayEvent ? 'Relay Squad / Lineup' : 'Swimmer / Team'}
                                     </th>
-                                    <th className="py-2.5 px-3">PB / SB</th>
+                                    <th className="py-2.5 px-3">Seed / PB / SB</th>
                                     <th className="py-2.5 px-3 text-center">Wins</th>
-                                    <th className="py-2.5 px-3">Last Swim in Event</th>
-                                    <th className="py-2.5 px-3">Event Trend</th>
-                                    <th className="py-2.5 px-3">All-Time / Cuts</th>
+                                    <th className="py-2.5 px-3">Last Swim</th>
+                                    <th className="py-2.5 px-3">Trajectory & Form</th>
+                                    <th className="py-2.5 px-3">All-Time & Milestones</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -6464,27 +6472,186 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         ).length;
 
                                     const lastSwim = swEventHistory[0] || null;
-                                    const curSec = timeToSeconds(entry.finalsTime);
-                                    let trendText = '—';
-                                    let trendTone = 'text-slate-500';
-                                    if (curSec !== null && lastSwim) {
-                                      const diff = curSec - lastSwim.seconds;
-                                      if (diff < -0.005) {
-                                        trendText = `${diff.toFixed(2)}s vs last`;
-                                        trendTone = 'text-emerald-700 font-bold';
-                                      } else if (diff > 0.005) {
-                                        trendText = `+${diff.toFixed(2)}s vs last`;
-                                        trendTone = 'text-amber-700 font-semibold';
+                                    const seedSec = timeToSeconds(entry.seedTime);
+                                    const finalsSec = timeToSeconds(entry.finalsTime);
+
+                                    // 1. Trajectory & Form Signals (Pre-Meet Seed vs PB/SB + Recent Arc)
+                                    const trajectoryNotes = [];
+                                    if (seedSec !== null && pbRec) {
+                                      const vsPb = seedSec - pbRec.seconds;
+                                      if (Math.abs(vsPb) <= 0.02) {
+                                        trajectoryNotes.push({
+                                          text: 'Seeded at PB',
+                                          tone: 'text-indigo-700 font-bold',
+                                        });
+                                      } else if (vsPb < -0.02) {
+                                        trajectoryNotes.push({
+                                          text: `Seeded ${Math.abs(vsPb).toFixed(2)}s faster than PB`,
+                                          tone: 'text-emerald-700 font-bold',
+                                        });
                                       } else {
-                                        trendText = 'Exact last mark';
+                                        trajectoryNotes.push({
+                                          text: `Seeded +${vsPb.toFixed(2)}s off PB`,
+                                          tone: 'text-slate-600',
+                                        });
                                       }
+                                    } else if (seedSec !== null && sbRec) {
+                                      const vsSb = seedSec - sbRec.seconds;
+                                      trajectoryNotes.push({
+                                        text:
+                                          Math.abs(vsSb) <= 0.02
+                                            ? 'Seeded at SB'
+                                            : `Seeded ${vsSb > 0 ? '+' : ''}${vsSb.toFixed(2)}s vs SB`,
+                                        tone: 'text-slate-600',
+                                      });
                                     }
 
+                                    // Recent Arc across last 2-3 swims in this event
+                                    if (swEventHistory.length >= 3) {
+                                      const [s0, s1, s2] = swEventHistory;
+                                      if (s0.seconds < s1.seconds && s1.seconds < s2.seconds) {
+                                        const drop3 = s2.seconds - s0.seconds;
+                                        trajectoryNotes.push({
+                                          text: `Dropping (-${drop3.toFixed(2)}s over last 3)`,
+                                          tone: 'text-emerald-700 font-bold',
+                                        });
+                                      }
+                                    }
+                                    if (
+                                      lastSwim &&
+                                      pbRec &&
+                                      lastSwim.id === pbRec.id &&
+                                      swEventHistory.length > 1
+                                    ) {
+                                      trajectoryNotes.push({
+                                        text: 'Career-best form (PB last swim)',
+                                        tone: 'text-emerald-700 font-semibold',
+                                      });
+                                    } else if (
+                                      lastSwim &&
+                                      sbRec &&
+                                      lastSwim.id === sbRec.id &&
+                                      sbSwims.length > 1
+                                    ) {
+                                      trajectoryNotes.push({
+                                        text: 'Season-best form (SB last swim)',
+                                        tone: 'text-cyan-700 font-semibold',
+                                      });
+                                    }
+
+                                    if (finalsSec !== null && lastSwim) {
+                                      const diff = finalsSec - lastSwim.seconds;
+                                      trajectoryNotes.push({
+                                        text:
+                                          Math.abs(diff) <= 0.005
+                                            ? 'Finals matched last mark'
+                                            : `Finals ${diff < 0 ? '' : '+'}${diff.toFixed(2)}s vs last`,
+                                        tone:
+                                          diff < -0.005
+                                            ? 'text-emerald-700 font-bold'
+                                            : 'text-slate-500',
+                                      });
+                                    }
+
+                                    // 2. All-Time Gap, Barrier Watch, Last Meet Momentum, & Cut Proximity
                                     const rankNum = isRelayEvent
                                       ? isGettysburgEntry
                                         ? allTimeRankBySwimmer.get(swKey)
                                         : undefined
                                       : allTimeRankBySwimmer.get(swKey);
+
+                                    const milestoneBullets = [];
+                                    const refSec =
+                                      pbRec?.seconds ?? (seedSec !== null ? seedSec : null);
+
+                                    if (rankNum && rankNum > 1 && sortedEvBests[rankNum - 2]) {
+                                      const aheadRec = sortedEvBests[rankNum - 2];
+                                      if (refSec !== null && refSec >= aheadRec.seconds) {
+                                        const gap = refSec - aheadRec.seconds;
+                                        milestoneBullets.push(
+                                          `#${rankNum} All-Time (${gap.toFixed(2)}s shy of #${
+                                            rankNum - 1
+                                          })`
+                                        );
+                                      }
+                                    } else if (
+                                      !rankNum &&
+                                      isGettysburgEntry &&
+                                      tenthMark &&
+                                      refSec !== null &&
+                                      refSec > tenthMark.seconds &&
+                                      refSec - tenthMark.seconds <= Math.max(2.5, tenthMark.seconds * 0.03)
+                                    ) {
+                                      milestoneBullets.push(
+                                        `${(refSec - tenthMark.seconds).toFixed(2)}s outside Top-10 (#10: ${tenthMark.time})`
+                                      );
+                                    }
+
+                                    // Barrier / Milestone Watch (next round second or round minute below PB)
+                                    if (pbRec && pbRec.seconds > 15) {
+                                      const pbS = pbRec.seconds;
+                                      let barrierTarget = null;
+                                      if (pbS >= 60) {
+                                        const wholeMin = Math.floor(pbS / 60) * 60;
+                                        const tenSecStep = Math.floor(pbS / 10) * 10;
+                                        const cand =
+                                          pbS - wholeMin <= 2.5 ? wholeMin : tenSecStep;
+                                        if (pbS > cand && pbS - cand <= 2.0) {
+                                          barrierTarget = cand;
+                                        }
+                                      } else {
+                                        const wholeSec = Math.floor(pbS);
+                                        if (pbS > wholeSec && pbS - wholeSec <= 0.75) {
+                                          barrierTarget = wholeSec;
+                                        }
+                                      }
+                                      if (barrierTarget !== null) {
+                                        milestoneBullets.push(
+                                          `Chasing sub-${secondsToTime(barrierTarget)} (-${(
+                                            pbS - barrierTarget
+                                          ).toFixed(2)}s)`
+                                        );
+                                      }
+                                    }
+
+                                    // Recent Meet Momentum (wins at most recent meet in DB)
+                                    if (!isRelayEvent && isGettysburgEntry) {
+                                      const athAllRows = historicalRecords.filter(
+                                        (r) =>
+                                          normalizeSwimmerKey(
+                                            resolveMasterAthlete(r.swimmerName)?.canonicalName ||
+                                              r.swimmerName
+                                          ) === swKey && r.date
+                                      );
+                                      if (athAllRows.length > 0) {
+                                        const latestDate = athAllRows.reduce(
+                                          (maxD, r) => (r.date > maxD ? r.date : maxD),
+                                          ''
+                                        );
+                                        const winsLastMeet = athAllRows.filter(
+                                          (r) =>
+                                            r.date === latestDate &&
+                                            String(r.place || '').trim() === '1' &&
+                                            String(r.round || 'Finals').toLowerCase() !==
+                                              'prelims' &&
+                                            String(r.round || 'Finals').toLowerCase() !==
+                                              'time trial'
+                                        ).length;
+                                        if (winsLastMeet >= 2) {
+                                          milestoneBullets.push(
+                                            `Won ${winsLastMeet} events last meet (${formatDisplayDateMDY(
+                                              latestDate
+                                            )})`
+                                          );
+                                        } else if (
+                                          lastSwim &&
+                                          String(lastSwim.place || '').trim() === '1'
+                                        ) {
+                                          milestoneBullets.push('Won this event last time out');
+                                        }
+                                      }
+                                    }
+
                                     const hitStandards = evaluateStandardsForSwim(
                                       entry.eventLabel,
                                       entry.finalsTime
@@ -6499,15 +6666,35 @@ const rRowId = `cl2-lo-${entry.id}`;
                                     const displayStandards = Array.from(
                                       combinedStandardsMap.values()
                                     );
+                                    const achievedStdIds = new Set(
+                                      displayStandards.map((s) => s.id)
+                                    );
+
+                                    // Cut Proximity for standards not yet hit
+                                    if (refSec !== null) {
+                                      matchingStandards.forEach((std) => {
+                                        if (achievedStdIds.has(std.id)) return;
+                                        const stdSec = timeToSeconds(std.time);
+                                        if (
+                                          stdSec !== null &&
+                                          refSec > stdSec &&
+                                          refSec - stdSec <= Math.max(1.5, stdSec * 0.025)
+                                        ) {
+                                          milestoneBullets.push(
+                                            `${(refSec - stdSec).toFixed(2)}s from ${std.label} (${std.time})`
+                                          );
+                                        }
+                                      });
+                                    }
 
                                     return (
                                       <tr
                                         key={laneNum}
-                                        className="hover:bg-slate-50/80 transition"
+                                        className="hover:bg-slate-50/80 transition align-top"
                                       >
                                         <td
                                           style={{ backgroundColor: teamHex }}
-                                          className="py-3 px-3 text-center font-mono text-xl sm:text-2xl font-black text-white select-none"
+                                          className="py-3 px-3 text-center font-mono text-xl sm:text-2xl font-black text-white select-none align-middle"
                                         >
                                           {laneNum}
                                         </td>
@@ -6530,7 +6717,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                                                 .join(' • ')}
                                             </div>
                                           )}
-                                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
+                                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
                                             <span
                                               className="w-2 h-2 rounded-full inline-block"
                                               style={{ backgroundColor: teamHex }}
@@ -6538,12 +6725,18 @@ const rRowId = `cl2-lo-${entry.id}`;
                                             <span>{entry.teamName}</span>
                                             {entry.finalsTime && entry.finalsTime !== 'NT' && (
                                               <span className="font-mono font-bold text-slate-800 ml-1">
-                                                • {entry.finalsTime}
+                                                • Final: {entry.finalsTime}
                                               </span>
                                             )}
                                           </div>
                                         </td>
-                                        <td className="py-3 px-3 font-mono text-[11px]">
+                                        <td className="py-3 px-3 font-mono text-[11px] space-y-0.5">
+                                          <div>
+                                            Seed:{' '}
+                                            <strong className="text-indigo-900">
+                                              {entry.seedTime || 'NT'}
+                                            </strong>
+                                          </div>
                                           <div>
                                             PB:{' '}
                                             <strong className="text-slate-900">
@@ -6560,19 +6753,36 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         <td className="py-3 px-3 text-[11px]">
                                           {lastSwim ? (
                                             <div>
-                                              <span className="font-mono font-bold text-slate-800">
-                                                {lastSwim.time}
-                                              </span>
-                                              <span className="text-slate-500 ml-1.5">
-                                                ({formatDisplayDateMDY(lastSwim.date)})
-                                              </span>
+                                              <div>
+                                                <span className="font-mono font-bold text-slate-800">
+                                                  {lastSwim.time}
+                                                </span>
+                                                <span className="text-slate-500 ml-1">
+                                                  ({formatDisplayDateMDY(lastSwim.date)})
+                                                </span>
+                                              </div>
+                                              {lastSwim.competition && (
+                                                <div className="text-[10px] text-slate-400 truncate max-w-[160px]">
+                                                  {lastSwim.competition}
+                                                </div>
+                                              )}
                                             </div>
                                           ) : (
                                             <span className="text-slate-400">—</span>
                                           )}
                                         </td>
-                                        <td className={`py-3 px-3 text-[11px] font-mono ${trendTone}`}>
-                                          {trendText}
+                                        <td className="py-3 px-3 text-[11px]">
+                                          {trajectoryNotes.length > 0 ? (
+                                            <div className="space-y-0.5">
+                                              {trajectoryNotes.slice(0, 2).map((note, idx) => (
+                                                <div key={idx} className={note.tone}>
+                                                  {note.text}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-400">—</span>
+                                          )}
                                         </td>
                                         <td className="py-3 px-3">
                                           <div className="flex flex-wrap gap-1">
@@ -6591,10 +6801,21 @@ const rRowId = `cl2-lo-${entry.id}`;
                                                 {std.label}
                                               </span>
                                             ))}
-                                            {!rankNum && displayStandards.length === 0 && (
+                                          </div>
+                                          {milestoneBullets.length > 0 && (
+                                            <ul className="mt-1 space-y-0.5 text-[11px] text-slate-700">
+                                              {milestoneBullets.slice(0, 3).map((b, bIdx) => (
+                                                <li key={bIdx} className="leading-snug">
+                                                  • {b}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          )}
+                                          {!rankNum &&
+                                            displayStandards.length === 0 &&
+                                            milestoneBullets.length === 0 && (
                                               <span className="text-slate-400 text-[11px]">—</span>
                                             )}
-                                          </div>
                                         </td>
                                       </tr>
                                     );
@@ -6609,7 +6830,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                   )}
                 </div>
               )}
-
+              
               {/* SUB-TAB 2: ACTIVE ROSTER OVERVIEW */}
               {inMeetSubTab === 'roster' && (
                 <div className="p-5 sm:p-6 space-y-5">
