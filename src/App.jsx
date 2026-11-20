@@ -248,6 +248,14 @@ function normalizeDateIso(raw) {
   return `${y}-${m}-${day}`;
 }
 
+function formatDisplayDateMDY(raw) {
+  const clean = String(raw || '').trim();
+  if (!clean) return '—';
+  const d = parseFlexibleDate(clean);
+  if (!d) return clean;
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+}
+
 function sliceCol(line, start1Based, end1Based) {
   if (!line || line.length < start1Based) return '';
   return line.slice(start1Based - 1, end1Based).trim();
@@ -5516,7 +5524,7 @@ export default function App() {
                     {recordBookData.freshmanRecord && (
                       <div className="text-xs text-amber-900 font-medium">
                         {recordBookData.freshmanRecord.competition} •{' '}
-                        {recordBookData.freshmanRecord.date}
+                        {formatDisplayDateMDY(recordBookData.freshmanRecord.date)}
                       </div>
                     )}
                   </div>
@@ -5577,7 +5585,9 @@ export default function App() {
                                   )}
                                 </div>
                               </td>
-                              <td className="py-3 px-4 text-slate-500">{row.date || '—'}</td>
+                              <td className="py-3 px-4 text-slate-500">
+                                {formatDisplayDateMDY(row.date)}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -5773,7 +5783,8 @@ export default function App() {
                                                 {w.splitContext ? ` (${w.splitContext})` : ''}
                                               </div>
                                               <div className="text-slate-500">
-                                                {w.competition || 'Meet'} • {w.date || '—'}
+                                                {w.competition || 'Meet'} •{' '}
+                                                {formatDisplayDateMDY(w.date)}
                                               </div>
                                             </div>
                                             <span className="font-mono font-extrabold text-cyan-800 shrink-0">
