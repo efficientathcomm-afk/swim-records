@@ -115,10 +115,13 @@ const CANONICAL_EVENTS = [
   'Women 500 Freestyle',
   'Women 1000 Freestyle',
   'Women 1650 Freestyle',
+  'Women 50 Backstroke',
   'Women 100 Backstroke',
   'Women 200 Backstroke',
+  'Women 50 Breaststroke',
   'Women 100 Breaststroke',
   'Women 200 Breaststroke',
+  'Women 50 Butterfly',
   'Women 100 Butterfly',
   'Women 200 Butterfly',
   'Women 200 Individual Medley',
@@ -129,10 +132,13 @@ const CANONICAL_EVENTS = [
   'Men 500 Freestyle',
   'Men 1000 Freestyle',
   'Men 1650 Freestyle',
+  'Men 50 Backstroke',
   'Men 100 Backstroke',
   'Men 200 Backstroke',
+  'Men 50 Breaststroke',
   'Men 100 Breaststroke',
   'Men 200 Breaststroke',
+  'Men 50 Butterfly',
   'Men 100 Butterfly',
   'Men 200 Butterfly',
   'Men 200 Individual Medley',
@@ -349,6 +355,45 @@ function getCurrentSeasonStart() {
   return new Date(yr, 7, 1);
 }
 
+// Extract all legal flat-start opening splits (e.g., 50 Back off 100 Back, 100 Free off 200 Free, 1000 Free off 1650 Free)
+function extractLegalOpeningSplits(ev, splits) {
+  if (!ev || ev.type !== 'Individual' || !Array.isArray(splits) || splits.length === 0) return [];
+  const validByStroke = {
+    Freestyle: [50, 100, 200, 500, 1000],
+    Backstroke: [50, 100],
+    Breaststroke: [50, 100],
+    Butterfly: [50, 100],
+    'Individual Medley': [],
+  };
+  const targets = validByStroke[ev.stroke] || [];
+  if (targets.length === 0) return [];
+
+  // Infer split interval (50y standard in SCY/SCM/LCM; fallback to 25y if split count indicates 25s)
+  const interval =
+    ev.distance > 0 && splits.length > 0 && Math.round(ev.distance / splits.length) === 25
+      ? 25
+      : 50;
+
+  const legal = [];
+  splits.forEach((sp) => {
+    const distAtSplit = sp.splitNumber * interval;
+    if (distAtSplit < ev.distance && targets.includes(distAtSplit) && sp.cumulative) {
+      const sec = timeToSeconds(sp.cumulative);
+      if (sec !== null && sec > 0) {
+        legal.push({
+          splitDistance: distAtSplit,
+          eventLabel: `${ev.gender} ${distAtSplit} ${ev.stroke}`,
+          eventKey: normalizeEventKey(`${ev.gender} ${distAtSplit} ${ev.stroke}`),
+          time: sp.cumulative,
+          seconds: sec,
+          context: `${distAtSplit} Split in ${ev.eventLabel}`,
+        });
+      }
+    }
+  });
+  return legal;
+}
+
 // ============================================================================
 // SDIF / CL2 FILE PARSER
 // ============================================================================
@@ -415,7 +460,12 @@ function parseSdifCl2(rawText) {
       const distance = sliceCol(line, 84, 87);
       const strokeCode = sliceCol(line, 88, 88);
       const seedTime = sliceCol(line, 96, 103);
-      const finalsTime = sliceCol(line, 116, 123) || sliceCol(line, 106, 113);
+      const prelimTimeRaw = sliceCol(line, 106, 113).replace(/[YLS]$/i, '');
+      const finalsTimeRaw = sliceCol(line, 116, 123).replace(/[YLS]$/i, '');
+      const hasFinals = Boolean(finalsTimeRaw && !['NT', 'NS', 'SCR'].includes(finalsTimeRaw));
+      const hasPrelim = Boolean(prelimTimeRaw && !['NT', 'NS', 'SCR'].includes(prelimTimeRaw));
+      const effectiveTime = hasFinals ? finalsTimeRaw : prelimTimeRaw || finalsTimeRaw;
+      const round = !hasFinals && hasPrelim ? 'Prelims' : 'Finals';
       const placeStr = sliceCol(line, 126, 128);
       const pointsStr = sliceCol(line, 132, 137);
       const points = parseFloat(pointsStr) || 0;
@@ -429,7 +479,9 @@ function parseSdifCl2(rawText) {
         swimmerName,
         classYear: normalizeClass(classYear),
         seedTime: seedTime.replace(/[YLS]$/i, ''),
-        finalsTime: finalsTime.replace(/[YLS]$/i, ''),
+        prelimTime: prelimTimeRaw,
+        finalsTime: effectiveTime,
+        round,
         place: placeStr ? String(parseInt(placeStr, 10) || placeStr) : '',
         points,
         splits: [],
@@ -1538,8 +1590,9 @@ export default function App() {
           const finalLoc = resolvedComp?.defaultLocation || meetLoc;
           const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
           const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : ev.eventLabel;
+          const entryRound = entry.round || 'Finals';
 
-          const hash = `${normalizeSwimmerKey(finalName)}|${finalEvKey}|${sec.toFixed(2)}|${finalDate}|${entry.place || ''}`;
+          const hash = `${normalizeSwimmerKey(finalName)}|${finalEvKey}|${sec.toFixed(2)}|${finalDate}|${entryRound}|${entry.place || ''}`;
           if (!existingHashes.has(hash)) {
             existingHashes.add(hash);
             newEntries.push({
@@ -1555,6 +1608,7 @@ export default function App() {
               dateObj: parseFlexibleDate(finalDate),
               location: finalLoc,
               competition: finalComp,
+              round: entryRound,
               place: entry.place || '',
               swimType: 'OFFICIAL',
               isOfficial: true,
@@ -1562,12 +1616,17 @@ export default function App() {
             });
           }
 
-          if (includeSplitsOnCommit && ev.distance === 1650 && entry.splits && entry.splits.length >= 20) {
-            const split1000 = entry.splits[19];
-            const splitSec = timeToSeconds(split1000?.cumulative);
-            const splitEvKey = normalizeEventKey(`${ev.gender} 1000 Freestyle`);
-            if (splitSec !== null && splitEvKey) {
-              const sHash = `${normalizeSwimmerKey(finalName)}|${splitEvKey}|${splitSec.toFixed(2)}|${finalDate}|S`;
+          if (includeSplitsOnCommit && entry.splits && entry.splits.length > 0) {
+            const legalSplits = extractLegalOpeningSplits(ev, entry.splits);
+            legalSplits.forEach((spItem) => {
+              const resolvedSplitEv = resolveMasterEvent(spItem.eventLabel, ev.gender);
+              const splitEvKey = resolvedSplitEv ? resolvedSplitEv.eventKey : spItem.eventKey;
+              const splitEvLabel = resolvedSplitEv
+                ? resolvedSplitEv.canonicalName
+                : spItem.eventLabel;
+              if (!splitEvKey) return;
+
+              const sHash = `${normalizeSwimmerKey(finalName)}|${splitEvKey}|${spItem.seconds.toFixed(2)}|${finalDate}|${entryRound}|S`;
               if (!existingHashes.has(sHash)) {
                 existingHashes.add(sHash);
                 newEntries.push({
@@ -1576,21 +1635,22 @@ export default function App() {
                   swimmerKey: normalizeSwimmerKey(finalName),
                   classYear: normalizeClass(entry.classYear),
                   eventKey: splitEvKey,
-                  eventLabel: `${ev.gender} 1000 Freestyle`,
-                  time: split1000.cumulative,
-                  seconds: splitSec,
+                  eventLabel: splitEvLabel,
+                  time: spItem.time,
+                  seconds: spItem.seconds,
                   date: finalDate,
                   dateObj: parseFlexibleDate(finalDate),
                   location: finalLoc,
                   competition: finalComp,
+                  round: entryRound,
                   place: 'S',
                   swimType: 'INTERMEDIATE_SPLIT',
                   isOfficial: true,
-                  splitContext: `1000 Split in ${ev.eventLabel}`,
+                  splitContext: spItem.context,
                   source: 'cl2_split',
                 });
               }
-            }
+            });
           }
         });
       } else if (ev.type === 'Relay') {
@@ -4106,6 +4166,78 @@ export default function App() {
 
             {parsedData && (
               <>
+                {/* Master Competition Link & Quick-Commit Status Bar */}
+                {(() => {
+                  const matchedMeet = resolveMasterCompetition(
+                    parsedData.meet.name,
+                    parsedData.meet.startDate
+                  );
+                  return (
+                    <div
+                      className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        matchedMeet
+                          ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                          : 'bg-amber-50/80 border-amber-200 text-amber-950'
+                      }`}
+                    >
+                      <div className="flex items-start sm:items-center gap-2.5 text-xs">
+                        {matchedMeet ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+                        )}
+                        <div>
+                          {matchedMeet ? (
+                            <span>
+                              Matched Master Competition:{' '}
+                              <strong>{matchedMeet.canonicalName}</strong> ({matchedMeet.date})
+                            </span>
+                          ) : (
+                            <span>
+                              Meet <strong>"{parsedData.meet.name}"</strong> (
+                              {parsedData.meet.startDate || 'No date'}) is not in{' '}
+                              <strong>Master Competitions</strong> yet.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {!matchedMeet && (
+                          <button
+                            onClick={() => {
+                              const created = {
+                                id: `comp-${Date.now()}`,
+                                canonicalName: parsedData.meet.name,
+                                date: normalizeDateIso(parsedData.meet.startDate),
+                                defaultLocation: parsedData.meet.location || '',
+                                aliases: [],
+                              };
+                              updateMasterCompetitions(
+                                [...masterCompetitions, created],
+                                [created]
+                              );
+                              setBenchmarkStatusMsg(
+                                `Added "${created.canonicalName}" (${created.date}) to Master Competitions.`
+                              );
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white transition cursor-pointer"
+                          >
+                            <Calendar className="w-3.5 h-3.5" />
+                            Add to Master Competitions
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setActiveSection('postmeet')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+                        >
+                          <ArrowRight className="w-3.5 h-3.5 text-cyan-400" />
+                          Post-Meet & Commit
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {Object.values(parsedData.teams).map((team) => (
                     <div
@@ -4201,6 +4333,7 @@ export default function App() {
                               <th className="py-2.5 px-4">Swimmer / Relay</th>
                               <th className="py-2.5 px-4">Team</th>
                               <th className="py-2.5 px-4">Seed</th>
+                              <th className="py-2.5 px-4">Prelims</th>
                               <th className="py-2.5 px-4">Finals</th>
                               <th className="py-2.5 px-4 text-right">Pts</th>
                             </tr>
@@ -4217,6 +4350,52 @@ export default function App() {
                                       entry.classYear
                                     )
                                   : [];
+                              // Also evaluate any legal flat-start opening splits (e.g., 50 Back off 100 Back, 1000 Free off 1650 Free)
+                              const openingSplitTags =
+                                ev.type === 'Individual' && isPrimary && entry.splits?.length > 0
+                                  ? extractLegalOpeningSplits(ev, entry.splits).flatMap((spItem) =>
+                                      benchmarkIndex
+                                        .evaluateSwim(
+                                          entry.swimmerName,
+                                          spItem.eventLabel,
+                                          spItem.time,
+                                          entry.classYear,
+                                          true
+                                        )
+                                        .map((t) => ({
+                                          ...t,
+                                          label: `${spItem.splitDistance} Split (${spItem.time}) ${t.label}`,
+                                        }))
+                                    )
+                                  : [];
+                              // Evaluate Relay Lead-Off (Leg 1) for primary team relays
+                              const legDist = ev.type === 'Relay' ? Math.round(ev.distance / 4) : 0;
+                              const legStroke =
+                                ev.stroke === 'Medley' ? 'Backstroke' : 'Freestyle';
+                              const leadOffLeg =
+                                ev.type === 'Relay'
+                                  ? (entry.legs || []).find((l) => l.leg === 1)
+                                  : null;
+                              const leadOffTags =
+                                ev.type === 'Relay' &&
+                                isPrimary &&
+                                leadOffLeg &&
+                                leadOffLeg.name &&
+                                leadOffLeg.split
+                                  ? benchmarkIndex
+                                      .evaluateSwim(
+                                        leadOffLeg.name,
+                                        `${ev.gender} ${legDist} ${legStroke}`,
+                                        leadOffLeg.split,
+                                        leadOffLeg.classYear || '',
+                                        false
+                                      )
+                                      .map((t) => ({
+                                        ...t,
+                                        label: `Lead-Off ${t.label}`,
+                                      }))
+                                  : [];
+
                               const hasSplits = entry.splits && entry.splits.length > 0;
                               const isExpanded = Boolean(expandedSplits[entry.id]);
 
@@ -4236,7 +4415,12 @@ export default function App() {
                                           <span className="font-bold text-slate-900">
                                             {entry.swimmerName}
                                           </span>
-                                          {tags.map((t, i) => (
+                                          {entry.round === 'Prelims' && (
+                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                              Prelims (SF)
+                                            </span>
+                                          )}
+                                          {[...tags, ...openingSplitTags].map((t, i) => (
                                             <span
                                               key={i}
                                               className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
@@ -4265,8 +4449,18 @@ export default function App() {
                                         </div>
                                       ) : (
                                         <div className="space-y-1">
-                                          <div className="font-bold text-slate-900">
-                                            Relay {entry.relayLetter}
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="font-bold text-slate-900">
+                                              Relay {entry.relayLetter}
+                                            </span>
+                                            {leadOffTags.map((t, i) => (
+                                              <span
+                                                key={i}
+                                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-100 text-cyan-900"
+                                              >
+                                                {t.label}
+                                              </span>
+                                            ))}
                                           </div>
                                           {entry.legs && entry.legs.length > 0 && (
                                             <div className="text-[11px] text-slate-600 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -4285,6 +4479,9 @@ export default function App() {
                                     <td className="py-2.5 px-4 font-mono text-slate-500">
                                       {entry.seedTime || '—'}
                                     </td>
+                                    <td className="py-2.5 px-4 font-mono text-slate-500">
+                                      {entry.prelimTime || '—'}
+                                    </td>
                                     <td className="py-2.5 px-4 font-mono font-extrabold text-slate-900">
                                       {entry.finalsTime || '—'}
                                     </td>
@@ -4295,7 +4492,7 @@ export default function App() {
 
                                   {hasSplits && isExpanded && (
                                     <tr className="bg-slate-50">
-                                      <td colSpan={6} className="px-4 py-3">
+                                      <td colSpan={7} className="px-4 py-3">
                                         <div className="flex flex-wrap gap-2">
                                           {entry.splits.map((sp) => (
                                             <div
@@ -4370,7 +4567,7 @@ export default function App() {
                         onChange={(e) => setIncludeSplitsOnCommit(e.target.checked)}
                         className="rounded text-cyan-600"
                       />
-                      Also save 1000 splits inside 1650 (Place = S; Relay Lead-Offs "R" are always saved)
+                      Also save legal opening splits (e.g., 50 Back off 100 Back, 1000 Free off 1650 Free as Place = S; Relay Lead-Offs "R" are always saved)
                     </label>
                   </div>
 
