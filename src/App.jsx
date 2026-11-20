@@ -1852,7 +1852,7 @@ export default function App() {
             const wRowId = `cl2-rw-${entry.id}-leg${leg.legOrder}`;
             const wDate = resolveRowDate(wRowId, entry.eventNumber, defaultMeetDate);
             const winHash = `${swKey}|${finalEvKey}|${relaySec.toFixed(2)}|${wDate}|Finals|1`;
-            const isDup = existingHashes.has(winHash);
+            const isDuplicate = existingHashes.has(winHash);
             rows.push({
               id: wRowId,
               eventNumber: entry.eventNumber,
@@ -1875,8 +1875,8 @@ export default function App() {
                 leg.legTotalTime !== '-' ? ` (${leg.legTotalTime})` : ''
               }`,
               source: 'cl2_relay_win',
-              isDuplicate: isDup,
-              selected: !isDup && !excludedMeetCommitIds.has(wRowId),
+              isDuplicate,
+              selected: !isDuplicate && !excludedMeetCommitIds.has(wRowId),
             });
           });
         }
