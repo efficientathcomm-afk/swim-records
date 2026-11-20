@@ -119,11 +119,6 @@ Delanie McKenzie\tJr.\t100 Back\t0\t58.15\t2026-02-20\tLancaster PA\tCentennial 
 Olivia Pyott\tSr.\t100 Breast\t1\t06.95\t2026-02-21\tLancaster PA\tCentennial Conference Championships\t1\t1:06.95\tWomen 100 Breaststroke\t66.95
 Charles Schundler\tJr.\t200 Free\t1\t53.40\t2026-10-24\tGettysburg PA\tGettysburg Invitational\t1\t1:53.40\tMen 200 Freestyle\t113.40`;
 
-const SAMPLE_RELAY_SHEET_CSV = `Names\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds
-Delanie McKenzie, Reilly Dolan, Morgan Puckett, Delaney Reck\t400 Medley Relay\t3\t59.68\t2026-11-07\tGettysburg PA\tGettysburg v Carnegie Mellon\t2\t3:59.68\tWomen 400 Medley Relay\t239.68
-Delaney Reck, Delanie McKenzie, Kathleen Miller, Maya Peitler\t200 Free Relay\t1\t38.76\t2026-11-07\tGettysburg PA\tGettysburg v Carnegie Mellon\t1\t1:38.76\tWomen 200 Freestyle Relay\t98.76
-Toby Winston, Ryan Burek, Edward Kim, Raphael Rudatsikira\t200 Free Relay\t1\t26.53\t2026-11-07\tGettysburg PA\tGettysburg v Carnegie Mellon\t1\t1:26.53\tMen 200 Freestyle Relay\t86.53`;
-
 // ============================================================================
 // PARSING & NORMALIZATION UTILITIES
 // ============================================================================
@@ -1218,6 +1213,7 @@ function parseGoogleSheetRelayHistory(rawText, genderLookupMap = {}) {
   return rows;
 }
 
+
 // ============================================================================
 // MAIN APPLICATION COMPONENT
 // ============================================================================
@@ -1282,7 +1278,6 @@ export default function App() {
   });
 
   // Staging & Importer State
-  const [sheetImportMode, setSheetImportMode] = useState('auto'); // 'auto' | 'individual' | 'relay'
   const [pasteSheetText, setPasteSheetText] = useState('');
   const [stagedHistoryRows, setStagedHistoryRows] = useState([]);
   const [reconcileSelections, setReconcileSelections] = useState({});
@@ -2242,30 +2237,11 @@ export default function App() {
   }, [masterRoster, parsedData]);
 
   // Stage Google Sheet rows for inspection & reconciliation before committing
-  const handleStageHistoryText = (rawText, forcedMode = sheetImportMode) => {
-    const firstNonEmpty =
-      String(rawText || '')
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .find(Boolean) || '';
-    const delim = firstNonEmpty.includes('\t') ? '\t' : ',';
-    const firstCols = firstNonEmpty.split(delim).map((c) => c.trim().replace(/^"|"$/g, ''));
-
-    const isRelaySheet =
-      forcedMode === 'relay' ||
-      (forcedMode === 'auto' &&
-        ((firstCols[0] || '').toLowerCase() === 'names' ||
-          (firstCols.length === 11 && (firstCols[0] || '').includes(','))));
-
-    const parsed = isRelaySheet
-      ? parseGoogleSheetRelayHistory(rawText, swimmerGenderLookup)
-      : parseGoogleSheetHistory(rawText, swimmerGenderLookup);
-
+  const handleStageHistoryText = (rawText) => {
+    const parsed = parseGoogleSheetHistory(rawText, swimmerGenderLookup);
     if (parsed.length === 0) {
       setBenchmarkStatusMsg(
-        isRelaySheet
-          ? 'No valid relay rows found. Ensure 11 columns follow: Names, Event, Min, Sec, Date, Location, Competition, Place, Time, Event, Seconds.'
-          : 'No valid rows found. Ensure 12 columns follow: Name, Class, Event, Min, Sec, Date, Location, Competition, Place, Time, Event, Seconds.'
+        'No valid rows found. Ensure columns follow: Name, Class, Event, Min, Sec, Date, Location, Competition, Place, Time, Event, Seconds.'
       );
       return;
     }
@@ -2278,57 +2254,6 @@ export default function App() {
     );
 
     const staged = parsed.map((row) => {
-      if (row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs)) {
-        const resolvedLegs = row.relayLegs.map((legName) => {
-          const m = resolveMasterAthlete(legName);
-          return m ? m.canonicalName : legName;
-        });
-        const firstMatchedAth = row.relayLegs
-          .map((legName) => resolveMasterAthlete(legName))
-          .find(Boolean);
-        const inferredGender =
-          firstMatchedAth?.gender ||
-          row.relayLegs.map((n) => swimmerGenderLookup[normalizeSwimmerKey(n)]).find(Boolean) ||
-          '';
-
-        const matchedComp = resolveMasterCompetition(row.competition, row.date);
-        const resolvedComp = matchedComp ? matchedComp.canonicalName : row.competition;
-        const resolvedDate = matchedComp?.date ? normalizeDateIso(matchedComp.date) : row.date;
-        const resolvedLocation = matchedComp?.defaultLocation || row.location || '';
-
-        const matchedEv = resolveMasterEvent(row.rawEventInput, inferredGender);
-        let resolvedEventKey = matchedEv ? matchedEv.eventKey : row.eventKey;
-        if (resolvedEventKey && !resolvedEventKey.endsWith('relay')) {
-          resolvedEventKey = `${resolvedEventKey} relay`;
-        }
-        const resolvedEventLabel = matchedEv
-          ? matchedEv.canonicalName
-          : resolvedEventKey
-          ? toTitleEventLabel(resolvedEventKey)
-          : row.eventLabel;
-
-        const resolvedLineup = resolvedLegs.join(', ');
-        const resolvedKey = normalizeSwimmerKey(resolvedLineup);
-        const hash = `${resolvedKey}|${resolvedEventKey}|${row.seconds.toFixed(2)}|${resolvedDate}|${row.round || 'Finals'}|${row.place}`;
-        const isDuplicate = existingHashes.has(hash);
-
-        return {
-          ...row,
-          relayLegs: resolvedLegs,
-          swimmerName: resolvedLineup,
-          swimmerKey: resolvedKey,
-          competition: resolvedComp,
-          date: resolvedDate,
-          dateObj: parseFlexibleDate(resolvedDate),
-          location: resolvedLocation,
-          eventKey: resolvedEventKey,
-          eventLabel: resolvedEventLabel,
-          isEventMatched: Boolean(matchedEv),
-          isDuplicate,
-          selected: !isDuplicate,
-        };
-      }
-
       const matchedAth = resolveMasterAthlete(row.swimmerName);
       const resolvedName = matchedAth ? matchedAth.canonicalName : row.swimmerName;
       const inferredGender = matchedAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
@@ -2364,7 +2289,7 @@ export default function App() {
     setReconcileSelections({});
     const dupCount = staged.filter((r) => r.isDuplicate).length;
     setBenchmarkStatusMsg(
-      `Staged ${staged.length} ${isRelaySheet ? 'relay ' : ''}rows (${staged.length - dupCount} new, ${dupCount} already in database). Review or reconcile below before committing.`
+      `Staged ${staged.length} rows (${staged.length - dupCount} new, ${dupCount} already in database). Review or reconcile below before committing.`
     );
   };
 
@@ -2375,27 +2300,19 @@ export default function App() {
     const events = new Map();
 
     stagedHistoryRows.forEach((row) => {
-      const namesToCheck =
-        row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs)
-          ? row.relayLegs
-          : [row.swimmerName];
-
-      namesToCheck.forEach((rawCandidate) => {
-        const matchedAth = resolveMasterAthlete(rawCandidate);
-        if (!matchedAth) {
-          const key = normalizeSwimmerKey(rawCandidate);
-          if (!athletes.has(key)) {
-            athletes.set(key, {
-              rawName: rawCandidate,
-              inferredGender: row.eventKey.startsWith('men') ? 'Men' : 'Women',
-              count: 1,
-            });
-          } else {
-            athletes.get(key).count += 1;
-          }
+      const matchedAth = resolveMasterAthlete(row.swimmerName);
+      if (!matchedAth) {
+        const key = normalizeSwimmerKey(row.swimmerName);
+        if (!athletes.has(key)) {
+          athletes.set(key, {
+            rawName: row.swimmerName,
+            inferredGender: row.eventKey.startsWith('men') ? 'Men' : 'Women',
+            count: 1,
+          });
+        } else {
+          athletes.get(key).count += 1;
         }
-      });
-
+      }
       if (row.competition && !resolveMasterCompetition(row.competition, row.date)) {
         const cKey = `${normalizeCompKey(row.competition)}|${normalizeDateIso(row.date)}`;
         if (!competitions.has(cKey)) {
@@ -2409,11 +2326,7 @@ export default function App() {
           competitions.get(cKey).count += 1;
         }
       }
-      const firstLegAth =
-        row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs)
-          ? row.relayLegs.map((n) => resolveMasterAthlete(n)).find(Boolean)
-          : resolveMasterAthlete(row.swimmerName);
-      const genderHint = firstLegAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
+      const genderHint = matchedAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
       if (!resolveMasterEvent(row.rawEventInput || row.eventLabel, genderHint)) {
         const eKey = `${(row.rawEventInput || row.eventLabel).trim().toLowerCase()}|${genderHint}`;
         if (!events.has(eKey)) {
@@ -2519,32 +2432,13 @@ export default function App() {
     }
 
     const updatedStaged = stagedHistoryRows.map((row) => {
-      const resolveSingleAth = (name) => {
-        const k = normalizeSwimmerKey(name);
-        return nextRoster.find(
-          (a) =>
-            normalizeSwimmerKey(a.canonicalName) === k ||
-            (a.aliases || []).some((al) => normalizeSwimmerKey(al) === k)
-        );
-      };
-
-      const isRelayRow = row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs);
-      const resolvedLegs = isRelayRow
-        ? row.relayLegs.map((legName) => {
-            const m = resolveSingleAth(legName);
-            return m ? m.canonicalName : legName;
-          })
-        : null;
-
       const key = normalizeSwimmerKey(row.swimmerName);
-      const ath = isRelayRow
-        ? row.relayLegs.map((n) => resolveSingleAth(n)).find(Boolean)
-        : resolveSingleAth(row.swimmerName);
-      const resolvedName = isRelayRow
-        ? resolvedLegs.join(', ')
-        : ath
-        ? ath.canonicalName
-        : row.swimmerName;
+      const ath = nextRoster.find(
+        (a) =>
+          normalizeSwimmerKey(a.canonicalName) === key ||
+          (a.aliases || []).some((al) => normalizeSwimmerKey(al) === key)
+      );
+      const resolvedName = ath ? ath.canonicalName : row.swimmerName;
       const genderHint = ath?.gender || swimmerGenderLookup[key] || '';
 
       const cKey = normalizeCompKey(row.competition);
@@ -2575,75 +2469,33 @@ export default function App() {
       const resolvedComp = comp ? comp.canonicalName : row.competition;
       const resolvedDate = comp?.date ? normalizeDateIso(comp.date) : row.date;
       const resolvedLocation = comp?.defaultLocation || row.location || '';
-      const resolvedEventKey = evMatch ? evMatch.eventKey : normEvKey || row.eventKey;
-      const resolvedEventLabel = evMatch
-        ? evMatch.canonicalName
-        : resolvedEventKey
-        ? toTitleEventLabel(resolvedEventKey)
-        : row.eventLabel;
-
-      const isDuplicate = historicalRecords.some(
-        (hr) =>
-          hr.swimmerKey === normalizeSwimmerKey(resolvedName) &&
-          hr.eventKey === resolvedEventKey &&
-          hr.seconds.toFixed(2) === row.seconds.toFixed(2) &&
-          hr.date === resolvedDate &&
-          (hr.round || 'Finals') === (row.round || 'Finals') &&
-          hr.place === row.place
-      );
 
       return {
         ...row,
-        ...(isRelayRow ? { relayLegs: resolvedLegs } : {}),
         swimmerName: resolvedName,
         swimmerKey: normalizeSwimmerKey(resolvedName),
         competition: resolvedComp,
         date: resolvedDate,
         dateObj: parseFlexibleDate(resolvedDate),
         location: resolvedLocation,
-        eventKey: resolvedEventKey,
-        eventLabel: resolvedEventLabel,
+        eventKey: evMatch ? evMatch.eventKey : row.eventKey,
+        eventLabel: evMatch ? evMatch.canonicalName : row.eventLabel,
         isEventMatched: Boolean(evMatch),
-        isDuplicate,
-        selected: !isDuplicate,
       };
     });
 
     setStagedHistoryRows(updatedStaged);
     setReconcileSelections({});
-    setBenchmarkStatusMsg('Reconciled Master List matches and updated staged preview.');
+    setBenchmarkStatusMsg(
+      'Reconciled unmatched athletes, competitions, and events into Master Lists.'
+    );
   };
 
-  // Commit staged rows into database (Relay rows also generate 4 individual RELAY_WIN records when Place === '1' in Finals)
+  // Commit staged rows into database
   const handleCommitStagedRows = (mode = 'append') => {
-    const chosen = [];
-
-    stagedHistoryRows
+    const chosen = stagedHistoryRows
       .filter((r) => r.selected)
-      .forEach(({ isDuplicate, selected, isEventMatched, rawEventInput, ...cleanRow }) => {
-        chosen.push(cleanRow);
-
-        if (
-          cleanRow.swimType === 'RELAY_TEAM' &&
-          Array.isArray(cleanRow.relayLegs) &&
-          String(cleanRow.place || '').trim() === '1' &&
-          String(cleanRow.round || 'Finals').toLowerCase() === 'finals'
-        ) {
-          cleanRow.relayLegs.forEach((legName, legIdx) => {
-            const legKey = normalizeSwimmerKey(legName);
-            if (!legKey) return;
-            chosen.push({
-              ...cleanRow,
-              id: `${cleanRow.id}-win-leg${legIdx + 1}`,
-              swimmerName: legName,
-              swimmerKey: legKey,
-              swimType: 'RELAY_WIN',
-              isOfficial: false,
-              splitContext: `Leg ${legIdx + 1}`,
-            });
-          });
-        }
-      });
+      .map(({ isDuplicate, selected, isEventMatched, rawEventInput, ...cleanRow }) => cleanRow);
 
     if (chosen.length === 0) {
       setBenchmarkStatusMsg('No rows selected in staging table to commit.');
@@ -2653,7 +2505,7 @@ export default function App() {
     const next = mode === 'replace' ? chosen : [...historicalRecords, ...chosen];
     updateHistoricalRecords(next, chosen, mode === 'replace');
     setBenchmarkStatusMsg(
-      `Committed ${chosen.length} verified records (${next.length} total in database).`
+      `Committed ${chosen.length} verified performances (${next.length} total in database).`
     );
     setStagedHistoryRows([]);
     setPasteSheetText('');
@@ -3891,31 +3743,10 @@ export default function App() {
                 <div className="p-5 sm:p-6 space-y-6">
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                          Paste Google Sheet Rows (TSV / CSV)
-                        </label>
-                        <div className="flex bg-slate-100 p-0.5 rounded-lg text-[11px] font-bold">
-                          {[
-                            { id: 'auto', label: 'Auto-Detect' },
-                            { id: 'individual', label: 'Individual (12-Col)' },
-                            { id: 'relay', label: 'Relays (11-Col)' },
-                          ].map((m) => (
-                            <button
-                              key={m.id}
-                              onClick={() => setSheetImportMode(m.id)}
-                              className={`px-2 py-1 rounded-md transition cursor-pointer ${
-                                sheetImportMode === m.id
-                                  ? 'bg-white text-slate-900 shadow-xs'
-                                  : 'text-slate-600 hover:text-slate-900'
-                              }`}
-                            >
-                              {m.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                        Paste 12-Column Google Sheet Rows (TSV / CSV)
+                      </label>
+                      <div className="flex items-center gap-2">
                         <input
                           ref={historyCsvInputRef}
                           type="file"
@@ -3942,23 +3773,12 @@ export default function App() {
                         </button>
                         <button
                           onClick={() => {
-                            setSheetImportMode('individual');
                             setPasteSheetText(SAMPLE_GOOGLE_SHEET_CSV);
-                            handleStageHistoryText(SAMPLE_GOOGLE_SHEET_CSV, 'individual');
+                            handleStageHistoryText(SAMPLE_GOOGLE_SHEET_CSV);
                           }}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 cursor-pointer"
                         >
-                          Sample Individual
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSheetImportMode('relay');
-                            setPasteSheetText(SAMPLE_RELAY_SHEET_CSV);
-                            handleStageHistoryText(SAMPLE_RELAY_SHEET_CSV, 'relay');
-                          }}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 cursor-pointer"
-                        >
-                          Sample Relays
+                          Load Sample Sheet Rows
                         </button>
                       </div>
                     </div>
@@ -3967,11 +3787,7 @@ export default function App() {
                       rows={5}
                       value={pasteSheetText}
                       onChange={(e) => setPasteSheetText(e.target.value)}
-                      placeholder={
-                        sheetImportMode === 'relay'
-                          ? `Names\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nDelanie McKenzie, Reilly Dolan, Morgan Puckett, Delaney Reck\t400 Medley Relay\t3\t59.68\t2026-11-07\tGettysburg PA\tGettysburg v Carnegie Mellon\t2\t3:59.68\tWomen 400 Medley Relay\t239.68`
-                          : `Name\tClass\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nAva Berry\tFr.\t1000 Free\t10\t46.20\t2026-10-24\tGettysburg PA\tGettysburg Invitational\t1\t10:46.20\tWomen 1000 Freestyle\t646.20`
-                      }
+                      placeholder={`Name\tClass\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nAva Berry\tFr.\t1000 Free\t10\t46.20\t2026-10-24\tGettysburg PA\tGettysburg Invitational\t1\t10:46.20\tWomen 1000 Freestyle\t646.20`}
                       className="w-full p-3 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     />
 
@@ -4219,75 +4035,59 @@ export default function App() {
                                     }
                                   />
                                 </td>
-                                <td className="py-2 px-3 font-semibold text-slate-800">
-                                  <div>{row.swimmerName}</div>
-                                  {row.classYear && (
-                                    <span className="text-[10px] text-slate-500 font-normal">
-                                      Class: {row.classYear}
-                                    </span>
-                                  )}
+                                <td className="py-2 px-3 font-bold text-slate-900">
+                                  {row.swimmerName}
                                 </td>
                                 <td className="py-2 px-3">{row.eventLabel}</td>
-                                <td className="py-2 px-3 font-mono font-bold">
+                                <td className="py-2 px-3 font-mono font-bold text-cyan-800">
                                   {row.time}
-                                  {row.place && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">
-                                      #{row.place}
-                                    </span>
-                                  )}
                                 </td>
                                 <td className="py-2 px-3">
                                   {row.competition || '—'}
                                   {row.round === 'Prelims' && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
                                       Prelims (SF)
                                     </span>
                                   )}
                                 </td>
-                                <td className="py-2 px-3 font-mono text-[11px]">{row.date || '—'}</td>
+                                <td className="py-2 px-3 font-mono">{row.date || '—'}</td>
                                 <td className="py-2 px-3">
-                                  {row.swimType === 'RELAY_TEAM' ? (
-                                    <span className="px-2 py-1 rounded bg-purple-100 text-purple-800 text-[11px] font-bold">
-                                      Relay Lineup (4 Legs)
-                                    </span>
-                                  ) : (
-                                    <select
-                                      value={row.swimType}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        setStagedHistoryRows((prev) =>
-                                          prev.map((item) =>
-                                            item.id === row.id
-                                              ? {
-                                                  ...item,
-                                                  swimType: val,
-                                                  place:
-                                                    val === 'RELAY_LEADOFF'
-                                                      ? 'R'
-                                                      : val === 'INTERMEDIATE_SPLIT'
-                                                      ? 'S'
-                                                      : item.place === 'R' || item.place === 'S'
-                                                      ? ''
-                                                      : item.place,
-                                                }
-                                              : item
-                                          )
-                                        );
-                                      }}
-                                      className="px-2 py-1 bg-white border border-slate-200 rounded text-[11px]"
-                                    >
-                                      <option value="OFFICIAL">Official Individual</option>
-                                      <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
-                                      <option value="INTERMEDIATE_SPLIT">
-                                        Intermediate Split (S)
-                                      </option>
-                                    </select>
-                                  )}
+                                  <select
+                                    value={row.swimType}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setStagedHistoryRows((prev) =>
+                                        prev.map((item) =>
+                                          item.id === row.id
+                                            ? {
+                                                ...item,
+                                                swimType: val,
+                                                place:
+                                                  val === 'RELAY_LEADOFF'
+                                                    ? 'R'
+                                                    : val === 'INTERMEDIATE_SPLIT'
+                                                    ? 'S'
+                                                    : item.place === 'R' || item.place === 'S'
+                                                    ? ''
+                                                    : item.place,
+                                              }
+                                            : item
+                                        )
+                                      );
+                                    }}
+                                    className="px-2 py-1 bg-white border border-slate-200 rounded text-[11px]"
+                                  >
+                                    <option value="OFFICIAL">Official Individual</option>
+                                    <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
+                                    <option value="INTERMEDIATE_SPLIT">
+                                      Intermediate Split (S)
+                                    </option>
+                                  </select>
                                 </td>
                                 <td className="py-2 px-3">
                                   {row.isDuplicate ? (
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-600">
-                                      Already in DB
+                                      Duplicate
                                     </span>
                                   ) : (
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
@@ -4307,46 +4107,99 @@ export default function App() {
 
               {/* SUB-TAB B: MASTER ROSTER */}
               {historySubTab === 'roster' && (
-                <div className="p-5 sm:p-6 space-y-6">
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                    <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
-                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                        <UserPlus className="w-4 h-4 text-cyan-600" />
-                        Add Single Athlete
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="p-5 sm:p-6 space-y-5">
+                  <div className="bg-cyan-50/50 p-4 rounded-xl border border-cyan-200/80 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-cyan-900 flex items-center gap-1.5">
+                        <UserPlus className="w-4 h-4 text-cyan-700" />
+                        Mass Roster Importer
+                      </label>
+                      <span className="text-[11px] text-cyan-800 font-medium">
+                        Columns:{' '}
+                        <code className="bg-white px-1 rounded">
+                          Name, Gender, Active (Yes/No), Aliases (semicolon-separated)
+                        </code>
+                      </span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={bulkRosterText}
+                      onChange={(e) => setBulkRosterText(e.target.value)}
+                      placeholder={`Name, Gender, Active, Aliases\nKathleen Miller, Women, Yes, Kate Miller\nDelanie McKenzie, Women, Yes, Lanie McKenzie\nCharles Schundler, Men, No, Jackson Schundler`}
+                      className="w-full p-3 text-xs font-mono bg-white border border-cyan-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <button
+                        onClick={handleBulkImportRoster}
+                        disabled={!bulkRosterText.trim()}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white transition cursor-pointer"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        Mass Import Athletes
+                      </button>
+
+                      {historicalRecords.length > 0 && (
+                        <button
+                          onClick={handleSyncMasterListsFromDatabase}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                          Sync Missing from DB
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Single Athlete Quick-Add Bar */}
+                  <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 flex-1">
+                      <div className="sm:col-span-2">
+                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                          Quick-Add Single Athlete
+                        </label>
                         <input
                           type="text"
                           value={newAthleteName}
                           onChange={(e) => setNewAthleteName(e.target.value)}
-                          placeholder="First Last (e.g. Ava Berry)"
-                          className="sm:col-span-2 px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
+                          placeholder="e.g., Kathleen Miller"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
                         />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                          Gender
+                        </label>
                         <select
                           value={newAthleteGender}
                           onChange={(e) => setNewAthleteGender(e.target.value)}
-                          className="px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
                         >
                           <option value="Women">Women</option>
                           <option value="Men">Men</option>
                         </select>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
+                      <div className="flex items-end gap-2">
+                        <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-3 py-2.5 rounded-lg cursor-pointer">
                           <input
                             type="checkbox"
                             checked={newAthleteActive}
                             onChange={(e) => setNewAthleteActive(e.target.checked)}
+                            className="rounded text-cyan-600 focus:ring-cyan-500"
                           />
-                          Currently Active Roster
+                          Active
                         </label>
                         <button
                           onClick={() => {
-                            const clean = formatSwimmerDisplayName(newAthleteName);
-                            if (!clean) return;
+                            if (!newAthleteName.trim()) return;
+                            if (resolveMasterAthlete(newAthleteName)) {
+                              setBenchmarkStatusMsg(
+                                `"${newAthleteName.trim()}" already exists in the Master Roster.`
+                              );
+                              return;
+                            }
                             const created = {
                               id: `ath-${Date.now()}`,
-                              canonicalName: clean,
+                              canonicalName: newAthleteName.trim(),
                               gender: newAthleteGender,
                               isActive: newAthleteActive,
                               aliases: [],
@@ -4354,173 +4207,268 @@ export default function App() {
                             updateMasterRoster([...masterRoster, created], [created]);
                             setNewAthleteName('');
                           }}
-                          className="px-4 py-1.5 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer"
+                          className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white transition cursor-pointer"
                         >
-                          Add Athlete
+                          Add
                         </button>
                       </div>
                     </div>
-
-                    <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-2.5">
-                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
-                        Bulk Paste Roster (Name, Gender, Active [Yes/No], Aliases)
-                      </h3>
-                      <textarea
-                        rows={3}
-                        value={bulkRosterText}
-                        onChange={(e) => setBulkRosterText(e.target.value)}
-                        placeholder={`Ava Berry\tWomen\tYes\nDelanie McKenzie\tWomen\tYes\tLanie McKenzie`}
-                        className="w-full p-2.5 text-xs font-mono bg-white border border-slate-200 rounded-lg"
-                      />
-                      <button
-                        onClick={handleBulkImportRoster}
-                        className="px-4 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
-                      >
-                        Import Roster Rows
-                      </button>
-                    </div>
                   </div>
 
-                  {/* Roster Filter Bar */}
-                  <div className="flex flex-wrap items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <div className="relative flex-1 min-w-[200px]">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        value={rosterSearchQuery}
-                        onChange={(e) => setRosterSearchQuery(e.target.value)}
-                        placeholder="Search athlete or alias..."
-                        className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg"
-                      />
+                  {/* Master Roster Table (Sorted by Last Name) */}
+                  {masterRoster.length === 0 ? (
+                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No athletes in the Master Roster yet. Use the Mass Roster Importer above or
+                      sync from your database.
                     </div>
-                    <select
-                      value={rosterFilterGender}
-                      onChange={(e) => setRosterFilterGender(e.target.value)}
-                      className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-semibold"
-                    >
-                      <option value="ALL">All Genders</option>
-                      <option value="Women">Women</option>
-                      <option value="Men">Men</option>
-                    </select>
-                    <select
-                      value={rosterFilterActive}
-                      onChange={(e) => setRosterFilterActive(e.target.value)}
-                      className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-semibold"
-                    >
-                      <option value="ALL">All Status</option>
-                      <option value="ACTIVE">Active Only</option>
-                      <option value="INACTIVE">Inactive / Alumni</option>
-                    </select>
-                  </div>
+                  ) : (
+                    (() => {
+                      const filteredRoster = masterRoster
+                        .filter((ath) => {
+                          if (rosterFilterGender !== 'ALL' && ath.gender !== rosterFilterGender) {
+                            return false;
+                          }
+                          if (rosterFilterActive === 'ACTIVE' && !ath.isActive) return false;
+                          if (rosterFilterActive === 'INACTIVE' && ath.isActive) return false;
+                          if (rosterSearchQuery.trim() !== '') {
+                            const q = rosterSearchQuery.toLowerCase();
+                            const hay = `${ath.canonicalName} ${(ath.aliases || []).join(' ')}`.toLowerCase();
+                            if (!hay.includes(q)) return false;
+                          }
+                          return true;
+                        })
+                        .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName));
 
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[460px]">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
-                        <tr>
-                          <th className="py-2.5 px-3">Canonical Name</th>
-                          <th className="py-2.5 px-3">Gender</th>
-                          <th className="py-2.5 px-3">Active Status</th>
-                          <th className="py-2.5 px-3">Known Aliases</th>
-                          <th className="py-2.5 px-3 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {masterRoster
-                          .filter((ath) => {
-                            if (rosterFilterGender !== 'ALL' && ath.gender !== rosterFilterGender)
-                              return false;
-                            if (rosterFilterActive === 'ACTIVE' && !ath.isActive) return false;
-                            if (rosterFilterActive === 'INACTIVE' && ath.isActive) return false;
-                            if (rosterSearchQuery.trim()) {
-                              const q = rosterSearchQuery.toLowerCase();
-                              const hay = `${ath.canonicalName} ${(ath.aliases || []).join(' ')}`.toLowerCase();
-                              if (!hay.includes(q)) return false;
-                            }
-                            return true;
-                          })
-                          .slice()
-                          .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
-                          .map((ath) => (
-                            <tr key={ath.id} className="hover:bg-slate-50">
-                              <td className="py-2 px-3 font-bold text-slate-900">
-                                {ath.canonicalName}
-                              </td>
-                              <td className="py-2 px-3">{ath.gender}</td>
-                              <td className="py-2 px-3">
+                      return (
+                        <div className="space-y-3">
+                          {/* Roster Filter Bar */}
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                              <div className="relative flex-1 min-w-[180px] max-w-xs">
+                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                  type="text"
+                                  value={rosterSearchQuery}
+                                  onChange={(e) => setRosterSearchQuery(e.target.value)}
+                                  placeholder="Search name or alias..."
+                                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                />
+                              </div>
+
+                              {/* Gender Filter */}
+                              <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                                {[
+                                  { id: 'ALL', label: 'All Genders' },
+                                  { id: 'Women', label: 'Women' },
+                                  { id: 'Men', label: 'Men' },
+                                ].map((opt) => (
+                                  <button
+                                    key={opt.id}
+                                    onClick={() => setRosterFilterGender(opt.id)}
+                                    className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                                      rosterFilterGender === opt.id
+                                        ? 'bg-white text-slate-900 shadow-xs'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                ))}
+                              </div>
+
+                              {/* Active Status Filter */}
+                              <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                                {[
+                                  { id: 'ALL', label: 'All Status' },
+                                  { id: 'ACTIVE', label: 'Active' },
+                                  { id: 'INACTIVE', label: 'Inactive' },
+                                ].map((opt) => (
+                                  <button
+                                    key={opt.id}
+                                    onClick={() => setRosterFilterActive(opt.id)}
+                                    className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                                      rosterFilterActive === opt.id
+                                        ? 'bg-white text-slate-900 shadow-xs'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 text-xs text-slate-600 shrink-0">
+                              <span>
+                                Showing <strong>{filteredRoster.length}</strong> of{' '}
+                                <strong>{masterRoster.length}</strong>
+                              </span>
+                              {(rosterSearchQuery ||
+                                rosterFilterGender !== 'ALL' ||
+                                rosterFilterActive !== 'ALL') && (
                                 <button
                                   onClick={() => {
-                                    const updated = { ...ath, isActive: !ath.isActive };
-                                    updateMasterRoster(
-                                      masterRoster.map((a) => (a.id === ath.id ? updated : a)),
-                                      [updated]
-                                    );
+                                    setRosterSearchQuery('');
+                                    setRosterFilterGender('ALL');
+                                    setRosterFilterActive('ALL');
                                   }}
-                                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold cursor-pointer ${
-                                    ath.isActive
-                                      ? 'bg-emerald-100 text-emerald-800'
-                                      : 'bg-slate-200 text-slate-600'
-                                  }`}
+                                  className="font-bold text-cyan-700 hover:underline cursor-pointer"
                                 >
-                                  {ath.isActive ? 'Active' : 'Alumni / Inactive'}
+                                  Reset
                                 </button>
-                              </td>
-                              <td className="py-2 px-3 text-slate-500">
-                                {(ath.aliases || []).join(', ') || '—'}
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                <button
-                                  onClick={() =>
-                                    updateMasterRoster(
-                                      masterRoster.filter((a) => a.id !== ath.id),
-                                      null,
-                                      ath.id
-                                    )
-                                  }
-                                  className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
-                                  title="Delete Athlete"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {filteredRoster.length === 0 ? (
+                            <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                              No athletes match the selected roster filters.
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                              <table className="w-full text-left text-xs">
+                                <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                                  <tr>
+                                    <th className="py-2.5 px-4">Canonical Name</th>
+                                    <th className="py-2.5 px-4">Gender</th>
+                                    <th className="py-2.5 px-4 text-center">Active</th>
+                                    <th className="py-2.5 px-4">Saved Aliases</th>
+                                    <th className="py-2.5 px-4 text-center">Remove</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {filteredRoster.map((ath) => (
+                                    <tr key={ath.id} className="hover:bg-slate-50">
+                                      <td className="py-2.5 px-4 font-bold text-slate-900">
+                                        {ath.canonicalName}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-slate-600">{ath.gender}</td>
+                                      <td className="py-2.5 px-4 text-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(ath.isActive)}
+                                          onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            const updatedItem = { ...ath, isActive: checked };
+                                            updateMasterRoster(
+                                              masterRoster.map((item) =>
+                                                item.id === ath.id ? updatedItem : item
+                                              ),
+                                              [updatedItem]
+                                            );
+                                          }}
+                                          className="rounded text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                        />
+                                      </td>
+                                      <td className="py-2.5 px-4 text-slate-500">
+                                        {(ath.aliases || []).length > 0 ? (
+                                          <div className="flex flex-wrap gap-1">
+                                            {ath.aliases.map((al) => (
+                                              <span
+                                                key={al}
+                                                className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
+                                              >
+                                                {al}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <span className="text-slate-400 italic">None</span>
+                                        )}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-center">
+                                        <button
+                                          onClick={() =>
+                                            updateMasterRoster(
+                                              masterRoster.filter((item) => item.id !== ath.id),
+                                              null,
+                                              ath.id
+                                            )
+                                          }
+                                          className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
+                  )}
                 </div>
               )}
 
               {/* SUB-TAB C: MASTER COMPETITIONS */}
               {historySubTab === 'competitions' && (
-                <div className="p-5 sm:p-6 space-y-6">
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                    <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
-                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                        <Building2 className="w-4 h-4 text-cyan-600" />
-                        Add Single Competition
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <input
-                          type="text"
-                          value={newCompName}
-                          onChange={(e) => setNewCompName(e.target.value)}
-                          placeholder="Meet Name"
-                          className="px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
-                        />
-                        <input
-                          type="date"
-                          value={newCompDate}
-                          onChange={(e) => setNewCompDate(e.target.value)}
-                          className="px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
-                        />
-                        <input
-                          type="text"
-                          value={newCompLocation}
-                          onChange={(e) => setNewCompLocation(e.target.value)}
-                          placeholder="Location (City ST)"
-                          className="px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
-                        />
-                      </div>
+                <div className="p-5 sm:p-6 space-y-5">
+                  <div className="bg-cyan-50/50 p-4 rounded-xl border border-cyan-200/80 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-cyan-900 flex items-center gap-1.5">
+                        <Building2 className="w-4 h-4 text-cyan-700" />
+                        Mass Competitions Importer (Each Competition + Date is a Unique Meet)
+                      </label>
+                      <span className="text-[11px] text-cyan-800 font-medium">
+                        Columns:{' '}
+                        <code className="bg-white px-1 rounded">
+                          Competition Name, Date (YYYY-MM-DD), Location, Aliases
+                        </code>
+                      </span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={bulkCompText}
+                      onChange={(e) => setBulkCompText(e.target.value)}
+                      placeholder={`Competition Name, Date, Location, Aliases\nGettysburg Invitational, 2026-10-24, Gettysburg PA, Gettysburg Invite\nCentennial Conference Championships, 2026-02-20, Lancaster PA, CC Championships`}
+                      className="w-full p-3 text-xs font-mono bg-white border border-cyan-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    />
+                    <button
+                      onClick={handleBulkImportCompetitions}
+                      disabled={!bulkCompText.trim()}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white transition cursor-pointer"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      Mass Import Competitions
+                    </button>
+                  </div>
+
+                  {/* Single Competition Quick-Add */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200 items-end">
+                    <div className="md:col-span-2">
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Competition Name
+                      </label>
+                      <input
+                        type="text"
+                        value={newCompName}
+                        onChange={(e) => setNewCompName(e.target.value)}
+                        placeholder="e.g., Centennial Conference Championships"
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Meet Date
+                      </label>
+                      <input
+                        type="date"
+                        value={newCompDate}
+                        onChange={(e) => setNewCompDate(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newCompLocation}
+                        onChange={(e) => setNewCompLocation(e.target.value)}
+                        placeholder="Location (e.g., Lancaster PA)"
+                        className="flex-1 px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg"
+                      />
                       <button
                         onClick={() => {
                           if (!newCompName.trim()) return;
@@ -4536,165 +4484,199 @@ export default function App() {
                           setNewCompDate('');
                           setNewCompLocation('');
                         }}
-                        className="px-4 py-1.5 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer"
+                        className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
                       >
-                        Add Competition
-                      </button>
-                    </div>
-
-                    <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-2.5">
-                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
-                        Bulk Paste Competitions (Name, Date [YYYY-MM-DD], Location, Aliases)
-                      </h3>
-                      <textarea
-                        rows={3}
-                        value={bulkCompText}
-                        onChange={(e) => setBulkCompText(e.target.value)}
-                        placeholder={`Gettysburg Invitational\t2026-10-24\tGettysburg PA`}
-                        className="w-full p-2.5 text-xs font-mono bg-white border border-slate-200 rounded-lg"
-                      />
-                      <button
-                        onClick={handleBulkImportCompetitions}
-                        className="px-4 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
-                      >
-                        Import Competitions
+                        Add
                       </button>
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[420px]">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
-                        <tr>
-                          <th className="py-2.5 px-3">Canonical Competition</th>
-                          <th className="py-2.5 px-3">Date</th>
-                          <th className="py-2.5 px-3">Default Location</th>
-                          <th className="py-2.5 px-3">Aliases</th>
-                          <th className="py-2.5 px-3 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {masterCompetitions
-                          .slice()
-                          .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-                          .map((c) => (
-                            <tr key={c.id} className="hover:bg-slate-50">
-                              <td className="py-2 px-3 font-bold text-slate-900">
-                                {c.canonicalName}
-                              </td>
-                              <td className="py-2 px-3 font-mono">{c.date || 'Any Date'}</td>
-                              <td className="py-2 px-3 text-slate-600">
-                                {c.defaultLocation || '—'}
-                              </td>
-                              <td className="py-2 px-3 text-slate-500">
-                                {(c.aliases || []).join(', ') || '—'}
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                <button
-                                  onClick={() =>
-                                    updateMasterCompetitions(
-                                      masterCompetitions.filter((x) => x.id !== c.id),
-                                      null,
-                                      c.id
-                                    )
-                                  }
-                                  className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  {masterCompetitions.length === 0 ? (
+                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No competitions in Master Competitions yet.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                          <tr>
+                            <th className="py-2.5 px-4">Canonical Competition</th>
+                            <th className="py-2.5 px-4">Date</th>
+                            <th className="py-2.5 px-4">Default Location</th>
+                            <th className="py-2.5 px-4">Saved Aliases</th>
+                            <th className="py-2.5 px-4 text-center">Remove</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {masterCompetitions
+                            .slice()
+                            .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+                            .map((comp) => (
+                              <tr key={comp.id} className="hover:bg-slate-50">
+                                <td className="py-2.5 px-4 font-bold text-slate-900">
+                                  {comp.canonicalName}
+                                </td>
+                                <td className="py-2.5 px-4 font-mono text-slate-600">
+                                  {comp.date || 'Any Date'}
+                                </td>
+                                <td className="py-2.5 px-4 text-slate-600">
+                                  {comp.defaultLocation || '—'}
+                                </td>
+                                <td className="py-2.5 px-4 text-slate-500">
+                                  {(comp.aliases || []).length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {comp.aliases.map((al) => (
+                                        <span
+                                          key={al}
+                                          className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
+                                        >
+                                          {al}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400 italic">None</span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-4 text-center">
+                                  <button
+                                    onClick={() =>
+                                      updateMasterCompetitions(
+                                        masterCompetitions.filter((item) => item.id !== comp.id),
+                                        null,
+                                        comp.id
+                                      )
+                                    }
+                                    className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* SUB-TAB D: MASTER EVENTS */}
+              {/* SUB-TAB C2: MASTER EVENTS */}
               {historySubTab === 'events' && (
                 <div className="p-5 sm:p-6 space-y-5">
-                  <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 flex flex-wrap items-end gap-3">
-                    <div className="flex-1 min-w-[200px]">
-                      <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row md:items-end gap-3">
+                    <div className="flex-1">
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
                         Canonical Event Name
                       </label>
                       <input
                         type="text"
                         value={newEventName}
                         onChange={(e) => setNewEventName(e.target.value)}
-                        placeholder="e.g. Women 100 Backstroke"
-                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
+                        placeholder="e.g., Women 100 Freestyle"
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
                       />
                     </div>
-                    <div className="flex-1 min-w-[200px]">
-                      <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
-                        Optional Alias (e.g. 100 Back)
+                    <div className="flex-1">
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Optional Alias (e.g., W 100 Free)
                       </label>
                       <input
                         type="text"
                         value={newEventAlias}
                         onChange={(e) => setNewEventAlias(e.target.value)}
-                        placeholder="Comma-separated aliases"
-                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
+                        placeholder="e.g., W 100 Free"
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
                       />
                     </div>
                     <button
                       onClick={() => {
-                        if (!newEventName.trim()) return;
-                        const clean = newEventName.trim();
-                        const aliases = newEventAlias
-                          .split(',')
-                          .map((a) => a.trim())
-                          .filter(Boolean);
-                        const created = {
-                          id: `ev-${Date.now()}`,
-                          canonicalName: clean,
-                          eventKey: normalizeEventKey(clean) || clean.toLowerCase(),
-                          gender: clean.toLowerCase().startsWith('men') ? 'Men' : 'Women',
-                          isRelay: clean.toLowerCase().includes('relay'),
-                          aliases,
-                        };
-                        updateMasterEvents([...masterEvents, created], [created]);
+                        const cleanName = newEventName.trim();
+                        if (!cleanName) return;
+                        const evKey = normalizeEventKey(cleanName) || cleanName.toLowerCase();
+                        const existing = masterEvents.find(
+                          (ev) => ev.canonicalName.toLowerCase() === cleanName.toLowerCase()
+                        );
+                        if (existing) {
+                          if (newEventAlias.trim()) {
+                            const updated = {
+                              ...existing,
+                              aliases: Array.from(
+                                new Set([...(existing.aliases || []), newEventAlias.trim()])
+                              ),
+                            };
+                            updateMasterEvents(
+                              masterEvents.map((e) => (e.id === existing.id ? updated : e)),
+                              [updated]
+                            );
+                          }
+                        } else {
+                          const created = {
+                            id: `ev-${Date.now()}`,
+                            canonicalName: cleanName,
+                            eventKey: evKey,
+                            gender: cleanName.toLowerCase().startsWith('men') ? 'Men' : 'Women',
+                            isRelay: cleanName.toLowerCase().includes('relay'),
+                            aliases: newEventAlias.trim() ? [newEventAlias.trim()] : [],
+                          };
+                          updateMasterEvents([...masterEvents, created], [created]);
+                        }
                         setNewEventName('');
                         setNewEventAlias('');
                       }}
-                      className="px-4 py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer"
+                      className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
                     >
-                      Add Event
+                      Save Event / Alias
                     </button>
                   </div>
 
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[420px]">
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
+                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
                         <tr>
-                          <th className="py-2.5 px-3">Canonical Event</th>
-                          <th className="py-2.5 px-3">Gender</th>
-                          <th className="py-2.5 px-3">Aliases</th>
-                          <th className="py-2.5 px-3 text-right">Actions</th>
+                          <th className="py-2.5 px-4">Canonical Event</th>
+                          <th className="py-2.5 px-4">Gender</th>
+                          <th className="py-2.5 px-4">Type</th>
+                          <th className="py-2.5 px-4">Saved Aliases</th>
+                          <th className="py-2.5 px-4 text-center">Remove</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {masterEvents.map((ev) => (
                           <tr key={ev.id} className="hover:bg-slate-50">
-                            <td className="py-2 px-3 font-bold text-slate-900">
+                            <td className="py-2.5 px-4 font-bold text-slate-900">
                               {ev.canonicalName}
                             </td>
-                            <td className="py-2 px-3">{ev.gender}</td>
-                            <td className="py-2 px-3 text-slate-500">
-                              {(ev.aliases || []).join(', ') || '—'}
+                            <td className="py-2.5 px-4 text-slate-600">{ev.gender}</td>
+                            <td className="py-2.5 px-4 text-slate-600">
+                              {ev.isRelay ? 'Relay' : 'Individual'}
                             </td>
-                            <td className="py-2 px-3 text-right">
+                            <td className="py-2.5 px-4 text-slate-500">
+                              {(ev.aliases || []).length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {ev.aliases.map((al) => (
+                                    <span
+                                      key={al}
+                                      className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
+                                    >
+                                      {al}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 italic">Auto-normalized</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-4 text-center">
                               <button
                                 onClick={() =>
                                   updateMasterEvents(
-                                    masterEvents.filter((x) => x.id !== ev.id),
+                                    masterEvents.filter((item) => item.id !== ev.id),
                                     null,
                                     ev.id
                                   )
                                 }
-                                className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
+                                className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -4707,351 +4689,451 @@ export default function App() {
                 </div>
               )}
 
-              {/* SUB-TAB E: COMMITTED DATABASE (FILTER, SORT, PAGINATION & BULK DELETE) */}
+              {/* SUB-TAB D: COMMITTED DATABASE */}
               {historySubTab === 'database' && (
                 <div className="p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs text-slate-600">
-                      Showing <strong>{paginatedDbRecords.length}</strong> of{' '}
-                      <strong>{filteredSortedDbRecords.length}</strong> filtered records (
-                      {historicalRecords.length} total in DB)
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs font-bold text-slate-700">
+                      {filteredSortedDbRecords.length === historicalRecords.length
+                        ? `${historicalRecords.length} total committed records`
+                        : `Showing ${filteredSortedDbRecords.length} matching records (of ${historicalRecords.length} total)`}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={handleSyncMasterListsFromDatabase}
-                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 cursor-pointer"
-                      >
-                        Sync Missing Athletes/Meets to Master Lists
-                      </button>
-                      <button
-                        onClick={handleExportMasterCsv}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        Export Master CSV
-                      </button>
+                      {historicalRecords.length > 0 && (
+                        <>
+                          <button
+                            onClick={handleExportMasterCsv}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5 text-cyan-400" />
+                            Export Master CSV
+                          </button>
+                          <button
+                            onClick={() => {
+                              updateHistoricalRecords([], null, true);
+                              setBenchmarkStatusMsg('Cleared historical benchmark database.');
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-200 transition cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Clear Entire Database
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
                   {/* Multi-Field Filter Bar */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <input
-                      type="text"
-                      value={dbSearchName}
-                      onChange={(e) => {
-                        setDbSearchName(e.target.value);
-                        setDbPage(1);
-                      }}
-                      placeholder="Filter athlete name..."
-                      className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg"
-                    />
-                    <select
-                      value={dbFilterEvent}
-                      onChange={(e) => {
-                        setDbFilterEvent(e.target.value);
-                        setDbPage(1);
-                      }}
-                      className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg"
-                    >
-                      <option value="ALL">All Events ({dbFilterOptions.events.length})</option>
-                      {dbFilterOptions.events.map((ev) => (
-                        <option key={ev} value={ev}>
-                          {ev}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={dbFilterCompetition}
-                      onChange={(e) => {
-                        setDbFilterCompetition(e.target.value);
-                        setDbPage(1);
-                      }}
-                      className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg"
-                    >
-                      <option value="ALL">
-                        All Competitions ({dbFilterOptions.competitions.length})
-                      </option>
-                      {dbFilterOptions.competitions.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="text"
-                      value={dbFilterDate}
-                      onChange={(e) => {
-                        setDbFilterDate(e.target.value);
-                        setDbPage(1);
-                      }}
-                      placeholder="Date (YYYY or YYYY-MM-DD)"
-                      className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg"
-                    />
-                    <select
-                      value={dbFilterType}
-                      onChange={(e) => {
-                        setDbFilterType(e.target.value);
-                        setDbPage(1);
-                      }}
-                      className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg"
-                    >
-                      <option value="ALL">All Record Types</option>
-                      <option value="OFFICIAL">Official Individual</option>
-                      <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
-                      <option value="INTERMEDIATE_SPLIT">Intermediate Split (S)</option>
-                      <option value="RELAY_WIN">Relay Team / Win</option>
-                    </select>
-                    <button
-                      onClick={() => {
-                        setDbSearchName('');
-                        setDbFilterEvent('ALL');
-                        setDbFilterCompetition('ALL');
-                        setDbFilterDate('');
-                        setDbFilterType('ALL');
-                        setDbPage(1);
-                      }}
-                      className="px-3 py-1.5 text-xs font-bold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg cursor-pointer"
-                    >
-                      Reset Filters
-                    </button>
-                  </div>
-
-                  {/* Bulk Delete Bar */}
-                  {(selectedDbIds.size > 0 || filteredSortedDbRecords.length < historicalRecords.length) &&
-                    filteredSortedDbRecords.length > 0 && (
-                      <div className="bg-slate-900 text-white px-4 py-2.5 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <span>
-                          {selectedDbIds.size > 0
-                            ? `${selectedDbIds.size} row(s) selected`
-                            : `${filteredSortedDbRecords.length} filtered record(s) matched`}
-                        </span>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {selectedDbIds.size > 0 && (
-                            <button
-                              onClick={() => setPendingDbDeleteIds(Array.from(selectedDbIds))}
-                              className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-500 font-bold cursor-pointer"
-                            >
-                              Delete Selected ({selectedDbIds.size})
-                            </button>
-                          )}
-                          {filteredSortedDbRecords.length < historicalRecords.length && (
-                            <button
-                              onClick={() =>
-                                setPendingDbDeleteIds(filteredSortedDbRecords.map((r) => r.id))
-                              }
-                              className="px-3 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-400/30 font-bold cursor-pointer"
-                            >
-                              Delete All {filteredSortedDbRecords.length} Filtered Records
-                            </button>
-                          )}
+                  {historicalRecords.length > 0 && (
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={dbSearchName}
+                            onChange={(e) => {
+                              setDbSearchName(e.target.value);
+                              setDbPage(1);
+                            }}
+                            placeholder="Filter by athlete name..."
+                            className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                          />
                         </div>
-                      </div>
-                    )}
 
-                  {/* Two-Step Inline Confirmation Banner */}
+                        <select
+                          value={dbFilterEvent}
+                          onChange={(e) => {
+                            setDbFilterEvent(e.target.value);
+                            setDbPage(1);
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                          <option value="ALL">All Events ({dbFilterOptions.events.length})</option>
+                          {dbFilterOptions.events.map((ev) => (
+                            <option key={ev} value={ev}>
+                              {ev}
+                            </option>
+                          ))}
+                        </select>
+
+                        <select
+                          value={dbFilterCompetition}
+                          onChange={(e) => {
+                            setDbFilterCompetition(e.target.value);
+                            setDbPage(1);
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                          <option value="ALL">
+                            All Competitions ({dbFilterOptions.competitions.length})
+                          </option>
+                          {dbFilterOptions.competitions.map((comp) => (
+                            <option key={comp} value={comp}>
+                              {comp}
+                            </option>
+                          ))}
+                        </select>
+
+                        <input
+                          type="text"
+                          value={dbFilterDate}
+                          onChange={(e) => {
+                            setDbFilterDate(e.target.value);
+                            setDbPage(1);
+                          }}
+                          placeholder="Filter date (e.g., 2026 or 2026-02)"
+                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        />
+
+                        <select
+                          value={dbFilterType}
+                          onChange={(e) => {
+                            setDbFilterType(e.target.value);
+                            setDbPage(1);
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                          <option value="ALL">All Record Types</option>
+                          <option value="OFFICIAL">Official Individual</option>
+                          <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
+                          <option value="INTERMEDIATE_SPLIT">Intermediate Split (S)</option>
+                          <option value="RELAY_WIN">Relay Win</option>
+                        </select>
+                      </div>
+
+                      {(dbSearchName ||
+                        dbFilterEvent !== 'ALL' ||
+                        dbFilterCompetition !== 'ALL' ||
+                        dbFilterDate ||
+                        dbFilterType !== 'ALL') && (
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <button
+                            onClick={() =>
+                              setPendingDbDeleteIds(filteredSortedDbRecords.map((r) => r.id))
+                            }
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            Delete All {filteredSortedDbRecords.length} Filtered Records
+                          </button>
+                          <button
+                            onClick={() => {
+                              setDbSearchName('');
+                              setDbFilterEvent('ALL');
+                              setDbFilterCompetition('ALL');
+                              setDbFilterDate('');
+                              setDbFilterType('ALL');
+                              setDbPage(1);
+                            }}
+                            className="text-[11px] font-bold text-cyan-700 hover:underline cursor-pointer"
+                          >
+                            Reset All Filters
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Selected Rows Action Bar */}
+                  {selectedDbIds.size > 0 && (
+                    <div className="bg-slate-900 text-white px-4 py-2.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-cyan-300">
+                          {selectedDbIds.size} record{selectedDbIds.size === 1 ? '' : 's'} selected
+                        </span>
+                        <button
+                          onClick={() => setSelectedDbIds(new Set())}
+                          className="text-slate-300 hover:text-white underline cursor-pointer"
+                        >
+                          Clear selection
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => setPendingDbDeleteIds(Array.from(selectedDbIds))}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold bg-red-600 hover:bg-red-500 text-white transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete Selected ({selectedDbIds.size})
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Inline Two-Step Delete Confirmation Banner */}
                   {pendingDbDeleteIds && pendingDbDeleteIds.length > 0 && (
-                    <div className="bg-red-50 border border-red-300 text-red-950 px-4 py-3 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs">
-                      <span className="font-bold">
-                        Permanently delete {pendingDbDeleteIds.length} record
-                        {pendingDbDeleteIds.length === 1 ? '' : 's'} from local cache & Firestore?
-                      </span>
+                    <div className="bg-red-50 border border-red-300 text-red-950 px-4 py-3 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                        <span>
+                          Permanently delete{' '}
+                          <strong>
+                            {pendingDbDeleteIds.length} database record
+                            {pendingDbDeleteIds.length === 1 ? '' : 's'}
+                          </strong>{' '}
+                          from local storage and Firestore?
+                        </span>
+                      </div>
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => handleDeleteDbRecords(pendingDbDeleteIds)}
-                          className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-extrabold cursor-pointer"
-                        >
-                          Confirm Delete
-                        </button>
-                        <button
                           onClick={() => setPendingDbDeleteIds(null)}
-                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 font-semibold text-slate-700 cursor-pointer"
+                          className="px-3 py-1.5 rounded-lg font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
                         >
                           Cancel
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDbRecords(pendingDbDeleteIds)}
+                          className="px-3.5 py-1.5 rounded-lg font-extrabold bg-red-600 hover:bg-red-500 text-white cursor-pointer"
+                        >
+                          Yes, Delete Permanently
                         </button>
                       </div>
                     </div>
                   )}
 
-                  {/* Paginated Database Table */}
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[500px]">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
-                        <tr>
-                          <th className="py-2.5 px-3 w-8">
-                            <input
-                              type="checkbox"
-                              checked={
-                                paginatedDbRecords.length > 0 &&
-                                paginatedDbRecords.every((r) => selectedDbIds.has(r.id))
-                              }
-                              onChange={(e) => {
-                                setSelectedDbIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (e.target.checked) {
-                                    paginatedDbRecords.forEach((r) => next.add(r.id));
-                                  } else {
-                                    paginatedDbRecords.forEach((r) => next.delete(r.id));
+                  {historicalRecords.length === 0 ? (
+                    <div className="text-center py-12 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No historical performances committed yet. Import rows from Google Sheets in
+                      the first tab or commit a `.cl2` meet in Post-Meet Tools.
+                    </div>
+                  ) : filteredSortedDbRecords.length === 0 ? (
+                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No database records match your active filters.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[540px]">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0 z-10">
+                            <tr>
+                              <th className="py-2.5 px-3 w-9">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    paginatedDbRecords.length > 0 &&
+                                    paginatedDbRecords.every((r) => selectedDbIds.has(r.id))
                                   }
-                                  return next;
-                                });
-                              }}
-                            />
-                          </th>
-                          <th
-                            onClick={() => handleDbSort('swimmerName')}
-                            className="py-2.5 px-3 cursor-pointer hover:text-slate-900"
-                          >
-                            Athlete ↕
-                          </th>
-                          <th
-                            onClick={() => handleDbSort('eventLabel')}
-                            className="py-2.5 px-3 cursor-pointer hover:text-slate-900"
-                          >
-                            Event ↕
-                          </th>
-                          <th
-                            onClick={() => handleDbSort('time')}
-                            className="py-2.5 px-3 cursor-pointer hover:text-slate-900"
-                          >
-                            Time ↕
-                          </th>
-                          <th
-                            onClick={() => handleDbSort('competition')}
-                            className="py-2.5 px-3 cursor-pointer hover:text-slate-900"
-                          >
-                            Competition ↕
-                          </th>
-                          <th
-                            onClick={() => handleDbSort('date')}
-                            className="py-2.5 px-3 cursor-pointer hover:text-slate-900"
-                          >
-                            Date ↕
-                          </th>
-                          <th
-                            onClick={() => handleDbSort('type')}
-                            className="py-2.5 px-3 cursor-pointer hover:text-slate-900"
-                          >
-                            Type ↕
-                          </th>
-                          <th className="py-2.5 px-3 text-right">Del</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {paginatedDbRecords.map((r) => (
-                          <tr key={r.id} className="hover:bg-slate-50">
-                            <td className="py-2 px-3">
-                              <input
-                                type="checkbox"
-                                checked={selectedDbIds.has(r.id)}
-                                onChange={(e) => {
-                                  setSelectedDbIds((prev) => {
-                                    const next = new Set(prev);
-                                    if (e.target.checked) next.add(r.id);
-                                    else next.delete(r.id);
-                                    return next;
-                                  });
-                                }}
-                              />
-                            </td>
-                            <td className="py-2 px-3 font-bold text-slate-900">
-                              {r.swimmerName}
-                              {r.classYear && (
-                                <span className="ml-1.5 text-[10px] font-normal text-slate-500">
-                                  ({r.classYear})
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3">{r.eventLabel}</td>
-                            <td className="py-2 px-3 font-mono font-bold">
-                              {r.time}
-                              {r.place && (
-                                <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">
-                                  #{r.place}
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3">
-                              {r.competition || '—'}
-                              {r.round === 'Prelims' && (
-                                <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
-                                  Prelims (SF)
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 font-mono text-[11px]">{r.date || '—'}</td>
-                            <td className="py-2 px-3">
-                              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold">
-                                {r.swimType || 'OFFICIAL'}
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 text-right">
-                              <button
-                                onClick={() => handleDeleteDbRecords([r.id])}
-                                className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
-                                title="Delete Record"
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setSelectedDbIds((prev) => {
+                                      const next = new Set(prev);
+                                      paginatedDbRecords.forEach((r) => {
+                                        if (checked) next.add(r.id);
+                                        else next.delete(r.id);
+                                      });
+                                      return next;
+                                    });
+                                  }}
+                                  title="Select all rows on this page"
+                                  className="rounded text-cyan-600 cursor-pointer"
+                                />
+                              </th>
+                              <th
+                                onClick={() => handleDbSort('swimmerName')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Athlete</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th className="py-2.5 px-3">Class</th>
+                              <th
+                                onClick={() => handleDbSort('eventLabel')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Event</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th
+                                onClick={() => handleDbSort('time')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Time</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th
+                                onClick={() => handleDbSort('competition')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Competition</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th
+                                onClick={() => handleDbSort('date')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Date</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th
+                                onClick={() => handleDbSort('type')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Type</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th className="py-2.5 px-3 text-center w-14">Delete</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {paginatedDbRecords.map((r) => {
+                              const isChecked = selectedDbIds.has(r.id);
+                              return (
+                                <tr
+                                  key={r.id}
+                                  className={
+                                    isChecked ? 'bg-cyan-50/60' : 'hover:bg-slate-50'
+                                  }
+                                >
+                                  <td className="py-2 px-3">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setSelectedDbIds((prev) => {
+                                          const next = new Set(prev);
+                                          if (checked) next.add(r.id);
+                                          else next.delete(r.id);
+                                          return next;
+                                        });
+                                      }}
+                                      className="rounded text-cyan-600 cursor-pointer"
+                                    />
+                                  </td>
+                                  <td className="py-2 px-3 font-bold text-slate-900">
+                                    {r.swimmerName}
+                                  </td>
+                                  <td className="py-2 px-3">{r.classYear || '—'}</td>
+                                  <td className="py-2 px-3">{r.eventLabel}</td>
+                                  <td className="py-2 px-3 font-mono font-bold text-cyan-800">
+                                    {r.time}
+                                  </td>
+                                  <td className="py-2 px-3 text-slate-600">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <span>{r.competition || '—'}</span>
+                                      {r.round === 'Prelims' && (
+                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                          Prelims (SF)
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-2 px-3 font-mono text-slate-500">
+                                    {r.date || '—'}
+                                  </td>
+                                  <td className="py-2 px-3">
+                                    {r.swimType === 'RELAY_LEADOFF' ||
+                                    r.place === 'R' ||
+                                    r.place === 'LR' ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800">
+                                        Relay Lead-Off (R)
+                                      </span>
+                                    ) : r.swimType === 'INTERMEDIATE_SPLIT' || r.place === 'S' ? (
+                                      <span
+                                        title={r.splitContext || 'Intermediate Distance Split'}
+                                        className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900"
+                                      >
+                                        Split (S){r.splitContext ? ` • ${r.splitContext}` : ''}
+                                      </span>
+                                    ) : r.swimType === 'RELAY_WIN' ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
+                                        Relay Win{r.splitContext ? ` • ${r.splitContext}` : ''}
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                        Official
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-2 px-3 text-center">
+                                    <button
+                                      onClick={() => handleDeleteDbRecords([r.id])}
+                                      title="Delete this record"
+                                      className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
 
-                  {/* Pagination Footer */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-600">Rows per page:</span>
-                      <select
-                        value={dbPageSize}
-                        onChange={(e) => {
-                          setDbPageSize(Number(e.target.value));
-                          setDbPage(1);
-                        }}
-                        className="px-2 py-1 bg-white border border-slate-200 rounded-lg font-semibold"
-                      >
-                        {[50, 100, 250, 500].map((sz) => (
-                          <option key={sz} value={sz}>
-                            {sz}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        disabled={safeDbPage <= 1}
-                        onClick={() => setDbPage(1)}
-                        className="px-2.5 py-1 rounded-lg border border-slate-200 disabled:opacity-40 cursor-pointer"
-                      >
-                        First
-                      </button>
-                      <button
-                        disabled={safeDbPage <= 1}
-                        onClick={() => setDbPage((p) => Math.max(1, p - 1))}
-                        className="px-2.5 py-1 rounded-lg border border-slate-200 disabled:opacity-40 cursor-pointer"
-                      >
-                        Prev
-                      </button>
-                      <span className="px-3 font-bold text-slate-700">
-                        Page {safeDbPage} of {dbTotalPages}
-                      </span>
-                      <button
-                        disabled={safeDbPage >= dbTotalPages}
-                        onClick={() => setDbPage((p) => Math.min(dbTotalPages, p + 1))}
-                        className="px-2.5 py-1 rounded-lg border border-slate-200 disabled:opacity-40 cursor-pointer"
-                      >
-                        Next
-                      </button>
-                      <button
-                        disabled={safeDbPage >= dbTotalPages}
-                        onClick={() => setDbPage(dbTotalPages)}
-                        className="px-2.5 py-1 rounded-lg border border-slate-200 disabled:opacity-40 cursor-pointer"
-                      >
-                        Last
-                      </button>
-                    </div>
-                  </div>
+                      {/* Pagination Bar */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 text-xs text-slate-600">
+                        <div className="flex items-center gap-2">
+                          <span>
+                            Showing{' '}
+                            <strong>
+                              {(safeDbPage - 1) * dbPageSize + 1}–
+                              {Math.min(safeDbPage * dbPageSize, filteredSortedDbRecords.length)}
+                            </strong>{' '}
+                            of <strong>{filteredSortedDbRecords.length}</strong> records
+                          </span>
+                          <select
+                            value={dbPageSize}
+                            onChange={(e) => {
+                              setDbPageSize(Number(e.target.value));
+                              setDbPage(1);
+                            }}
+                            className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold"
+                          >
+                            <option value={50}>50 / page</option>
+                            <option value={100}>100 / page</option>
+                            <option value={250}>250 / page</option>
+                            <option value={500}>500 / page</option>
+                          </select>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => setDbPage(1)}
+                            disabled={safeDbPage <= 1}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
+                          >
+                            First
+                          </button>
+                          <button
+                            onClick={() => setDbPage((p) => Math.max(1, p - 1))}
+                            disabled={safeDbPage <= 1}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
+                          >
+                            Prev
+                          </button>
+                          <span className="px-3 py-1.5 font-bold text-slate-800">
+                            Page {safeDbPage} of {dbTotalPages}
+                          </span>
+                          <button
+                            onClick={() => setDbPage((p) => Math.min(dbTotalPages, p + 1))}
+                            disabled={safeDbPage >= dbTotalPages}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
+                          >
+                            Next
+                          </button>
+                          <button
+                            onClick={() => setDbPage(dbTotalPages)}
+                            disabled={safeDbPage >= dbTotalPages}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
+                          >
+                            Last
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -5059,39 +5141,65 @@ export default function App() {
         )}
 
         {/* ==================================================================== */}
-        {/* SECTION 2: RECORDS & ALL-TIME TOP-10 LISTS + CAREER WINS             */}
+        {/* SECTION 2: PROGRAM RECORD BOOK & ALL-TIME TOP-10                     */}
         {/* ==================================================================== */}
         {activeSection === 'records' && (
           <div className="space-y-6">
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-5 sm:px-6 py-4 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-5">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
                 <div>
-                  <h2 className="text-base sm:text-lg font-extrabold flex items-center gap-2">
-                    <Trophy className="w-5 h-5 text-amber-400" />
-                    Program Record Book & All-Time Lists
+                  <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 flex items-center gap-2">
+                    <Trophy className="w-5 h-5 text-amber-500" />
+                    {recordBookSubTab === 'top10'
+                      ? 'Program All-Time Top-10 & Freshman Record Book'
+                      : `All-Time Career Wins Leaderboard (${recordBookGender})`}
                   </h2>
-                  <p className="text-xs text-slate-300 mt-0.5">
-                    Live All-Time Top-10 times, Freshman records, and Career Event Wins computed
-                    from your database.
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {recordBookSubTab === 'top10'
+                      ? `Ranked exclusively from official individual swims, relay lead-offs (R), & intermediate splits (S) (${recordBookData.totalMatchedCount} official marks matched for this event).`
+                      : 'Ranked by 1st-place Finals victories across Individual and Relay events (Prelims/SF excluded).'}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex bg-slate-800 p-1 rounded-xl text-xs font-bold">
+                  {/* View Toggle: Event Top-10 vs All-Time Wins */}
+                  <div className="flex bg-slate-100 p-1 rounded-xl">
+                    <button
+                      onClick={() => setRecordBookSubTab('top10')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        recordBookSubTab === 'top10'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600'
+                      }`}
+                    >
+                      Event Top-10
+                    </button>
+                    <button
+                      onClick={() => setRecordBookSubTab('wins')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        recordBookSubTab === 'wins'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600'
+                      }`}
+                    >
+                      All-Time Wins
+                    </button>
+                  </div>
+
+                  {/* Gender Toggle */}
+                  <div className="flex bg-slate-100 p-1 rounded-xl">
                     {['Women', 'Men'].map((g) => (
                       <button
                         key={g}
                         onClick={() => {
                           setRecordBookGender(g);
-                          const prefix = g.toLowerCase();
-                          if (!recordBookEventKey.startsWith(prefix)) {
-                            setRecordBookEventKey(`${prefix} 50 freestyle`);
-                          }
+                          const firstEv = CANONICAL_EVENTS.find((e) => e.startsWith(g));
+                          if (firstEv) setRecordBookEventKey(firstEv.toLowerCase());
                         }}
-                        className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                           recordBookGender === g
-                            ? 'bg-amber-500 text-slate-950 shadow-sm'
-                            : 'text-slate-300 hover:text-white'
+                            ? 'bg-white text-slate-900 shadow-sm'
+                            : 'text-slate-600'
                         }`}
                       >
                         {g}
@@ -5099,171 +5207,211 @@ export default function App() {
                     ))}
                   </div>
 
-                  <div className="flex bg-slate-800 p-1 rounded-xl text-xs font-bold">
-                    {[
-                      { id: 'top10', label: 'Event Top-10' },
-                      { id: 'wins', label: 'All-Time Wins' },
-                    ].map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => setRecordBookSubTab(t.id)}
-                        className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                          recordBookSubTab === t.id
-                            ? 'bg-cyan-600 text-white shadow-sm'
-                            : 'text-slate-300 hover:text-white'
-                        }`}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {recordBookSubTab === 'top10' ? (
-                <div className="p-5 sm:p-6 space-y-6">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+                  {recordBookSubTab === 'top10' ? (
                     <select
                       value={recordBookEventKey}
                       onChange={(e) => setRecordBookEventKey(e.target.value)}
-                      className="px-3.5 py-2 text-sm font-bold bg-slate-50 border border-slate-200 rounded-xl"
+                      className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     >
-                      {CANONICAL_EVENTS.filter((ev) =>
-                        ev.toLowerCase().startsWith(recordBookGender.toLowerCase())
-                      ).map((ev) => (
+                      {CANONICAL_EVENTS.filter((e) => e.startsWith(recordBookGender)).map((ev) => (
                         <option key={ev} value={ev.toLowerCase()}>
                           {ev}
                         </option>
                       ))}
                     </select>
+                  ) : (
+                    <>
+                      <select
+                        value={winsCompetitionFilter}
+                        onChange={(e) => setWinsCompetitionFilter(e.target.value)}
+                        className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500 max-w-[240px]"
+                      >
+                        <option value="ALL">All Competitions (Career Total)</option>
+                        {recurringCompetitionsList.map((compName) => (
+                          <option key={compName} value={compName}>
+                            {compName}
+                          </option>
+                        ))}
+                      </select>
+                      <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={winsActiveOnly}
+                          onChange={(e) => setWinsActiveOnly(e.target.checked)}
+                          className="rounded text-cyan-600"
+                        />
+                        Active Roster Only
+                      </label>
+                    </>
+                  )}
+                </div>
+              </div>
 
+              {recordBookSubTab === 'top10' ? (
+                <>
+                  {/* Freshman Record Spotlight Card */}
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
+                        <Star className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                          Program Freshman Record ({toTitleEventLabel(recordBookEventKey)})
+                        </div>
+                        {recordBookData.freshmanRecord ? (
+                          <div className="text-sm sm:text-base font-extrabold text-slate-900">
+                            {recordBookData.freshmanRecord.swimmerName} —{' '}
+                            <span className="font-mono text-amber-800">
+                              {recordBookData.freshmanRecord.time}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-xs text-slate-600">
+                            No official Freshman (`FR`) mark recorded for this event yet.
+                          </div>
+                        )}
+                      </div>
+                    </div>
                     {recordBookData.freshmanRecord && (
-                      <div className="px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 text-xs">
-                        <span className="font-extrabold text-amber-900">Freshman Record: </span>
-                        <span className="font-mono font-bold text-amber-800">
-                          {recordBookData.freshmanRecord.time}
-                        </span>{' '}
-                        — {recordBookData.freshmanRecord.swimmerName} (
-                        {recordBookData.freshmanRecord.date})
+                      <div className="text-xs text-amber-900 font-medium">
+                        {recordBookData.freshmanRecord.competition} •{' '}
+                        {recordBookData.freshmanRecord.date}
                       </div>
                     )}
                   </div>
 
-                  {/* All-Time Top-10 Table */}
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
-                        <tr>
-                          <th className="py-2.5 px-3 w-14">Rank</th>
-                          <th className="py-2.5 px-3">Athlete / Lineup</th>
-                          <th className="py-2.5 px-3">Time</th>
-                          <th className="py-2.5 px-3">Class</th>
-                          <th className="py-2.5 px-3">Competition</th>
-                          <th className="py-2.5 px-3">Date</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {recordBookData.top10.length === 0 ? (
+                  {/* Top-10 Table */}
+                  {recordBookData.top10.length === 0 ? (
+                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No official marks in the database for {toTitleEventLabel(recordBookEventKey)} yet.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
                           <tr>
-                            <td colSpan={6} className="py-8 text-center text-slate-500">
-                              No official performances recorded yet for{' '}
-                              {toTitleEventLabel(recordBookEventKey)}.
-                            </td>
+                            <th className="py-3 px-4 w-16">Rank</th>
+                            <th className="py-3 px-4">Athlete</th>
+                            <th className="py-3 px-4">Class</th>
+                            <th className="py-3 px-4">Time</th>
+                            <th className="py-3 px-4">Competition</th>
+                            <th className="py-3 px-4">Date</th>
                           </tr>
-                        ) : (
-                          recordBookData.top10.map((row, idx) => (
-                            <tr
-                              key={row.id}
-                              className={idx === 0 ? 'bg-amber-50/50 font-semibold' : ''}
-                            >
-                              <td className="py-2.5 px-3 font-extrabold text-slate-700">
-                                #{idx + 1}
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {recordBookData.top10.map((row, idx) => (
+                            <tr key={row.id} className={idx === 0 ? 'bg-amber-50/40' : 'hover:bg-slate-50'}>
+                              <td className="py-3 px-4 font-black text-slate-900">#{idx + 1}</td>
+                              <td className="py-3 px-4 font-bold text-slate-900">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span>{row.swimmerName}</span>
+                                  {(row.swimType === 'RELAY_LEADOFF' ||
+                                    row.place === 'R' ||
+                                    row.place === 'LR') && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-100 text-cyan-800">
+                                      R
+                                    </span>
+                                  )}
+                                  {(row.swimType === 'INTERMEDIATE_SPLIT' || row.place === 'S') && (
+                                    <span
+                                      title={row.splitContext || 'Intermediate Distance Split'}
+                                      className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
+                                    >
+                                      S{row.splitContext ? ` (${row.splitContext})` : ''}
+                                    </span>
+                                  )}
+                                </div>
                               </td>
-                              <td className="py-2.5 px-3 font-bold text-slate-900">
-                                {row.swimmerName}
-                                {row.round === 'Prelims' && (
-                                  <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px]">
-                                    Prelims (SF)
-                                  </span>
-                                )}
-                                {String(row.place || '').toUpperCase() === 'R' && (
-                                  <span className="ml-1.5 px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-800 text-[10px]">
-                                    Lead-Off (R)
-                                  </span>
-                                )}
-                                {String(row.place || '').toUpperCase() === 'S' && (
-                                  <span className="ml-1.5 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px]">
-                                    Split (S)
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3 font-mono font-extrabold text-cyan-800">
+                              <td className="py-3 px-4 text-slate-600">{row.classYear || '—'}</td>
+                              <td className="py-3 px-4 font-mono font-extrabold text-cyan-800">
                                 {row.time}
                               </td>
-                              <td className="py-2.5 px-3">{row.classYear || '—'}</td>
-                              <td className="py-2.5 px-3">{row.competition || '—'}</td>
-                              <td className="py-2.5 px-3 font-mono">{row.date || '—'}</td>
+                              <td className="py-3 px-4 text-slate-600">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span>{row.competition || '—'}</span>
+                                  {row.round === 'Prelims' && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                      Prelims (SF)
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-slate-500">{row.date || '—'}</td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
 
-                  {/* Event-Specific Wins Leaders (Top 10) */}
-                  <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
+                  {/* Event-Specific Career Wins Leaders (Top 10 below the All-Time Top-10 Times) */}
+                  <div className="pt-4 border-t border-slate-200 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div>
-                        <h3 className="text-sm font-extrabold text-slate-900">
+                        <h3 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-1.5">
+                          <Award className="w-4 h-4 text-cyan-600" />
                           Most Career Wins — {toTitleEventLabel(recordBookEventKey)}
                         </h3>
-                        <p className="text-xs text-slate-500">
-                          1st-place Finals victories in this specific event across career
+                        <p className="text-[11px] text-slate-500">
+                          Top 10 swimmers with the most 1st-place Finals victories in this event.
                         </p>
                       </div>
-                      <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 cursor-pointer self-start sm:self-auto">
                         <input
                           type="checkbox"
                           checked={eventWinsActiveOnly}
                           onChange={(e) => setEventWinsActiveOnly(e.target.checked)}
+                          className="rounded text-cyan-600"
                         />
                         Active Roster Only
                       </label>
                     </div>
 
                     {recordBookData.eventWinLeaders.length === 0 ? (
-                      <p className="text-xs text-slate-500">
-                        No Finals event wins recorded for this filter.
-                      </p>
+                      <div className="text-center py-6 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                        No 1st-place Finals victories recorded for{' '}
+                        {toTitleEventLabel(recordBookEventKey)}
+                        {eventWinsActiveOnly ? ' among active swimmers' : ''} yet.
+                      </div>
                     ) : (
-                      <div className="overflow-x-auto bg-white border border-slate-200 rounded-xl">
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl">
                         <table className="w-full text-left text-xs">
-                          <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                          <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px]">
                             <tr>
-                              <th className="py-2 px-3 w-12">Rank</th>
-                              <th className="py-2 px-3">Athlete</th>
-                              <th className="py-2 px-3">Event Wins</th>
-                              <th className="py-2 px-3">Best Winning Time</th>
-                              <th className="py-2 px-3">Meets Won</th>
+                              <th className="py-2.5 px-4 w-16">Rank</th>
+                              <th className="py-2.5 px-4">Athlete</th>
+                              <th className="py-2.5 px-4 text-center">Event Wins</th>
+                              <th className="py-2.5 px-4">Best Winning Time</th>
+                              <th className="py-2.5 px-4">Victories</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {recordBookData.eventWinLeaders.map((w, idx) => (
-                              <tr key={w.swimmerKey}>
-                                <td className="py-2 px-3 font-bold">#{idx + 1}</td>
-                                <td className="py-2 px-3 font-bold text-slate-900">
-                                  {w.swimmerName}
-                                  {w.isActive && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px]">
-                                      Active
-                                    </span>
-                                  )}
+                            {recordBookData.eventWinLeaders.map((ath, idx) => (
+                              <tr key={ath.swimmerKey} className="hover:bg-slate-50">
+                                <td className="py-2.5 px-4 font-black text-slate-900">
+                                  #{idx + 1}
                                 </td>
-                                <td className="py-2 px-3 font-extrabold text-cyan-700">
-                                  {w.wins}
+                                <td className="py-2.5 px-4 font-bold text-slate-900">
+                                  <div className="flex items-center gap-1.5">
+                                    <span>{ath.swimmerName}</span>
+                                    {ath.isActive && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                        Active
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
-                                <td className="py-2 px-3 font-mono">{w.bestTime}</td>
-                                <td className="py-2 px-3 text-slate-500">{w.meets.join(', ')}</td>
+                                <td className="py-2.5 px-4 text-center font-black text-cyan-800">
+                                  {ath.wins}
+                                </td>
+                                <td className="py-2.5 px-4 font-mono font-bold text-slate-700">
+                                  {ath.bestTime}
+                                </td>
+                                <td className="py-2.5 px-4 text-slate-500">
+                                  {ath.meets.slice(0, 4).join(', ')}
+                                  {ath.meets.length > 4 ? ` +${ath.meets.length - 4} more` : ''}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -5271,110 +5419,126 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                </div>
+                </>
               ) : (
                 /* ALL-TIME CAREER WINS LEADERBOARD */
-                <div className="p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <select
-                        value={winsCompetitionFilter}
-                        onChange={(e) => setWinsCompetitionFilter(e.target.value)}
-                        className="px-3 py-1.5 text-xs font-bold bg-white border border-slate-200 rounded-lg"
-                      >
-                        <option value="ALL">All Competitions (Career Total)</option>
-                        {recurringCompetitionsList.map((comp) => (
-                          <option key={comp} value={comp}>
-                            {comp}
-                          </option>
-                        ))}
-                      </select>
-                      <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={winsActiveOnly}
-                          onChange={(e) => setWinsActiveOnly(e.target.checked)}
-                        />
-                        Active Roster Only
-                      </label>
+                <div className="space-y-4">
+                  {/* Summary Stat Strip */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                      <div className="text-[11px] font-bold uppercase text-slate-500">
+                        Total Event Winners ({recordBookGender})
+                      </div>
+                      <div className="text-xl font-black text-slate-900 mt-0.5">
+                        {allTimeWinsLeaderboard.length}
+                      </div>
                     </div>
-                    <span className="text-xs text-slate-500">
-                      {allTimeWinsLeaderboard.length} {recordBookGender} winners ranked
-                    </span>
+                    <div className="bg-cyan-50/70 border border-cyan-200 rounded-xl p-3.5">
+                      <div className="text-[11px] font-bold uppercase text-cyan-800">
+                        Total Individual Wins Recorded
+                      </div>
+                      <div className="text-xl font-black text-cyan-900 mt-0.5">
+                        {allTimeWinsLeaderboard.reduce((acc, a) => acc + a.indWins, 0)}
+                      </div>
+                    </div>
+                    <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5">
+                      <div className="text-[11px] font-bold uppercase text-amber-800">
+                        All-Time Wins Leader
+                      </div>
+                      <div className="text-sm sm:text-base font-extrabold text-slate-900 mt-0.5 truncate">
+                        {allTimeWinsLeaderboard[0]
+                          ? `${allTimeWinsLeaderboard[0].swimmerName} (${allTimeWinsLeaderboard[0].totalWins})`
+                          : '—'}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
-                        <tr>
-                          <th className="py-2.5 px-3 w-14">Rank</th>
-                          <th className="py-2.5 px-3">Athlete</th>
-                          <th className="py-2.5 px-3 text-center">Total Wins</th>
-                          <th className="py-2.5 px-3 text-center">Individual</th>
-                          <th className="py-2.5 px-3 text-center">Relay</th>
-                          <th className="py-2.5 px-3 text-right">Win Log</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {allTimeWinsLeaderboard.length === 0 ? (
+                  {allTimeWinsLeaderboard.length === 0 ? (
+                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No 1st-place Finals victories recorded for {recordBookGender} yet.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
                           <tr>
-                            <td colSpan={6} className="py-8 text-center text-slate-500">
-                              No 1st-place Finals victories found for the current filters.
-                            </td>
+                            <th className="py-3 px-4 w-16">Rank</th>
+                            <th className="py-3 px-4">Athlete</th>
+                            <th className="py-3 px-4 text-center">Total Wins</th>
+                            <th className="py-3 px-4 text-center">Individual</th>
+                            <th className="py-3 px-4 text-center">Relay</th>
+                            <th className="py-3 px-4 text-right">Win Log</th>
                           </tr>
-                        ) : (
-                          allTimeWinsLeaderboard.map((ath, idx) => {
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {allTimeWinsLeaderboard.map((ath, idx) => {
                             const isOpen = expandedWinAthlete === ath.swimmerKey;
                             return (
                               <React.Fragment key={ath.swimmerKey}>
-                                <tr className="hover:bg-slate-50">
-                                  <td className="py-2.5 px-3 font-extrabold">#{idx + 1}</td>
-                                  <td className="py-2.5 px-3 font-bold text-slate-900">
-                                    {ath.swimmerName}
-                                    {ath.isActive && (
-                                      <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px]">
-                                        Active
-                                      </span>
-                                    )}
+                                <tr
+                                  className={
+                                    idx === 0 ? 'bg-amber-50/40' : 'hover:bg-slate-50'
+                                  }
+                                >
+                                  <td className="py-3 px-4 font-black text-slate-900">
+                                    #{idx + 1}
                                   </td>
-                                  <td className="py-2.5 px-3 text-center font-black text-cyan-700 text-sm">
+                                  <td className="py-3 px-4 font-bold text-slate-900">
+                                    <div className="flex items-center gap-2">
+                                      <span>{ath.swimmerName}</span>
+                                      {ath.isActive && (
+                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                          Active
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-4 text-center font-black text-sm text-cyan-800">
                                     {ath.totalWins}
                                   </td>
-                                  <td className="py-2.5 px-3 text-center font-mono">
+                                  <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
                                     {ath.indWins}
                                   </td>
-                                  <td className="py-2.5 px-3 text-center font-mono">
+                                  <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
                                     {ath.relWins}
                                   </td>
-                                  <td className="py-2.5 px-3 text-right">
+                                  <td className="py-3 px-4 text-right">
                                     <button
                                       onClick={() =>
                                         setExpandedWinAthlete(isOpen ? null : ath.swimmerKey)
                                       }
-                                      className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                                      className="inline-flex items-center gap-1 text-xs font-bold text-cyan-700 hover:underline cursor-pointer"
                                     >
-                                      {isOpen ? 'Hide' : `View (${ath.winLog.length})`}
+                                      {isOpen ? 'Hide' : 'View'} ({ath.winLog.length})
+                                      {isOpen ? (
+                                        <ChevronUp className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <ChevronDown className="w-3.5 h-3.5" />
+                                      )}
                                     </button>
                                   </td>
                                 </tr>
                                 {isOpen && (
                                   <tr className="bg-slate-50">
-                                    <td colSpan={6} className="p-3">
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                        {ath.winLog.map((w, wIdx) => (
+                                    <td colSpan={6} className="px-4 py-3">
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        {ath.winLog.map((w) => (
                                           <div
-                                            key={`${w.id}-${wIdx}`}
-                                            className="p-2.5 rounded-lg bg-white border border-slate-200 text-[11px]"
+                                            key={w.id}
+                                            className="bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2 text-[11px]"
                                           >
-                                            <div className="font-bold text-slate-900">
-                                              {w.eventLabel} —{' '}
-                                              <span className="font-mono text-cyan-700">
-                                                {w.time}
-                                              </span>
+                                            <div>
+                                              <div className="font-bold text-slate-900">
+                                                {w.eventLabel}
+                                                {w.splitContext ? ` (${w.splitContext})` : ''}
+                                              </div>
+                                              <div className="text-slate-500">
+                                                {w.competition || 'Meet'} • {w.date || '—'}
+                                              </div>
                                             </div>
-                                            <div className="text-slate-500 mt-0.5">
-                                              {w.competition} ({w.date})
-                                            </div>
+                                            <span className="font-mono font-extrabold text-cyan-800 shrink-0">
+                                              {w.time}
+                                            </span>
                                           </div>
                                         ))}
                                       </div>
@@ -5383,11 +5547,11 @@ export default function App() {
                                 )}
                               </React.Fragment>
                             );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -5395,96 +5559,118 @@ export default function App() {
         )}
 
         {/* ==================================================================== */}
-        {/* SECTION 3: IN-MEET DECK & BROADCAST TOOLS                            */}
+        {/* SECTION 3: IN-MEET BROADCASTER & DECK TOOLS                          */}
         {/* ==================================================================== */}
         {activeSection === 'inmeet' && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
               <div>
-                <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-indigo-600" />
-                  In-Meet Deck & Broadcaster Lookup
+                <h2 className="text-lg sm:text-xl font-extrabold text-slate-900">
+                  In-Meet Deck & Broadcaster Reference
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Instant personal bests, season bests, and All-Time Top-10 target thresholds for
-                  active swimmers.
+                <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                  Active roster swimmers and their current Full-Distance Bests & Split Bests.
                 </p>
               </div>
-              <div className="relative w-full sm:w-72">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search active swimmer..."
-                  className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl"
-                />
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                {masterRoster.filter((a) => a.isActive).length} Active Roster Athletes
+              </span>
+            </div>
+
+            {masterRoster.filter((a) => a.isActive).length === 0 ? (
+              <div className="text-center py-12 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                Add active swimmers in <strong>Section 1 → Master Roster</strong> to populate your
+                deck reference board.
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {masterRoster
+                  .filter((a) => a.isActive)
+                  .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
+                  .map((ath) => {
+                    const swKey = normalizeSwimmerKey(ath.canonicalName);
+                    const swFullBestMap = new Map();
+                    const swSplitBestMap = new Map();
+                    historicalRecords
+                      .filter((r) => r.isOfficial !== false && r.swimmerKey === swKey)
+                      .forEach((r) => {
+                        const isSplit =
+                          r.swimType === 'INTERMEDIATE_SPLIT' ||
+                          String(r.place || '').toUpperCase() === 'S';
+                        const targetMap = isSplit ? swSplitBestMap : swFullBestMap;
+                        if (
+                          !targetMap.has(r.eventKey) ||
+                          r.seconds < targetMap.get(r.eventKey).seconds
+                        ) {
+                          targetMap.set(r.eventKey, r);
+                        }
+                      });
+                    const eventKeys = Array.from(
+                      new Set([...swFullBestMap.keys(), ...swSplitBestMap.keys()])
+                    ).slice(0, 4);
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {masterRoster
-                .filter((a) => a.isActive)
-                .filter((a) =>
-                  !searchQuery.trim()
-                    ? true
-                    : a.canonicalName.toLowerCase().includes(searchQuery.toLowerCase())
-                )
-                .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
-                .slice(0, 18)
-                .map((ath) => {
-                  const swKey = normalizeSwimmerKey(ath.canonicalName);
-                  const bestsByEvent = new Map();
-                  historicalRecords
-                    .filter((r) => r.swimmerKey === swKey && r.isOfficial !== false)
-                    .forEach((r) => {
-                      if (
-                        !bestsByEvent.has(r.eventLabel) ||
-                        r.seconds < bestsByEvent.get(r.eventLabel).seconds
-                      ) {
-                        bestsByEvent.set(r.eventLabel, r);
-                      }
-                    });
-
-                  return (
-                    <div
-                      key={ath.id}
-                      className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-2.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="font-extrabold text-sm text-slate-900">
-                          {ath.canonicalName}
+                    return (
+                      <div
+                        key={ath.id}
+                        className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2.5"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="font-extrabold text-sm text-slate-900">
+                            {ath.canonicalName}
+                          </div>
+                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-600">
+                            {ath.gender}
+                          </span>
                         </div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-800">
-                          {ath.gender}
-                        </span>
+                        {eventKeys.length === 0 ? (
+                          <div className="text-xs text-slate-400 italic">
+                            No career marks recorded yet
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            {eventKeys.map((evKey) => {
+                              const fullBest = swFullBestMap.get(evKey);
+                              const splitBest = swSplitBestMap.get(evKey);
+                              const label = (fullBest || splitBest).eventLabel.replace(
+                                /^(Women|Men)\s+/i,
+                                ''
+                              );
+                              return (
+                                <div
+                                  key={evKey}
+                                  className="flex items-center justify-between text-xs bg-white px-2.5 py-1.5 rounded-lg border border-slate-100 gap-2"
+                                >
+                                  <span className="text-slate-600 truncate">{label}</span>
+                                  <div className="flex items-center gap-1.5 font-mono font-bold shrink-0">
+                                    {fullBest && (
+                                      <span className="text-slate-900">{fullBest.time}</span>
+                                    )}
+                                    {splitBest && (
+                                      <span
+                                        title={
+                                          splitBest.splitContext || 'Best Intermediate Split (S)'
+                                        }
+                                        className="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
+                                      >
+                                        {splitBest.time} (S)
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                      {bestsByEvent.size === 0 ? (
-                        <p className="text-xs text-slate-400">No recorded times yet.</p>
-                      ) : (
-                        <div className="space-y-1">
-                          {Array.from(bestsByEvent.values())
-                            .slice(0, 5)
-                            .map((b) => (
-                              <div
-                                key={b.eventLabel}
-                                className="flex items-center justify-between text-xs bg-white px-2.5 py-1.5 rounded-lg border border-slate-200/80"
-                              >
-                                <span className="text-slate-700 truncate pr-2">{b.eventLabel}</span>
-                                <span className="font-mono font-bold text-slate-900">{b.time}</span>
-                              </div>
-                            ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-            </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         )}
 
         {/* ==================================================================== */}
-        {/* SECTION 4: IMPORT MEET RESULTS (.CL2 / .SD3 PARSER)                  */}
+        {/* SECTION 4: IMPORT MEET RESULTS (EXACT ORIGINAL PARSER & LAYOUT)      */}
         {/* ==================================================================== */}
         {activeSection === 'import' && (
           <div className="space-y-6">
@@ -5493,10 +5679,13 @@ export default function App() {
               type="file"
               accept=".cl2,.sd3,.txt"
               className="hidden"
-              onChange={handleFileUpload}
+              onChange={(e) => {
+                if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
+                e.target.value = '';
+              }}
             />
 
-            {/* Compact Upload Bar */}
+            {/* Compact Command Center Upload & Quick-Load Bar */}
             <div
               onDragOver={(e) => {
                 e.preventDefault();
@@ -5508,556 +5697,1263 @@ export default function App() {
                 setIsDraggingMeet(false);
                 if (e.dataTransfer.files?.[0]) handleFileUpload(e.dataTransfer.files[0]);
               }}
-              className={`rounded-2xl border-2 border-dashed p-4 sm:p-5 transition flex flex-col sm:flex-row items-center justify-between gap-4 ${
+              className={`bg-white rounded-2xl border-2 border-dashed p-4 sm:p-5 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm ${
                 isDraggingMeet
-                  ? 'border-cyan-500 bg-cyan-50'
-                  : 'border-slate-300 bg-white shadow-sm'
+                  ? 'border-cyan-500 bg-cyan-50/70'
+                  : 'border-slate-300 hover:border-cyan-400'
               }`}
             >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center shrink-0">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-xl bg-cyan-50 border border-cyan-100 flex items-center justify-center text-cyan-600 shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-extrabold text-slate-900">
+                  <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
                     Hy-Tek Meet Results Importer (.CL2 / .SD3)
                   </h2>
-                  <p className="text-xs text-slate-500">
-                    Drag & drop a `.cl2` / `.sd3` file here or load the sample dual meet to inspect
-                    splits, relays, and benchmark tags.
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Drag &amp; drop a <code className="font-mono text-slate-700">.cl2</code> or{' '}
+                    <code className="font-mono text-slate-700">.sd3</code> results file anywhere in
+                    this box, or choose a file to parse below.
                   </p>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <button
-                  onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 cursor-pointer"
-                >
-                  <Play className="w-3.5 h-3.5 text-cyan-600" />
-                  Load Sample Meet
-                </button>
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold bg-cyan-600 hover:bg-cyan-500 text-white shadow-sm cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs shadow-sm transition cursor-pointer"
                 >
-                  <Upload className="w-3.5 h-3.5" />
-                  Select .CL2 File
+                  <Upload className="w-3.5 h-3.5 text-cyan-400" />
+                  Select .CL2 / .SD3 File
                 </button>
-                {parsedData && (
-                  <button
-                    onClick={handleExportMeetCSV}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Export CSV
-                  </button>
-                )}
+                <button
+                  onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs shadow-sm transition cursor-pointer"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  Load Sample Meet
+                </button>
               </div>
             </div>
 
+            {/* Error Alert */}
             {meetErrorMsg && (
-              <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-xl flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-600" />
-                  <span>{meetErrorMsg}</span>
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start justify-between gap-3 text-red-800 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-sm font-semibold">Unable to Parse File</h3>
+                    <p className="text-sm text-red-700 mt-0.5">{meetErrorMsg}</p>
+                  </div>
                 </div>
-                <button onClick={() => setMeetErrorMsg('')} className="p-1">
+                <button
+                  onClick={() => setMeetErrorMsg('')}
+                  className="text-red-500 hover:text-red-700 p-1 rounded-lg cursor-pointer"
+                >
                   <X className="w-4 h-4" />
                 </button>
               </div>
             )}
 
-            {parsedData && (
+            {/* Parsed Meet Results View (Always visible below the compact upload bar) */}
+            {!parsedData ? (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950 px-6 py-4 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-300">
+                      Ready to Parse
+                    </span>
+                    <h3 className="text-lg font-bold tracking-tight mt-0.5">
+                      No Meet File Loaded Yet
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-0.5">
+                      Select a `.cl2` / `.sd3` file above or load the sample meet to populate team
+                      scores, event results, splits, and relays here.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 shrink-0">
+                    <div className="bg-white/10 border border-white/10 rounded-xl px-4 py-2.5 text-center">
+                      <div className="text-[11px] text-cyan-200 font-medium uppercase">Teams</div>
+                      <div className="text-lg font-bold text-white">—</div>
+                    </div>
+                    <div className="bg-white/10 border border-white/10 rounded-xl px-4 py-2.5 text-center">
+                      <div className="text-[11px] text-cyan-200 font-medium uppercase">Swimmers</div>
+                      <div className="text-lg font-bold text-white">—</div>
+                    </div>
+                    <div className="bg-white/10 border border-white/10 rounded-xl px-4 py-2.5 text-center">
+                      <div className="text-[11px] text-cyan-200 font-medium uppercase">Swims</div>
+                      <div className="text-lg font-bold text-white">—</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-8 text-center text-xs sm:text-sm text-slate-500">
+                  Individual results, relay splits, and Women&apos;s / Men&apos;s team scoreboards
+                  will populate right here as soon as a meet file is imported.
+                </div>
+              </div>
+            ) : (
               <div className="space-y-6">
-                {/* Meet Banner & Team Scoreboards */}
+                {/* Meet Summary Banner Card */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950 px-6 py-5 text-white flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                     <div>
-                      <h3 className="text-xl font-bold">{parsedData.meetInfo.name}</h3>
-                      <div className="flex flex-wrap items-center gap-4 mt-1.5 text-xs text-slate-300">
+                      <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
+                        {parsedData.meetInfo.name}
+                      </h2>
+                      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-2 text-sm text-slate-300">
                         {parsedData.meetInfo.startDate && (
-                          <span className="inline-flex items-center gap-1">
-                            <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                          <span className="inline-flex items-center gap-1.5">
+                            <Calendar className="w-4 h-4 text-cyan-400" />
                             {parsedData.meetInfo.startDate}
                           </span>
                         )}
                         {(parsedData.meetInfo.city || parsedData.meetInfo.state) && (
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="w-3.5 h-3.5 text-cyan-400" />
+                          <span className="inline-flex items-center gap-1.5">
+                            <MapPin className="w-4 h-4 text-cyan-400" />
                             {[parsedData.meetInfo.city, parsedData.meetInfo.state]
                               .filter(Boolean)
                               .join(', ')}
                           </span>
                         )}
+                        {parsedData.meetInfo.software && (
+                          <span className="inline-flex items-center gap-1.5 text-xs bg-white/10 px-2.5 py-0.5 rounded-full text-slate-200">
+                            {parsedData.meetInfo.software}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 mt-4">
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white shadow-sm transition cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Import New .CL2</span>
+                        </button>
+                        <button
+                          onClick={handleExportMeetCSV}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Export CSV</span>
+                        </button>
+                        <button
+                          onClick={() => setActiveSection('postmeet')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 text-cyan-200 border border-white/15 transition cursor-pointer"
+                        >
+                          <Award className="w-3.5 h-3.5" />
+                          <span>Post-Meet Wins & Commit</span>
+                        </button>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3 shrink-0">
-                      <div className="bg-white/10 rounded-xl px-4 py-2.5 text-center">
-                        <div className="text-[10px] uppercase text-cyan-200">Teams</div>
-                        <div className="text-lg font-extrabold">{parsedData.stats.totalTeams}</div>
+                    {/* KPI Stats Pills */}
+                    <div className="grid grid-cols-3 gap-3 sm:gap-4 shrink-0">
+                      <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl px-4 py-3 text-center">
+                        <div className="text-xs text-cyan-200 font-medium uppercase tracking-wider">
+                          Teams
+                        </div>
+                        <div className="text-xl sm:text-2xl font-bold text-white mt-0.5">
+                          {parsedData.stats.totalTeams}
+                        </div>
                       </div>
-                      <div className="bg-white/10 rounded-xl px-4 py-2.5 text-center">
-                        <div className="text-[10px] uppercase text-cyan-200">Swimmers</div>
-                        <div className="text-lg font-extrabold">
+                      <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl px-4 py-3 text-center">
+                        <div className="text-xs text-cyan-200 font-medium uppercase tracking-wider">
+                          Swimmers
+                        </div>
+                        <div className="text-xl sm:text-2xl font-bold text-white mt-0.5">
                           {parsedData.stats.totalSwimmers}
                         </div>
                       </div>
-                      <div className="bg-white/10 rounded-xl px-4 py-2.5 text-center">
-                        <div className="text-[10px] uppercase text-cyan-200">Swims</div>
-                        <div className="text-lg font-extrabold">{parsedData.stats.totalSwims}</div>
+                      <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl px-4 py-3 text-center">
+                        <div className="text-xs text-cyan-200 font-medium uppercase tracking-wider">
+                          Total Swims
+                        </div>
+                        <div className="text-xl sm:text-2xl font-bold text-white mt-0.5">
+                          {parsedData.stats.totalSwims}
+                        </div>
                       </div>
                     </div>
                   </div>
 
                   {/* Women's & Men's Team Scoreboards */}
-                  {parsedData.teamScores.length > 0 && (
-                    <div className="p-4 sm:p-5 grid grid-cols-1 md:grid-cols-2 gap-4 bg-white border-t border-slate-200">
-                      {['womenPoints', 'menPoints'].map((key) => {
-                        const title =
-                          key === 'womenPoints' ? "Women's Team Scores" : "Men's Team Scores";
-                        const sorted = [...parsedData.teamScores].sort((a, b) => b[key] - a[key]);
-                        return (
-                          <div
-                            key={key}
-                            className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-1.5"
-                          >
-                            <div className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1.5 mb-2">
-                              <Trophy className="w-3.5 h-3.5 text-amber-500" />
-                              {title}
-                            </div>
-                            {sorted.map((t, idx) => (
-                              <div
-                                key={`${key}-${t.code}`}
-                                className={`flex items-center justify-between px-3 py-1.5 rounded-lg text-xs ${
-                                  idx === 0 && t[key] > 0
-                                    ? 'bg-white border border-amber-200 font-bold text-slate-900'
-                                    : 'bg-white/70 border border-slate-200/70 text-slate-700'
-                                }`}
-                              >
-                                <span>{t.name}</span>
-                                <span className="font-mono font-bold">{t[key]}</span>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Meet View Switcher Tabs */}
-                  <div className="px-4 sm:px-6 bg-slate-50 border-t border-slate-200 flex items-center gap-2 overflow-x-auto">
-                    {[
-                      {
-                        id: 'individual',
-                        label: `Individual (${parsedData.individualResults.length})`,
-                        icon: Timer,
-                      },
-                      {
-                        id: 'relays',
-                        label: `Relays (${parsedData.relayResults.length})`,
-                        icon: Layers,
-                      },
-                      {
-                        id: 'roster',
-                        label: `Roster (${parsedData.stats.totalSwimmers})`,
-                        icon: Users,
-                      },
-                    ].map((tab) => {
-                      const Icon = tab.icon;
-                      return (
-                        <button
-                          key={tab.id}
-                          onClick={() => {
-                            setMeetSubTab(tab.id);
-                            setSelectedEventFilter('ALL');
-                          }}
-                          className={`px-4 py-3 text-xs font-bold border-b-2 transition inline-flex items-center gap-1.5 cursor-pointer ${
-                            meetSubTab === tab.id
-                              ? 'border-cyan-600 text-cyan-700'
-                              : 'border-transparent text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          <Icon className="w-3.5 h-3.5" />
-                          {tab.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Filter Bar */}
-                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-center">
-                  <div className="lg:col-span-4 relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search swimmer, team, or event..."
-                      className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg"
-                    />
-                  </div>
-                  <div className="lg:col-span-3">
-                    <select
-                      value={selectedTeam}
-                      onChange={(e) => {
-                        setSelectedTeam(e.target.value);
-                        try {
-                          localStorage.setItem('swimmeet_primary_team_v1', e.target.value);
-                        } catch {}
-                      }}
-                      className="w-full px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-lg"
-                    >
-                      <option value="ALL">All Teams ({parsedData.teams.length})</option>
-                      {parsedData.teams.map((t) => (
-                        <option key={t.code} value={t.code}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="lg:col-span-3">
-                    {meetSubTab !== 'roster' && (
-                      <select
-                        value={selectedEventFilter}
-                        onChange={(e) => setSelectedEventFilter(e.target.value)}
-                        className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg"
-                      >
-                        <option value="ALL">All Events ({availableMeetEvents.length})</option>
-                        {availableMeetEvents.map((ev) => (
-                          <option key={ev.label} value={ev.label}>
-                            #{ev.num} — {ev.label}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                  <div className="lg:col-span-2 flex bg-slate-100 p-1 rounded-lg">
-                    {['ALL', 'Men', 'Women'].map((g) => (
-                      <button
-                        key={g}
-                        onClick={() => setGenderFilter(g)}
-                        className={`flex-1 py-1 text-xs font-bold rounded-md cursor-pointer ${
-                          genderFilter === g ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-                        }`}
-                      >
-                        {g === 'ALL' ? 'All' : g}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* INDIVIDUAL RESULTS */}
-                {meetSubTab === 'individual' && (
-                  <div className="space-y-5">
-                    {groupedIndividualEvents.map((eventGroup) => {
-                      const expandable = eventGroup.swims.filter(
-                        (r) => r.splits && r.splits.length > 0
-                      );
-                      const allExp =
-                        expandable.length > 0 && expandable.every((r) => expandedRows.has(r.id));
-                      return (
-                        <div
-                          key={eventGroup.key}
-                          className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-                        >
-                          <div className="bg-slate-900 text-white px-5 py-3 flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300">
-                                #{eventGroup.eventNumber}
-                              </span>
-                              <h4 className="text-sm font-bold">{eventGroup.eventLabel}</h4>
-                            </div>
-                            {expandable.length > 0 && (
-                              <button
-                                onClick={() => toggleAllIndividualsInEvent(eventGroup.swims)}
-                                className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 cursor-pointer"
-                              >
-                                {allExp ? 'Collapse Splits' : 'Expand All Splits'}
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-left text-xs">
-                              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase text-[10px]">
-                                <tr>
-                                  <th className="py-2.5 px-3 w-8"></th>
-                                  <th className="py-2.5 px-3 text-center w-14">Place</th>
-                                  <th className="py-2.5 px-3">Swimmer</th>
-                                  <th className="py-2.5 px-3">Team</th>
-                                  <th className="py-2.5 px-3 text-right">Finals</th>
-                                  <th className="py-2.5 px-3 text-right">Behind</th>
-                                  <th className="py-2.5 px-3 text-center">Pts</th>
-                                  <th className="py-2.5 px-3 text-right">Splits</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100">
-                                {eventGroup.swims.map((row) => {
-                                  const hasSplits = row.splits && row.splits.length > 0;
-                                  const isExp = expandedRows.has(row.id);
-                                  const splitAnalysis = isExp
-                                    ? calculateSplitBreakdown(
-                                        row.splits,
-                                        row.distance,
-                                        row.splitInterval,
-                                        row.splitType
-                                      )
-                                    : null;
-                                  const behindSec =
-                                    isFinite(row.timeSeconds) &&
-                                    isFinite(eventGroup.fastestTimeSec)
-                                      ? row.timeSeconds - eventGroup.fastestTimeSec
-                                      : Infinity;
-                                  const displaySwimmer = formatSwimmerDisplay(
-                                    row.swimmerName,
-                                    row.preferredFirst
-                                  );
-                                  const tags =
-                                    selectedTeam === 'ALL' || row.teamCode === selectedTeam
-                                      ? benchmarkIndex.evaluateSwim(
-                                          displaySwimmer,
-                                          row.eventLabel,
-                                          row.finalsTime,
-                                          row.classYear,
-                                          false
-                                        )
-                                      : [];
-
-                                  return (
-                                    <React.Fragment key={row.id}>
-                                      <tr
-                                        onClick={() => hasSplits && toggleRow(row.id)}
-                                        className={
-                                          hasSplits
-                                            ? 'cursor-pointer hover:bg-cyan-50/40'
-                                            : 'hover:bg-slate-50'
-                                        }
-                                      >
-                                        <td className="py-2.5 px-3 text-cyan-600">
-                                          {hasSplits &&
-                                            (isExp ? (
-                                              <ChevronDown className="w-3.5 h-3.5" />
-                                            ) : (
-                                              <ChevronRight className="w-3.5 h-3.5" />
-                                            ))}
-                                        </td>
-                                        <td className="py-2.5 px-3 text-center font-bold">
-                                          {row.place ?? '—'}
-                                        </td>
-                                        <td className="py-2.5 px-3">
-                                          <div className="font-bold text-slate-900 flex flex-wrap items-center gap-1.5">
-                                            <span>{displaySwimmer}</span>
-                                            {tags.map((tg, tIdx) => (
-                                              <span
-                                                key={tIdx}
-                                                className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 text-[10px] font-extrabold"
-                                              >
-                                                {tg.label}
-                                              </span>
-                                            ))}
-                                          </div>
-                                          {row.classYear && (
-                                            <div className="text-[10px] text-slate-400">
-                                              Class: {row.classYear}
-                                            </div>
-                                          )}
-                                        </td>
-                                        <td className="py-2.5 px-3 text-slate-600">
-                                          {row.teamName}
-                                        </td>
-                                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
-                                          {row.finalsTime}
-                                        </td>
-                                        <td className="py-2.5 px-3 text-right font-mono text-slate-500">
-                                          {isFinite(behindSec)
-                                            ? behindSec < 0.005
-                                              ? 'Leader'
-                                              : `+${behindSec.toFixed(2)}s`
-                                            : '—'}
-                                        </td>
-                                        <td className="py-2.5 px-3 text-center font-mono">
-                                          {row.points > 0 ? row.points : '—'}
-                                        </td>
-                                        <td className="py-2.5 px-3 text-right">
-                                          {hasSplits ? `${row.splits.length} splits` : '—'}
-                                        </td>
-                                      </tr>
-
-                                      {isExp && hasSplits && splitAnalysis && (
-                                        <tr className="bg-slate-50">
-                                          <td colSpan={8} className="p-4">
-                                            <div className="bg-white rounded-xl border border-cyan-200 p-3.5 space-y-2">
-                                              <div className="text-xs font-bold text-cyan-800">
-                                                Split Breakdown — {displaySwimmer}
-                                              </div>
-                                              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                                                {splitAnalysis.rows.map((s) => (
-                                                  <div
-                                                    key={s.index}
-                                                    className="p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono"
-                                                  >
-                                                    <div className="text-[10px] text-slate-500">
-                                                      {s.distanceLabel}
-                                                    </div>
-                                                    <div className="font-bold text-slate-900">
-                                                      {s.cumulative}
-                                                    </div>
-                                                    <div className="text-[11px] text-cyan-700">
-                                                      ({s.lap})
-                                                    </div>
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      )}
-                                    </React.Fragment>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* RELAY RESULTS */}
-                {meetSubTab === 'relays' && (
-                  <div className="space-y-5">
-                    {groupedRelayEvents.map((eventGroup) => (
-                      <div
-                        key={eventGroup.key}
-                        className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-                      >
-                        <div className="bg-slate-900 text-white px-5 py-3 flex items-center gap-2.5">
-                          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300">
-                            #{eventGroup.eventNumber}
-                          </span>
-                          <h4 className="text-sm font-bold">{eventGroup.eventLabel}</h4>
-                        </div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-xs">
-                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase text-[10px]">
-                              <tr>
-                                <th className="py-2.5 px-3 w-8"></th>
-                                <th className="py-2.5 px-3 text-center w-14">Place</th>
-                                <th className="py-2.5 px-3">Squad</th>
-                                <th className="py-2.5 px-3">Swimmers</th>
-                                <th className="py-2.5 px-3 text-right">Finals</th>
-                                <th className="py-2.5 px-3 text-center">Pts</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {eventGroup.relays.map((relay) => {
-                                const isExp = expandedRows.has(relay.id);
-                                const legs = isExp ? calculateRelayLegBreakdown(relay) : [];
-                                return (
-                                  <React.Fragment key={relay.id}>
-                                    <tr
-                                      onClick={() => toggleRow(relay.id)}
-                                      className="cursor-pointer hover:bg-cyan-50/40"
-                                    >
-                                      <td className="py-2.5 px-3 text-cyan-600">
-                                        {isExp ? (
-                                          <ChevronDown className="w-3.5 h-3.5" />
-                                        ) : (
-                                          <ChevronRight className="w-3.5 h-3.5" />
-                                        )}
-                                      </td>
-                                      <td className="py-2.5 px-3 text-center font-bold">
-                                        {relay.place ?? '—'}
-                                      </td>
-                                      <td className="py-2.5 px-3 font-bold text-slate-900">
-                                        {relay.relayTitle}
-                                      </td>
-                                      <td className="py-2.5 px-3 text-slate-600">
-                                        {relay.legs
-                                          .map(
-                                            (l) =>
-                                              `${l.legOrder}) ${formatSwimmerDisplay(
-                                                l.swimmerName,
-                                                l.preferredFirst
-                                              )}`
-                                          )
-                                          .join(' • ')}
-                                      </td>
-                                      <td className="py-2.5 px-3 text-right font-mono font-bold">
-                                        {relay.finalsTime}
-                                      </td>
-                                      <td className="py-2.5 px-3 text-center font-mono">
-                                        {relay.points > 0 ? relay.points : '—'}
-                                      </td>
-                                    </tr>
-                                    {isExp && (
-                                      <tr className="bg-slate-50">
-                                        <td colSpan={6} className="p-4">
-                                          <div className="bg-white rounded-xl border border-cyan-200 p-3 space-y-1.5">
-                                            {legs.map((lg) => (
-                                              <div
-                                                key={lg.legOrder}
-                                                className="flex items-center justify-between text-xs py-1 border-b border-slate-100 last:border-0"
-                                              >
-                                                <span>
-                                                  <strong>Leg {lg.legOrder}:</strong>{' '}
-                                                  {formatSwimmerDisplay(
-                                                    lg.swimmerName,
-                                                    lg.preferredFirst
-                                                  )}
-                                                </span>
-                                                <span className="font-mono font-bold text-cyan-700">
-                                                  {lg.legTotalTime} (Cum: {lg.endCumulativeTime})
-                                                </span>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    )}
-                                  </React.Fragment>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* ROSTER TAB */}
-                {meetSubTab === 'roster' && (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                    {filteredMeetTeams.map((team) => (
-                      <div
-                        key={team.code}
-                        className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-                      >
-                        <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between">
-                          <h4 className="font-bold text-sm">{team.name}</h4>
-                          <span className="text-xs text-cyan-300">
-                            {team.swimmerList.length} Athletes
-                          </span>
-                        </div>
-                        <div className="divide-y divide-slate-100 max-h-[420px] overflow-y-auto">
-                          {team.swimmerList.map((sw) => (
-                            <div key={sw.name} className="px-4 py-2.5 text-xs">
-                              <div className="font-bold text-slate-900">
-                                {formatSwimmerDisplay(sw.name, sw.preferredFirst)}{' '}
-                                {sw.classYear && (
-                                  <span className="text-slate-400 font-normal">
-                                    ({sw.classYear})
+                  {parsedData.teamScores && parsedData.teamScores.length > 0 && (
+                    <div className="px-4 sm:px-6 py-4 bg-white border-t border-slate-200">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Women's Team Score Card */}
+                        {(() => {
+                          const womenSorted = [...parsedData.teamScores].sort(
+                            (a, b) => b.womenPoints - a.womenPoints
+                          );
+                          return (
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+                              <div className="flex items-center justify-between mb-2.5">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                                  <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                                  Women&apos;s Team Scores
+                                </span>
+                                {womenSorted.length === 2 && (
+                                  <span className="text-xs font-mono font-bold text-cyan-800 bg-cyan-50 border border-cyan-200 px-2 py-0.5 rounded-full">
+                                    {womenSorted[0].womenPoints} – {womenSorted[1].womenPoints}
                                   </span>
                                 )}
                               </div>
-                              <div className="text-slate-500 mt-0.5">{sw.events.join(' • ')}</div>
+                              <div className="space-y-1.5">
+                                {womenSorted.map((t, idx) => (
+                                  <div
+                                    key={`w-${t.code}`}
+                                    onClick={() => {
+                                      setSelectedTeam(t.code);
+                                      try {
+                                        localStorage.setItem('swimmeet_primary_team_v1', t.code);
+                                      } catch {}
+                                    }}
+                                    className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition ${
+                                      idx === 0 && t.womenPoints > 0
+                                        ? 'bg-white border border-amber-200 shadow-2xs font-bold text-slate-900'
+                                        : 'bg-white/70 border border-slate-200/70 text-slate-700 font-medium hover:bg-white'
+                                    }`}
+                                  >
+                                    <span className="truncate pr-2">{t.name}</span>
+                                    <span className="font-mono font-bold tabular-nums">
+                                      {t.womenPoints}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
+                          );
+                        })()}
+
+                        {/* Men's Team Score Card */}
+                        {(() => {
+                          const menSorted = [...parsedData.teamScores].sort(
+                            (a, b) => b.menPoints - a.menPoints
+                          );
+                          return (
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+                              <div className="flex items-center justify-between mb-2.5">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                                  <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                                  Men&apos;s Team Scores
+                                </span>
+                                {menSorted.length === 2 && (
+                                  <span className="text-xs font-mono font-bold text-cyan-800 bg-cyan-50 border border-cyan-200 px-2 py-0.5 rounded-full">
+                                    {menSorted[0].menPoints} – {menSorted[1].menPoints}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="space-y-1.5">
+                                {menSorted.map((t, idx) => (
+                                  <div
+                                    key={`m-${t.code}`}
+                                    onClick={() => {
+                                      setSelectedTeam(t.code);
+                                      try {
+                                        localStorage.setItem('swimmeet_primary_team_v1', t.code);
+                                      } catch {}
+                                    }}
+                                    className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition ${
+                                      idx === 0 && t.menPoints > 0
+                                        ? 'bg-white border border-amber-200 shadow-2xs font-bold text-slate-900'
+                                        : 'bg-white/70 border border-slate-200/70 text-slate-700 font-medium hover:bg-white'
+                                    }`}
+                                  >
+                                    <span className="truncate pr-2">{t.name}</span>
+                                    <span className="font-mono font-bold tabular-nums">
+                                      {t.menPoints}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* View Switcher Tabs */}
+                  <div className="px-4 sm:px-6 bg-slate-50/80 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-1 -mb-px overflow-x-auto">
+                      <button
+                        onClick={() => {
+                          setMeetSubTab('individual');
+                          setSelectedEventFilter('ALL');
+                        }}
+                        className={`px-4 py-3.5 text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 cursor-pointer ${
+                          meetSubTab === 'individual'
+                            ? 'border-cyan-600 text-cyan-700'
+                            : 'border-transparent text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <Timer className="w-4 h-4" />
+                        Individual Results
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700">
+                          {parsedData.individualResults.length}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setMeetSubTab('relays');
+                          setSelectedEventFilter('ALL');
+                        }}
+                        className={`px-4 py-3.5 text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 cursor-pointer ${
+                          meetSubTab === 'relays'
+                            ? 'border-cyan-600 text-cyan-700'
+                            : 'border-transparent text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <Layers className="w-4 h-4" />
+                        Relay Results
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700">
+                          {parsedData.relayResults.length}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => setMeetSubTab('roster')}
+                        className={`px-4 py-3.5 text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 cursor-pointer ${
+                          meetSubTab === 'roster'
+                            ? 'border-cyan-600 text-cyan-700'
+                            : 'border-transparent text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <Users className="w-4 h-4" />
+                        Team Roster
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700">
+                          {parsedData.stats.totalSwimmers}
+                        </span>
+                      </button>
+                    </div>
+
+                    <div className="py-2 text-xs text-slate-500 hidden md:block">
+                      Tip: Click any row with splits or relay legs to inspect detailed breakdowns
+                    </div>
+                  </div>
+                </div>
+
+                {/* Filter & Search Bar */}
+                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-center">
+                    <div className="lg:col-span-4 relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search swimmer, team, or event..."
+                        className="w-full pl-9 pr-8 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:bg-white transition"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="lg:col-span-3">
+                      <select
+                        value={selectedTeam}
+                        onChange={(e) => {
+                          setSelectedTeam(e.target.value);
+                          try {
+                            localStorage.setItem('swimmeet_primary_team_v1', e.target.value);
+                          } catch {}
+                        }}
+                        className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:bg-white"
+                      >
+                        <option value="ALL">All Teams ({parsedData.teams.length})</option>
+                        {parsedData.teams.map((t) => (
+                          <option key={t.code} value={t.code}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {meetSubTab !== 'roster' ? (
+                      <div className="lg:col-span-3">
+                        <select
+                          value={selectedEventFilter}
+                          onChange={(e) => setSelectedEventFilter(e.target.value)}
+                          className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:bg-white"
+                        >
+                          <option value="ALL">All Events ({availableMeetEvents.length})</option>
+                          {availableMeetEvents.map((ev) => (
+                            <option key={ev.label} value={ev.label}>
+                              #{ev.num} — {ev.label}
+                            </option>
                           ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="lg:col-span-3 hidden lg:block" />
+                    )}
+
+                    <div className="lg:col-span-2 flex bg-slate-100 p-1 rounded-lg border border-slate-200/80">
+                      {['ALL', 'Men', 'Women'].map((g) => (
+                        <button
+                          key={g}
+                          onClick={() => setGenderFilter(g)}
+                          className={`flex-1 py-1 text-xs font-semibold rounded-md transition cursor-pointer ${
+                            genderFilter === g
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {g === 'ALL' ? 'All' : g}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* TAB 1: INDIVIDUAL RESULTS (GROUPED BY EVENT CARDS) */}
+                {meetSubTab === 'individual' && (
+                  <div className="space-y-6">
+                    {groupedIndividualEvents.length === 0 ? (
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm py-12 text-center text-slate-500 text-sm">
+                        No individual swim results match the current filter criteria.
+                      </div>
+                    ) : (
+                      groupedIndividualEvents.map((eventGroup) => {
+                        const expandableSwims = eventGroup.swims.filter(
+                          (r) => r.splits && r.splits.length > 0
+                        );
+                        const allExpanded =
+                          expandableSwims.length > 0 &&
+                          expandableSwims.every((r) => expandedRows.has(r.id));
+
+                        return (
+                          <div
+                            key={eventGroup.key}
+                            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+                          >
+                            <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
+                                  Event #{eventGroup.eventNumber}
+                                </span>
+                                <div>
+                                  <h3 className="text-base font-bold tracking-tight">
+                                    {eventGroup.eventLabel}
+                                  </h3>
+                                  <p className="text-xs text-slate-400">
+                                    {eventGroup.swims.length}{' '}
+                                    {eventGroup.swims.length === 1 ? 'Swimmer' : 'Swimmers'} •{' '}
+                                    {eventGroup.course}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {expandableSwims.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleAllIndividualsInEvent(eventGroup.swims)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition cursor-pointer"
+                                >
+                                  {allExpanded ? (
+                                    <>
+                                      <ChevronDown className="w-3.5 h-3.5" />
+                                      <span>Collapse All Splits</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ChevronRight className="w-3.5 h-3.5" />
+                                      <span>Expand All Splits</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left border-collapse">
+                                <thead>
+                                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                    <th className="py-3 pl-4 pr-2 w-10"></th>
+                                    <th
+                                      onClick={() => handleSort('place')}
+                                      className="py-3 px-3 w-20 text-center cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center justify-center gap-1">
+                                        <span>Place</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th
+                                      onClick={() => handleSort('swimmerName')}
+                                      className="py-3 px-3 cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center gap-1">
+                                        <span>Swimmer</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th
+                                      onClick={() => handleSort('teamName')}
+                                      className="py-3 px-3 cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center gap-1">
+                                        <span>Team</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th
+                                      onClick={() => handleSort('time')}
+                                      className="py-3 px-3 text-right cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center justify-end gap-1">
+                                        <span>Finals Time</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th className="py-3 px-3 text-right w-28">Behind</th>
+                                    <th className="py-3 px-3 text-center w-16">Pts</th>
+                                    <th className="py-3 pl-3 pr-5 text-right w-28">Splits</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 text-sm">
+                                  {eventGroup.swims.map((row) => {
+                                    const hasSplits = row.splits && row.splits.length > 0;
+                                    const isExpanded = expandedRows.has(row.id);
+                                    const splitAnalysis = isExpanded
+                                      ? calculateSplitBreakdown(
+                                          row.splits,
+                                          row.distance,
+                                          row.splitInterval,
+                                          row.splitType
+                                        )
+                                      : null;
+                                    const behindSec =
+                                      isFinite(row.timeSeconds) &&
+                                      isFinite(eventGroup.fastestTimeSec)
+                                        ? row.timeSeconds - eventGroup.fastestTimeSec
+                                        : Infinity;
+                                    const displaySwimmer = formatSwimmerDisplay(
+                                      row.swimmerName,
+                                      row.preferredFirst
+                                    );
+                                    const tags = benchmarkIndex.evaluateSwim(
+                                      displaySwimmer,
+                                      row.eventLabel,
+                                      row.finalsTime,
+                                      row.classYear
+                                    );
+
+                                    return (
+                                      <React.Fragment key={row.id}>
+                                        <tr
+                                          onClick={() => hasSplits && toggleRow(row.id)}
+                                          className={`transition ${
+                                            hasSplits
+                                              ? 'cursor-pointer hover:bg-cyan-50/40'
+                                              : 'hover:bg-slate-50/70'
+                                          } ${isExpanded ? 'bg-cyan-50/50' : ''}`}
+                                        >
+                                          <td className="py-3 pl-4 pr-2 text-slate-400">
+                                            {hasSplits && (
+                                              <button
+                                                type="button"
+                                                aria-label="Toggle splits"
+                                                className="p-1 rounded hover:bg-slate-200/60 text-cyan-600"
+                                              >
+                                                {isExpanded ? (
+                                                  <ChevronDown className="w-4 h-4" />
+                                                ) : (
+                                                  <ChevronRight className="w-4 h-4" />
+                                                )}
+                                              </button>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3 text-center">
+                                            {row.place ? (
+                                              <span
+                                                className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+                                                  row.place === 1
+                                                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                                    : row.place === 2
+                                                    ? 'bg-slate-200 text-slate-800 border border-slate-300'
+                                                    : row.place === 3
+                                                    ? 'bg-orange-100 text-orange-800 border border-orange-300'
+                                                    : 'bg-slate-100 text-slate-600'
+                                                }`}
+                                              >
+                                                {row.place}
+                                              </span>
+                                            ) : (
+                                              <span className="text-slate-400 text-xs">—</span>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3">
+                                            <div className="font-semibold text-slate-900 flex flex-wrap items-center gap-1.5">
+                                              <span>{displaySwimmer}</span>
+                                              {tags.map((t, i) => (
+                                                <span
+                                                  key={i}
+                                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
+                                                >
+                                                  {t.label}
+                                                </span>
+                                              ))}
+                                            </div>
+                                            <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                                              {row.classYear && <span>Class: {row.classYear}</span>}
+                                              {(row.heat || row.lane) && (
+                                                <span className="font-mono text-slate-400">
+                                                  {row.heat ? `Heat ${row.heat}` : ''}
+                                                  {row.heat && row.lane ? ' • ' : ''}
+                                                  {row.lane ? `Lane ${row.lane}` : ''}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </td>
+                                          <td className="py-3 px-3">
+                                            <div className="text-slate-700 font-medium">
+                                              {row.teamName}
+                                            </div>
+                                          </td>
+                                          <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
+                                            {row.finalsTime}
+                                          </td>
+                                          <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
+                                            {isFinite(behindSec) ? (
+                                              behindSec < 0.005 ? (
+                                                <span className="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/80">
+                                                  Leader
+                                                </span>
+                                              ) : (
+                                                <span className="text-slate-500">
+                                                  +{behindSec.toFixed(2)}s
+                                                </span>
+                                              )
+                                            ) : (
+                                              <span className="text-slate-400">—</span>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3 text-center font-mono text-xs tabular-nums">
+                                            {row.points > 0 ? (
+                                              <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
+                                                {row.points}
+                                              </span>
+                                            ) : (
+                                              <span className="text-slate-300">—</span>
+                                            )}
+                                          </td>
+                                          <td className="py-3 pl-3 pr-5 text-right">
+                                            {hasSplits ? (
+                                              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200/80">
+                                                {row.splits.length} splits
+                                              </span>
+                                            ) : (
+                                              <span className="text-xs text-slate-400">
+                                                No splits
+                                              </span>
+                                            )}
+                                          </td>
+                                        </tr>
+
+                                        {/* Expanded Individual Split Breakdown Drawer */}
+                                        {isExpanded && hasSplits && splitAnalysis && (
+                                          <tr className="bg-slate-50/95 border-b border-slate-200">
+                                            <td colSpan={8} className="px-4 sm:px-6 py-4">
+                                              <div className="bg-white rounded-xl border border-cyan-200/90 p-4 sm:p-5 shadow-xs space-y-4">
+                                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                                  <div className="text-xs font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
+                                                    <Timer className="w-4 h-4 text-cyan-600" />
+                                                    <span>
+                                                      Split Breakdown (
+                                                      {splitAnalysis.stats?.interval || 50}y
+                                                      Intervals) — {displaySwimmer}
+                                                    </span>
+                                                  </div>
+
+                                                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                                                    {splitAnalysis.stats && (
+                                                      <>
+                                                        <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-mono">
+                                                          Avg Lap:{' '}
+                                                          <strong>
+                                                            {splitAnalysis.stats.avgLap}
+                                                          </strong>
+                                                        </span>
+                                                        {splitAnalysis.stats.halfDiff !== null && (
+                                                          <span
+                                                            className={`px-2.5 py-1 rounded-md font-mono font-semibold ${
+                                                              splitAnalysis.stats.halfDiff < 0
+                                                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                                                : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                                            }`}
+                                                          >
+                                                            {splitAnalysis.stats.halfDiff < 0
+                                                              ? `Negative Split (${splitAnalysis.stats.halfDiff.toFixed(
+                                                                  2
+                                                                )}s)`
+                                                              : `2nd Half +${splitAnalysis.stats.halfDiff.toFixed(
+                                                                  2
+                                                                )}s`}
+                                                          </span>
+                                                        )}
+                                                      </>
+                                                    )}
+                                                    {(row.heat || row.lane) && (
+                                                      <span className="text-slate-500 font-mono">
+                                                        {row.heat ? `Heat ${row.heat}` : ''}{' '}
+                                                        {row.lane ? `• Lane ${row.lane}` : ''}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </div>
+
+                                                {/* Pacing Bar Visualization */}
+                                                {splitAnalysis.stats &&
+                                                  splitAnalysis.rows.length > 1 && (
+                                                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-200/70">
+                                                      <div className="text-[11px] font-semibold text-slate-500 mb-2 flex items-center justify-between">
+                                                        <span className="flex items-center gap-1">
+                                                          <TrendingUp className="w-3.5 h-3.5 text-cyan-600" />
+                                                          Lap Pacing Comparison (Shorter bar =
+                                                          faster lap)
+                                                        </span>
+                                                        <span className="flex items-center gap-3">
+                                                          <span className="inline-flex items-center gap-1 text-emerald-700">
+                                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                                            Fastest
+                                                          </span>
+                                                          <span className="inline-flex items-center gap-1 text-amber-700">
+                                                            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                                                            Slowest
+                                                          </span>
+                                                        </span>
+                                                      </div>
+                                                      <div className="flex items-end gap-1.5 h-16 pt-2">
+                                                        {splitAnalysis.rows.map((s) => {
+                                                          const { minLap, maxLap } =
+                                                            splitAnalysis.stats;
+                                                          const range = Math.max(
+                                                            maxLap - minLap,
+                                                            0.5
+                                                          );
+                                                          const norm = isFinite(s.lapSec)
+                                                            ? 35 +
+                                                              ((s.lapSec - minLap) / range) * 65
+                                                            : 50;
+                                                          return (
+                                                            <div
+                                                              key={s.index}
+                                                              className="flex-1 flex flex-col items-center gap-1 min-w-[20px]"
+                                                              title={`${s.distanceLabel}: Lap ${s.lap} (Cum ${s.cumulative})`}
+                                                            >
+                                                              <div className="w-full flex items-end justify-center h-11">
+                                                                <div
+                                                                  style={{
+                                                                    height: `${Math.round(norm)}%`,
+                                                                  }}
+                                                                  className={`w-full max-w-[28px] rounded-t transition-all ${
+                                                                    s.isFastest
+                                                                      ? 'bg-emerald-500'
+                                                                      : s.isSlowest
+                                                                      ? 'bg-amber-400'
+                                                                      : 'bg-cyan-500/80'
+                                                                  }`}
+                                                                />
+                                                              </div>
+                                                              <span className="text-[9px] font-mono text-slate-500">
+                                                                {s.distance}
+                                                              </span>
+                                                            </div>
+                                                          );
+                                                        })}
+                                                      </div>
+                                                    </div>
+                                                  )}
+
+                                                {/* Structured Split Table */}
+                                                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                                                  <table className="w-full text-left border-collapse text-xs">
+                                                    <thead>
+                                                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
+                                                        <th className="py-2 px-3">Distance</th>
+                                                        <th className="py-2 px-3 text-right">
+                                                          Cumulative Time
+                                                        </th>
+                                                        <th className="py-2 px-3 text-right">
+                                                          {splitAnalysis.stats?.interval || 50}y Lap
+                                                          Split
+                                                        </th>
+                                                        <th className="py-2 px-3 text-right">
+                                                          Pace Note
+                                                        </th>
+                                                      </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-100 font-mono tabular-nums">
+                                                      {splitAnalysis.rows.map((s) => (
+                                                        <tr
+                                                          key={s.index}
+                                                          className={
+                                                            s.isFastest
+                                                              ? 'bg-emerald-50/40'
+                                                              : s.isSlowest
+                                                              ? 'bg-amber-50/30'
+                                                              : 'hover:bg-slate-50/80'
+                                                          }
+                                                        >
+                                                          <td className="py-2 px-3 font-sans font-semibold text-slate-700">
+                                                            {s.distanceLabel}
+                                                          </td>
+                                                          <td className="py-2 px-3 text-right font-bold text-slate-900">
+                                                            {s.cumulative}
+                                                          </td>
+                                                          <td className="py-2 px-3 text-right font-bold text-cyan-700">
+                                                            {s.lap}
+                                                          </td>
+                                                          <td className="py-2 px-3 text-right font-sans">
+                                                            {s.isFastest ? (
+                                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
+                                                                <Zap className="w-3 h-3" />
+                                                                Fastest Lap
+                                                              </span>
+                                                            ) : s.isSlowest ? (
+                                                              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800">
+                                                                Slowest Lap
+                                                              </span>
+                                                            ) : splitAnalysis.stats &&
+                                                              isFinite(s.lapSec) ? (
+                                                              <span className="text-[11px] text-slate-400">
+                                                                {s.lapSec -
+                                                                  splitAnalysis.stats.avgLapSec >=
+                                                                0
+                                                                  ? `+${(
+                                                                      s.lapSec -
+                                                                      splitAnalysis.stats.avgLapSec
+                                                                    ).toFixed(2)}s vs avg`
+                                                                  : `${(
+                                                                      s.lapSec -
+                                                                      splitAnalysis.stats.avgLapSec
+                                                                    ).toFixed(2)}s vs avg`}
+                                                              </span>
+                                                            ) : (
+                                                              '—'
+                                                            )}
+                                                          </td>
+                                                        </tr>
+                                                      ))}
+                                                    </tbody>
+                                                  </table>
+                                                </div>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )}
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 2: RELAY RESULTS (GROUPED BY EVENT CARDS) */}
+                {meetSubTab === 'relays' && (
+                  <div className="space-y-6">
+                    {groupedRelayEvents.length === 0 ? (
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm py-12 text-center text-slate-500 text-sm">
+                        No relay results match the current filter criteria.
+                      </div>
+                    ) : (
+                      groupedRelayEvents.map((eventGroup) => {
+                        const expandableRelays = eventGroup.relays.filter(
+                          (r) => r.legs.length > 0 || r.splits.length > 0
+                        );
+                        const allExpanded =
+                          expandableRelays.length > 0 &&
+                          expandableRelays.every((r) => expandedRows.has(r.id));
+
+                        return (
+                          <div
+                            key={eventGroup.key}
+                            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+                          >
+                            <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
+                                  Event #{eventGroup.eventNumber}
+                                </span>
+                                <div>
+                                  <h3 className="text-base font-bold tracking-tight">
+                                    {eventGroup.eventLabel}
+                                  </h3>
+                                  <p className="text-xs text-slate-400">
+                                    {eventGroup.relays.length}{' '}
+                                    {eventGroup.relays.length === 1
+                                      ? 'Relay Entry'
+                                      : 'Relay Entries'}{' '}
+                                    • {eventGroup.course}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {expandableRelays.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleAllRelaysInEvent(eventGroup.relays)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition cursor-pointer"
+                                >
+                                  {allExpanded ? (
+                                    <>
+                                      <ChevronDown className="w-3.5 h-3.5" />
+                                      <span>Collapse All Splits</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ChevronRight className="w-3.5 h-3.5" />
+                                      <span>Expand All Splits</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left border-collapse">
+                                <thead>
+                                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                    <th className="py-3 pl-4 pr-2 w-10"></th>
+                                    <th
+                                      onClick={() => handleSort('place')}
+                                      className="py-3 px-3 w-20 text-center cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center justify-center gap-1">
+                                        <span>Place</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th
+                                      onClick={() => handleSort('swimmerName')}
+                                      className="py-3 px-3 cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center gap-1">
+                                        <span>Relay Squad</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th className="py-3 px-3">Swimmers (Legs 1–4)</th>
+                                    <th
+                                      onClick={() => handleSort('time')}
+                                      className="py-3 px-3 text-right cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center justify-end gap-1">
+                                        <span>Finals Time</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th className="py-3 px-3 text-right w-28">Behind</th>
+                                    <th className="py-3 pl-3 pr-5 text-center w-16">Pts</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 text-sm">
+                                  {eventGroup.relays.map((relay) => {
+                                    const hasDetails =
+                                      relay.legs.length > 0 || relay.splits.length > 0;
+                                    const isExpanded = expandedRows.has(relay.id);
+                                    const legBreakdown = isExpanded
+                                      ? calculateRelayLegBreakdown(relay)
+                                      : [];
+                                    const behindSec =
+                                      isFinite(relay.timeSeconds) &&
+                                      isFinite(eventGroup.fastestTimeSec)
+                                        ? relay.timeSeconds - eventGroup.fastestTimeSec
+                                        : Infinity;
+
+                                    return (
+                                      <React.Fragment key={relay.id}>
+                                        <tr
+                                          onClick={() => hasDetails && toggleRow(relay.id)}
+                                          className={`transition ${
+                                            hasDetails
+                                              ? 'cursor-pointer hover:bg-cyan-50/40'
+                                              : 'hover:bg-slate-50/70'
+                                          } ${isExpanded ? 'bg-cyan-50/50' : ''}`}
+                                        >
+                                          <td className="py-3 pl-4 pr-2 text-slate-400">
+                                            {hasDetails && (
+                                              <button
+                                                type="button"
+                                                aria-label="Toggle relay legs"
+                                                className="p-1 rounded hover:bg-slate-200/60 text-cyan-600"
+                                              >
+                                                {isExpanded ? (
+                                                  <ChevronDown className="w-4 h-4" />
+                                                ) : (
+                                                  <ChevronRight className="w-4 h-4" />
+                                                )}
+                                              </button>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3 text-center">
+                                            {relay.place ? (
+                                              <span
+                                                className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+                                                  relay.place === 1
+                                                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                                    : relay.place === 2
+                                                    ? 'bg-slate-200 text-slate-800 border border-slate-300'
+                                                    : relay.place === 3
+                                                    ? 'bg-orange-100 text-orange-800 border border-orange-300'
+                                                    : 'bg-slate-100 text-slate-600'
+                                                }`}
+                                              >
+                                                {relay.place}
+                                              </span>
+                                            ) : (
+                                              <span className="text-slate-400 text-xs">—</span>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3">
+                                            <div className="font-semibold text-slate-900">
+                                              {relay.relayTitle}
+                                            </div>
+                                            {(relay.heat || relay.lane) && (
+                                              <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                                                {relay.heat ? `Heat ${relay.heat}` : ''}
+                                                {relay.heat && relay.lane ? ' • ' : ''}
+                                                {relay.lane ? `Lane ${relay.lane}` : ''}
+                                              </div>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3">
+                                            <div className="text-xs text-slate-600 line-clamp-2">
+                                              {relay.legs.length > 0
+                                                ? relay.legs
+                                                    .map(
+                                                      (l) =>
+                                                        `${l.legOrder}) ${formatSwimmerDisplay(
+                                                          l.swimmerName,
+                                                          l.preferredFirst
+                                                        )}`
+                                                    )
+                                                    .join(' • ')
+                                                : 'No leg roster recorded'}
+                                            </div>
+                                          </td>
+                                          <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
+                                            {relay.finalsTime}
+                                          </td>
+                                          <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
+                                            {isFinite(behindSec) ? (
+                                              behindSec < 0.005 ? (
+                                                <span className="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/80">
+                                                  Leader
+                                                </span>
+                                              ) : (
+                                                <span className="text-slate-500">
+                                                  +{behindSec.toFixed(2)}s
+                                                </span>
+                                              )
+                                            ) : (
+                                              <span className="text-slate-400">—</span>
+                                            )}
+                                          </td>
+                                          <td className="py-3 pl-3 pr-5 text-center font-mono text-xs tabular-nums">
+                                            {relay.points > 0 ? (
+                                              <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
+                                                {relay.points}
+                                              </span>
+                                            ) : (
+                                              <span className="text-slate-300">—</span>
+                                            )}
+                                          </td>
+                                        </tr>
+
+                                        {/* Expanded Relay Legs & Splits */}
+                                        {isExpanded && hasDetails && (
+                                          <tr className="bg-slate-50/95 border-b border-slate-200">
+                                            <td colSpan={7} className="px-4 sm:px-6 py-4">
+                                              <div className="bg-white rounded-xl border border-cyan-200/90 p-4 sm:p-5 shadow-xs space-y-3">
+                                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                                  <div className="text-xs font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
+                                                    <Users className="w-4 h-4 text-cyan-600" />
+                                                    <span>
+                                                      Relay Leg Order & Splits — {relay.relayTitle}
+                                                    </span>
+                                                  </div>
+                                                  {(relay.heat || relay.lane) && (
+                                                    <div className="text-xs text-slate-500 font-mono">
+                                                      {relay.heat ? `Heat ${relay.heat}` : ''}{' '}
+                                                      {relay.lane ? `• Lane ${relay.lane}` : ''}
+                                                    </div>
+                                                  )}
+                                                </div>
+
+                                                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                                                  <table className="w-full text-left border-collapse text-xs">
+                                                    <thead>
+                                                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
+                                                        <th className="py-2.5 px-3 w-16">Leg</th>
+                                                        <th className="py-2.5 px-3">Swimmer</th>
+                                                        <th className="py-2.5 px-3 w-20">Class</th>
+                                                        <th className="py-2.5 px-3">
+                                                          Individual {relay.splitInterval || 50}y
+                                                          Sub-Splits
+                                                        </th>
+                                                        <th className="py-2.5 px-3 text-right">
+                                                          Leg Time
+                                                        </th>
+                                                        <th className="py-2.5 px-3 text-right">
+                                                          Cumulative Relay
+                                                        </th>
+                                                      </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-100">
+                                                      {legBreakdown.map((leg) => (
+                                                        <tr
+                                                          key={`${relay.id}-leg-${leg.legOrder}`}
+                                                          className="hover:bg-slate-50/80"
+                                                        >
+                                                          <td className="py-2.5 px-3">
+                                                            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded bg-cyan-50 text-cyan-800 border border-cyan-200 font-bold">
+                                                              Leg {leg.legOrder}
+                                                            </span>
+                                                          </td>
+                                                          <td className="py-2.5 px-3 font-semibold text-slate-900">
+                                                            {formatSwimmerDisplay(
+                                                              leg.swimmerName,
+                                                              leg.preferredFirst
+                                                            )}
+                                                          </td>
+                                                          <td className="py-2.5 px-3 text-slate-600">
+                                                            {leg.classYear ? (
+                                                              <span className="px-1.5 py-0.5 rounded bg-slate-100 font-medium">
+                                                                {leg.classYear}
+                                                              </span>
+                                                            ) : (
+                                                              '—'
+                                                            )}
+                                                          </td>
+                                                          <td className="py-2.5 px-3 font-mono tabular-nums">
+                                                            {leg.subSplits.length > 0 ? (
+                                                              <div className="flex flex-wrap items-center gap-1.5">
+                                                                {leg.subSplits.map((sub) => (
+                                                                  <span
+                                                                    key={sub.subIndex}
+                                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-700"
+                                                                  >
+                                                                    <span className="text-[10px] text-slate-400">
+                                                                      {sub.subDistance}:
+                                                                    </span>
+                                                                    <span className="font-semibold">
+                                                                      {sub.lap}
+                                                                    </span>
+                                                                  </span>
+                                                                ))}
+                                                              </div>
+                                                            ) : (
+                                                              <span className="text-slate-400">—</span>
+                                                            )}
+                                                          </td>
+                                                          <td className="py-2.5 px-3 text-right font-mono font-bold text-cyan-700 tabular-nums">
+                                                            {leg.legTotalTime}
+                                                          </td>
+                                                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
+                                                            {leg.endCumulativeTime}
+                                                          </td>
+                                                        </tr>
+                                                      ))}
+                                                    </tbody>
+                                                  </table>
+                                                </div>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )}
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 3: TEAM ROSTER CARDS */}
+                {meetSubTab === 'roster' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {filteredMeetTeams.map((team) => (
+                      <div
+                        key={team.code}
+                        className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col"
+                      >
+                        <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
+                          <div>
+                            <h3 className="font-bold text-base">{team.name}</h3>
+                            {(team.city || team.state) && (
+                              <p className="text-xs text-slate-400 mt-0.5">
+                                {[team.city, team.state].filter(Boolean).join(', ')}
+                              </p>
+                            )}
+                          </div>
+                          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                            {team.swimmerList.length} Athletes
+                          </span>
+                        </div>
+
+                        <div className="divide-y divide-slate-100 max-h-[540px] overflow-y-auto">
+                          {team.swimmerList.length === 0 ? (
+                            <div className="p-8 text-center text-sm text-slate-500">
+                              No swimmers match the selected filters.
+                            </div>
+                          ) : (
+                            team.swimmerList.map((swimmer) => (
+                              <div
+                                key={swimmer.name}
+                                className="px-5 py-3.5 hover:bg-slate-50 transition flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+                              >
+                                <div>
+                                  <div className="font-semibold text-sm text-slate-900 flex items-center gap-2">
+                                    <span>
+                                      {formatSwimmerDisplay(
+                                        swimmer.name,
+                                        swimmer.preferredFirst
+                                      )}
+                                    </span>
+                                    {swimmer.classYear && (
+                                      <span className="text-[11px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 font-medium">
+                                        {swimmer.classYear}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-slate-500 mt-0.5">
+                                    {swimmer.gender}
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                                  {swimmer.events.map((ev, idx) => (
+                                    <span
+                                      key={idx}
+                                      className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-50 text-cyan-800 border border-cyan-200/70"
+                                    >
+                                      {ev}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))
+                          )}
                         </div>
                       </div>
                     ))}
@@ -6069,152 +6965,198 @@ export default function App() {
         )}
 
         {/* ==================================================================== */}
-        {/* SECTION 5: POST-MEET TOOLS, RECONCILED COMMIT & SID RECAP            */}
+        {/* SECTION 5: POST-MEET TOOLS (WINS, SID RECAP & COMMIT TO DB)          */}
         {/* ==================================================================== */}
         {activeSection === 'postmeet' && (
           <div className="space-y-6">
             {!parsedData ? (
               <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-3">
-                <p className="text-sm font-bold text-slate-700">
-                  No active meet loaded yet. Import a `.cl2` / `.sd3` file in Section 4 first.
+                <p className="text-sm text-slate-600">
+                  No active meet loaded yet. Upload a `.cl2` meet file or load the sample meet first.
                 </p>
                 <button
-                  onClick={() => setActiveSection('import')}
-                  className="px-4 py-2 rounded-xl text-xs font-extrabold bg-cyan-600 text-white cursor-pointer"
+                  onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-cyan-600 text-white cursor-pointer"
                 >
-                  Go to Section 4 (Import Meet Results)
+                  Load Sample Meet
                 </button>
               </div>
             ) : (
               <>
-                {/* Pre-Commit Reconciliation & Staged Verification Card */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-5">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                    <div>
-                      <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
                         Commit Meet Performances to Master Database
-                      </h2>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Verify class years (`FR`/`SO`/`JR`/`SR`) and reconcile any unmatched meet,
-                        swimmer, or event names before saving.
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Imports only{' '}
+                        <strong>
+                          {parsedData.teams.find((t) => t.code === selectedTeam)?.name ||
+                            selectedTeam}
+                        </strong>{' '}
+                        swims with extracted Class Year (`FR`/`SO`/`JR`/`SR`) and reconciles
+                        competition, athletes, and events against your Master Lists.
                       </p>
+                      <div className="pt-1 flex flex-wrap items-center gap-3">
+                        <select
+                          value={selectedTeam}
+                          onChange={(e) => {
+                            setSelectedTeam(e.target.value);
+                            setExcludedMeetCommitIds(new Set());
+                            try {
+                              localStorage.setItem('swimmeet_primary_team_v1', e.target.value);
+                            } catch {}
+                          }}
+                          className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5"
+                        >
+                          <option value="ALL">-- Select Primary Program Team --</option>
+                          {parsedData.teams.map((t) => (
+                            <option key={t.code} value={t.code}>
+                              {t.name} ({t.code})
+                            </option>
+                          ))}
+                        </select>
+
+                        <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={includeSplitsOnCommit}
+                            onChange={(e) => setIncludeSplitsOnCommit(e.target.checked)}
+                            className="rounded text-cyan-600"
+                          />
+                          Also save legal opening splits (e.g., 50 Back off 100 Back, 1000 Free off
+                          1650 Free as Place = S; Relay Lead-Offs &quot;R&quot; are always saved)
+                        </label>
+                      </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3">
-                      <select
-                        value={selectedTeam}
-                        onChange={(e) => setSelectedTeam(e.target.value)}
-                        className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl"
-                      >
-                        <option value="ALL">-- Select Program Team --</option>
-                        {parsedData.teams.map((t) => (
-                          <option key={t.code} value={t.code}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </select>
-
-                      <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={includeSplitsOnCommit}
-                          onChange={(e) => setIncludeSplitsOnCommit(e.target.checked)}
-                        />
-                        Include Legal Opening Splits (S)
-                      </label>
-
-                      <button
-                        onClick={handleCommitCurrentMeet}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm cursor-pointer"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        Commit Verified Swims (
-                        {meetCommitPreview.rows.filter((r) => r.selected).length})
-                      </button>
-                    </div>
+                    <button
+                      onClick={handleCommitCurrentMeet}
+                      disabled={
+                        !selectedTeam ||
+                        selectedTeam === 'ALL' ||
+                        meetCommitPreview.rows.filter((r) => r.selected).length === 0
+                      }
+                      className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-xs sm:text-sm font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-sm transition cursor-pointer shrink-0"
+                    >
+                      <Database className="w-4 h-4" />
+                      Commit{' '}
+                      {meetCommitPreview.rows.filter((r) => r.selected).length > 0
+                        ? `${meetCommitPreview.rows.filter((r) => r.selected).length} Selected `
+                        : ''}
+                      Swims
+                    </button>
                   </div>
 
-                  {/* Meet Master List Reconciliation Banner */}
-                  {selectedTeam !== 'ALL' &&
+                  {/* Pre-Commit Master List Reconciliation Panel (Competition + Athletes + Events) */}
+                  {selectedTeam &&
+                    selectedTeam !== 'ALL' &&
                     (meetCommitPreview.unmatchedCompetition ||
                       meetCommitPreview.unmatchedAthletes.length > 0 ||
                       meetCommitPreview.unmatchedEvents.length > 0) && (
-                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-extrabold text-amber-950">
-                            Unmatched Master List Items Detected
-                          </span>
+                      <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <h4 className="text-sm font-extrabold text-amber-950 flex items-center gap-1.5">
+                              <Link2 className="w-4 h-4 text-amber-700" />
+                              Pre-Commit Master List Reconciliation (
+                              {meetCommitPreview.unmatchedCompetition ? '1 Competition, ' : ''}
+                              {meetCommitPreview.unmatchedAthletes.length} Athletes,{' '}
+                              {meetCommitPreview.unmatchedEvents.length} Events)
+                            </h4>
+                            <p className="text-xs text-amber-800 mt-0.5">
+                              Confirm matching to existing Master Lists or add new canonical entries
+                              before committing to the database.
+                            </p>
+                          </div>
                           <button
                             onClick={handleApplyMeetReconciliations}
-                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white cursor-pointer"
+                            className="px-4 py-2 rounded-xl text-xs font-extrabold bg-amber-600 hover:bg-amber-500 text-white shadow-sm transition cursor-pointer"
                           >
-                            Apply Reconciliations
+                            Apply &amp; Sync Master Lists
                           </button>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                           {meetCommitPreview.unmatchedCompetition && (
-                            <div className="bg-white p-3 rounded-lg border border-amber-200 space-y-1">
-                              <div className="font-bold text-slate-700">Competition:</div>
-                              <div>
-                                {meetCommitPreview.unmatchedCompetition.rawName} (
-                                {meetCommitPreview.unmatchedCompetition.sampleDate})
+                            <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2 text-xs">
+                              <div className="font-bold uppercase text-slate-600">
+                                Unmatched Meet (Name + Date)
                               </div>
-                              <select
-                                value={
-                                  meetReconcileSelections[
-                                    `comp:${normalizeCompKey(
-                                      meetCommitPreview.unmatchedCompetition.rawName
-                                    )}|${meetCommitPreview.unmatchedCompetition.sampleDate}`
-                                  ] || '__NEW__'
-                                }
-                                onChange={(e) =>
-                                  setMeetReconcileSelections((prev) => ({
-                                    ...prev,
-                                    [`comp:${normalizeCompKey(
-                                      meetCommitPreview.unmatchedCompetition.rawName
-                                    )}|${meetCommitPreview.unmatchedCompetition.sampleDate}`]:
-                                      e.target.value,
-                                  }))
-                                }
-                                className="w-full px-2 py-1 border border-slate-200 rounded"
-                              >
-                                <option value="__NEW__">+ Add as New Competition</option>
-                                {masterCompetitions.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    Alias → {c.canonicalName} ({c.date || 'Any'})
-                                  </option>
-                                ))}
-                              </select>
+                              <div className="font-bold text-slate-900">
+                                {meetCommitPreview.unmatchedCompetition.rawName}{' '}
+                                <span className="font-mono text-cyan-700">
+                                  [{meetCommitPreview.unmatchedCompetition.sampleDate || 'No Date'}]
+                                </span>
+                              </div>
+                              {(() => {
+                                const item = meetCommitPreview.unmatchedCompetition;
+                                const selKey = `comp:${normalizeCompKey(item.rawName)}|${item.sampleDate}`;
+                                return (
+                                  <select
+                                    value={meetReconcileSelections[selKey] || '__NEW__'}
+                                    onChange={(e) =>
+                                      setMeetReconcileSelections((prev) => ({
+                                        ...prev,
+                                        [selKey]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                                  >
+                                    <option value="__NEW__">
+                                      + Create New Meet &quot;{item.rawName}&quot; (
+                                      {item.sampleDate || 'Any Date'})
+                                    </option>
+                                    {masterCompetitions.map((c) => (
+                                      <option key={c.id} value={c.id}>
+                                        Alias → {c.canonicalName} ({c.date || 'Any Date'})
+                                      </option>
+                                    ))}
+                                  </select>
+                                );
+                              })()}
                             </div>
                           )}
 
                           {meetCommitPreview.unmatchedAthletes.length > 0 && (
-                            <div className="bg-white p-3 rounded-lg border border-amber-200 space-y-2">
-                              <div className="font-bold text-slate-700">
-                                Athletes ({meetCommitPreview.unmatchedAthletes.length}):
+                            <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2.5 max-h-56 overflow-y-auto">
+                              <div className="text-xs font-bold uppercase text-slate-600">
+                                Unmatched Athletes ({meetCommitPreview.unmatchedAthletes.length})
                               </div>
-                              {meetCommitPreview.unmatchedAthletes.map((a) => {
-                                const k = `ath:${normalizeSwimmerKey(a.rawName)}`;
+                              {meetCommitPreview.unmatchedAthletes.map((item) => {
+                                const selKey = `ath:${normalizeSwimmerKey(item.rawName)}`;
                                 return (
-                                  <div key={k} className="space-y-1">
-                                    <div className="font-semibold">{a.rawName}</div>
+                                  <div key={selKey} className="space-y-1 text-xs">
+                                    <div className="font-bold text-slate-900">
+                                      {item.rawName}{' '}
+                                      <span className="text-slate-400 font-normal">
+                                        ({item.inferredGender})
+                                      </span>
+                                    </div>
                                     <select
-                                      value={meetReconcileSelections[k] || '__NEW__'}
+                                      value={meetReconcileSelections[selKey] || '__NEW__'}
                                       onChange={(e) =>
                                         setMeetReconcileSelections((prev) => ({
                                           ...prev,
-                                          [k]: e.target.value,
+                                          [selKey]: e.target.value,
                                         }))
                                       }
-                                      className="w-full px-2 py-1 border border-slate-200 rounded"
+                                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                                     >
-                                      <option value="__NEW__">+ Add New ({a.inferredGender})</option>
-                                      {masterRoster.map((m) => (
-                                        <option key={m.id} value={m.id}>
-                                          Alias → {m.canonicalName}
-                                        </option>
-                                      ))}
+                                      <option value="__NEW__">
+                                        + Add &quot;{item.rawName}&quot; to Roster
+                                      </option>
+                                      {masterRoster
+                                        .slice()
+                                        .sort((a, b) =>
+                                          compareByLastName(a.canonicalName, b.canonicalName)
+                                        )
+                                        .map((ath) => (
+                                          <option key={ath.id} value={ath.id}>
+                                            Alias → {ath.canonicalName} ({ath.gender})
+                                          </option>
+                                        ))}
                                     </select>
                                   </div>
                                 );
@@ -6223,29 +7165,31 @@ export default function App() {
                           )}
 
                           {meetCommitPreview.unmatchedEvents.length > 0 && (
-                            <div className="bg-white p-3 rounded-lg border border-amber-200 space-y-2">
-                              <div className="font-bold text-slate-700">
-                                Events ({meetCommitPreview.unmatchedEvents.length}):
+                            <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2.5 max-h-56 overflow-y-auto">
+                              <div className="text-xs font-bold uppercase text-slate-600">
+                                Unmatched Events ({meetCommitPreview.unmatchedEvents.length})
                               </div>
-                              {meetCommitPreview.unmatchedEvents.map((ev) => {
-                                const k = `ev:${ev.rawEvent.toLowerCase()}|${ev.genderHint}`;
+                              {meetCommitPreview.unmatchedEvents.map((item) => {
+                                const selKey = `ev:${item.rawEvent.toLowerCase()}|${item.genderHint}`;
                                 return (
-                                  <div key={k} className="space-y-1">
-                                    <div className="font-semibold">{ev.rawEvent}</div>
+                                  <div key={selKey} className="space-y-1 text-xs">
+                                    <div className="font-bold text-slate-900">{item.rawEvent}</div>
                                     <select
-                                      value={meetReconcileSelections[k] || '__NEW__'}
+                                      value={meetReconcileSelections[selKey] || '__NEW__'}
                                       onChange={(e) =>
                                         setMeetReconcileSelections((prev) => ({
                                           ...prev,
-                                          [k]: e.target.value,
+                                          [selKey]: e.target.value,
                                         }))
                                       }
-                                      className="w-full px-2 py-1 border border-slate-200 rounded"
+                                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                                     >
-                                      <option value="__NEW__">+ Add New Event</option>
-                                      {masterEvents.map((m) => (
-                                        <option key={m.id} value={m.id}>
-                                          Alias → {m.canonicalName}
+                                      <option value="__NEW__">
+                                        + Create New Event &quot;{item.rawEvent}&quot;
+                                      </option>
+                                      {masterEvents.map((ev) => (
+                                        <option key={ev.id} value={ev.id}>
+                                          Alias → {ev.canonicalName}
                                         </option>
                                       ))}
                                     </select>
@@ -6258,73 +7202,123 @@ export default function App() {
                       </div>
                     )}
 
-                  {/* Staged Meet Swims Preview Table */}
-                  {meetCommitPreview.rows.length > 0 && (
-                    <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[360px]">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
-                          <tr>
-                            <th className="py-2 px-3 w-8">Keep</th>
-                            <th className="py-2 px-3">Athlete</th>
-                            <th className="py-2 px-3 w-24">Class</th>
-                            <th className="py-2 px-3">Event</th>
-                            <th className="py-2 px-3">Time</th>
-                            <th className="py-2 px-3">Place / Type</th>
-                            <th className="py-2 px-3">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {meetCommitPreview.rows.map((r) => (
-                            <tr
-                              key={r.id}
-                              className={r.isDuplicate ? 'bg-slate-50 text-slate-400' : ''}
-                            >
-                              <td className="py-2 px-3">
-                                <input
-                                  type="checkbox"
-                                  checked={r.selected}
-                                  onChange={(e) => {
-                                    setExcludedMeetCommitIds((prev) => {
-                                      const next = new Set(prev);
-                                      if (e.target.checked) next.delete(r.id);
-                                      else next.add(r.id);
-                                      return next;
-                                    });
-                                  }}
-                                />
-                              </td>
-                              <td className="py-2 px-3 font-bold text-slate-900">{r.swimmerName}</td>
-                              <td className="py-2 px-3">
-                                <select
-                                  value={r.classYear || ''}
-                                  onChange={(e) =>
-                                    setMeetClassOverrides((prev) => ({
-                                      ...prev,
-                                      [r.swimmerKey]: e.target.value,
-                                    }))
-                                  }
-                                  className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[11px]"
-                                >
-                                  <option value="">—</option>
-                                  <option value="FR">FR</option>
-                                  <option value="SO">SO</option>
-                                  <option value="JR">JR</option>
-                                  <option value="SR">SR</option>
-                                  <option value="GR">GR</option>
-                                </select>
-                              </td>
-                              <td className="py-2 px-3">{r.eventLabel}</td>
-                              <td className="py-2 px-3 font-mono font-bold">{r.time}</td>
-                              <td className="py-2 px-3">
-                                {r.place ? `#${r.place}` : '—'} ({r.swimType})
-                              </td>
-                              <td className="py-2 px-3">
-                                {r.isDuplicate ? 'Already in DB' : 'Ready'}
-                              </td>
+                  {/* Staged Pre-Commit Swims & Class Year Verification Table */}
+                  {selectedTeam && selectedTeam !== 'ALL' && meetCommitPreview.rows.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="font-bold text-slate-700">
+                          Staged Swims Preview ({meetCommitPreview.rows.filter((r) => r.selected).length}{' '}
+                          new selected,{' '}
+                          {meetCommitPreview.rows.filter((r) => r.isDuplicate).length} already in
+                          database)
+                        </span>
+                        <span className="text-slate-500">
+                          Tip: Verify or fill in any blank Class Year (`FR`–`GR`) directly in the
+                          table before committing
+                        </span>
+                      </div>
+
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-80">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
+                            <tr>
+                              <th className="py-2 px-3 w-9">Include</th>
+                              <th className="py-2 px-3">Athlete</th>
+                              <th className="py-2 px-3 w-24">Class Year</th>
+                              <th className="py-2 px-3">Event</th>
+                              <th className="py-2 px-3">Time</th>
+                              <th className="py-2 px-3">Type</th>
+                              <th className="py-2 px-3">Status</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {meetCommitPreview.rows.map((row) => (
+                              <tr
+                                key={row.id}
+                                className={row.isDuplicate ? 'bg-slate-50/70 text-slate-400' : ''}
+                              >
+                                <td className="py-2 px-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={row.selected}
+                                    onChange={(e) => {
+                                      const checked = e.target.checked;
+                                      setExcludedMeetCommitIds((prev) => {
+                                        const next = new Set(prev);
+                                        if (checked) next.delete(row.id);
+                                        else next.add(row.id);
+                                        return next;
+                                      });
+                                    }}
+                                    className="rounded text-cyan-600 cursor-pointer"
+                                  />
+                                </td>
+                                <td className="py-2 px-3 font-bold text-slate-900">
+                                  {row.swimmerName}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <select
+                                    value={row.classYear || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setMeetClassOverrides((prev) => ({
+                                        ...prev,
+                                        [row.swimmerKey]: val,
+                                      }));
+                                    }}
+                                    className={`px-2 py-1 border rounded text-[11px] font-bold ${
+                                      row.classYear
+                                        ? 'bg-white border-slate-200 text-slate-800'
+                                        : 'bg-amber-50 border-amber-300 text-amber-800'
+                                    }`}
+                                  >
+                                    <option value="">—</option>
+                                    <option value="FR">FR</option>
+                                    <option value="SO">SO</option>
+                                    <option value="JR">JR</option>
+                                    <option value="SR">SR</option>
+                                    <option value="GR">GR</option>
+                                  </select>
+                                </td>
+                                <td className="py-2 px-3">{row.eventLabel}</td>
+                                <td className="py-2 px-3 font-mono font-bold text-cyan-800">
+                                  {row.time}
+                                </td>
+                                <td className="py-2 px-3">
+                                  {row.swimType === 'RELAY_LEADOFF' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800">
+                                      Relay Lead-Off (R)
+                                    </span>
+                                  ) : row.swimType === 'INTERMEDIATE_SPLIT' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
+                                      Split (S) • {row.splitContext}
+                                    </span>
+                                  ) : row.swimType === 'RELAY_WIN' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
+                                      Relay Win • {row.splitContext}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                      Official
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3">
+                                  {row.isDuplicate ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-600">
+                                      Already in DB
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                      Ready
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </div>
