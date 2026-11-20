@@ -4268,6 +4268,11 @@ export default function App() {
                                       Prelims (SF)
                                     </span>
                                   )}
+                                  {row.round === 'Time Trial' && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-bold">
+                                      Time Trial (TT)
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="py-2 px-3 font-mono text-[11px]">{row.date || '—'}</td>
                                 <td className="py-2 px-3">
@@ -5255,6 +5260,11 @@ export default function App() {
                                       {r.round === 'Prelims' && (
                                         <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
                                           Prelims (SF)
+                                        </span>
+                                      )}
+                                      {r.round === 'Time Trial' && (
+                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">
+                                          Time Trial (TT)
                                         </span>
                                       )}
                                     </div>
