@@ -1339,6 +1339,66 @@ export default function App() {
     );
   };
 
+  // Master List Lookups (must be defined before useMemo hooks that invoke them)
+  const resolveMasterAthlete = (rawName) => {
+    const key = normalizeSwimmerKey(rawName);
+    if (!key) return null;
+    return (
+      masterRoster.find(
+        (ath) =>
+          normalizeSwimmerKey(ath.canonicalName) === key ||
+          (ath.aliases || []).some((al) => normalizeSwimmerKey(al) === key)
+      ) || null
+    );
+  };
+
+  const resolveMasterCompetition = (rawComp, rawDate = '') => {
+    const key = normalizeCompKey(rawComp);
+    const dateKey = normalizeDateIso(rawDate);
+    if (!key) return null;
+
+    const nameMatches = (c) =>
+      normalizeCompKey(c.canonicalName) === key ||
+      (c.aliases || []).some((al) => normalizeCompKey(al) === key);
+
+    // 1. Require BOTH Competition Name/Alias AND Date to match when a date is present
+    if (dateKey) {
+      const exactDated = masterCompetitions.find(
+        (c) => normalizeDateIso(c.date) === dateKey && nameMatches(c)
+      );
+      if (exactDated) return exactDated;
+    }
+
+    // 2. Fallback only to Master Competitions explicitly configured with blank ("Any Date")
+    const undated = masterCompetitions.find(
+      (c) => !normalizeDateIso(c.date) && nameMatches(c)
+    );
+    if (undated) return undated;
+
+    return null;
+  };
+
+  const resolveMasterEvent = (rawEvent, fallbackGender = '') => {
+    const rawTrim = String(rawEvent || '').trim();
+    if (!rawTrim) return null;
+    const rawLower = rawTrim.toLowerCase();
+    const normKey = normalizeEventKey(rawTrim, fallbackGender);
+
+    const explicitMatch = masterEvents.find(
+      (ev) =>
+        ev.canonicalName.toLowerCase() === rawLower ||
+        (ev.aliases || []).some((al) => al.trim().toLowerCase() === rawLower)
+    );
+    if (explicitMatch) return explicitMatch;
+
+    if (normKey && (normKey.startsWith('women ') || normKey.startsWith('men '))) {
+      const keyMatch = masterEvents.find((ev) => ev.eventKey === normKey);
+      if (keyMatch) return keyMatch;
+    }
+
+    return null;
+  };
+
   // Build staged rows & unmatched Master List items for the loaded .cl2 meet (Section 5)
   const meetCommitPreview = useMemo(() => {
     if (!parsedData || !selectedTeam || selectedTeam === 'ALL') {
@@ -1776,66 +1836,6 @@ export default function App() {
     setBenchmarkStatusMsg(
       `Committed ${chosenEntries.length} verified ${targetName} performances from "${meetComp}" to database (${updated.length} total records).`
     );
-  };
-
-  // Master List Lookups
-  const resolveMasterAthlete = (rawName) => {
-    const key = normalizeSwimmerKey(rawName);
-    if (!key) return null;
-    return (
-      masterRoster.find(
-        (ath) =>
-          normalizeSwimmerKey(ath.canonicalName) === key ||
-          (ath.aliases || []).some((al) => normalizeSwimmerKey(al) === key)
-      ) || null
-    );
-  };
-
-  const resolveMasterCompetition = (rawComp, rawDate = '') => {
-    const key = normalizeCompKey(rawComp);
-    const dateKey = normalizeDateIso(rawDate);
-    if (!key) return null;
-
-    const nameMatches = (c) =>
-      normalizeCompKey(c.canonicalName) === key ||
-      (c.aliases || []).some((al) => normalizeCompKey(al) === key);
-
-    // 1. Require BOTH Competition Name/Alias AND Date to match when a date is present
-    if (dateKey) {
-      const exactDated = masterCompetitions.find(
-        (c) => normalizeDateIso(c.date) === dateKey && nameMatches(c)
-      );
-      if (exactDated) return exactDated;
-    }
-
-    // 2. Fallback only to Master Competitions explicitly configured with blank ("Any Date")
-    const undated = masterCompetitions.find(
-      (c) => !normalizeDateIso(c.date) && nameMatches(c)
-    );
-    if (undated) return undated;
-
-    return null;
-  };
-
-  const resolveMasterEvent = (rawEvent, fallbackGender = '') => {
-    const rawTrim = String(rawEvent || '').trim();
-    if (!rawTrim) return null;
-    const rawLower = rawTrim.toLowerCase();
-    const normKey = normalizeEventKey(rawTrim, fallbackGender);
-
-    const explicitMatch = masterEvents.find(
-      (ev) =>
-        ev.canonicalName.toLowerCase() === rawLower ||
-        (ev.aliases || []).some((al) => al.trim().toLowerCase() === rawLower)
-    );
-    if (explicitMatch) return explicitMatch;
-
-    if (normKey && (normKey.startsWith('women ') || normKey.startsWith('men '))) {
-      const keyMatch = masterEvents.find((ev) => ev.eventKey === normKey);
-      if (keyMatch) return keyMatch;
-    }
-
-    return null;
   };
 
   const updateHistoricalRecords = (next, changedItems = null, replaceAll = false) => {
