@@ -539,6 +539,20 @@ function parseSDIFContent(content) {
 
       const classYear = sliceCol(line, 8, 9);
       const swimmerName = sliceCol(line, 12, 39);
+      // Exact 1-based SDIF D0 column layout:
+      // Cols 56-63: Birthdate (MMDDYYYY)
+      // Cols 64-65: Age / Class ('20', 'FR', etc.)
+      // Col 66: Swimmer Sex ('M' / 'F')
+      // Col 67: Event Sex ('M' / 'F' / 'X')
+      // Cols 68-71: Event Distance ('  50', ' 100', '1000')
+      // Col 72: Stroke Code ('1'..'5')
+      // Cols 73-76: Event Number ('  3', '  4', ' 14')
+      const altClassYear = sliceCol(line, 64, 65);
+      const resolvedClass = ['FR', 'SO', 'JR', 'SR', 'GR'].includes(classYear)
+        ? classYear
+        : ['FR', 'SO', 'JR', 'SR', 'GR'].includes(altClassYear)
+        ? altClassYear
+        : '';
       const genderCode = sliceCol(line, 67, 67) || sliceCol(line, 66, 66);
       const distance = sliceCol(line, 68, 71);
       const strokeCode = sliceCol(line, 72, 72);
@@ -566,7 +580,7 @@ function parseSDIFContent(content) {
         teamName: teamsMap.get(teamCode)?.name || teamCode,
         swimmerName,
         preferredFirst: '',
-        classYear: ['FR', 'SO', 'JR', 'SR'].includes(classYear) ? classYear : '',
+        classYear: resolvedClass,
         genderCode,
         genderLabel,
         distance: parseInt(distance, 10) || distance,
@@ -678,6 +692,12 @@ function parseSDIFContent(content) {
       const swimmerName = sliceCol(line, 23, 50);
       const legOrderRaw = sliceCol(line, 77, 77);
       const classYear = sliceCol(line, 8, 9);
+      const altClassYear = sliceCol(line, 72, 73);
+      const resolvedLegClass = ['FR', 'SO', 'JR', 'SR', 'GR'].includes(classYear)
+        ? classYear
+        : ['FR', 'SO', 'JR', 'SR', 'GR'].includes(altClassYear)
+        ? altClassYear
+        : '';
       const prefFirst = sliceCol(line, 99, 113).replace(/^[0-9A-F]{2,}/i, '').trim();
 
       const parsedLegOrder = /^[1-4]$/.test(legOrderRaw)
@@ -690,7 +710,7 @@ function parseSDIFContent(content) {
         legOrder: parsedLegOrder,
         swimmerName,
         preferredFirst: prefFirst,
-        classYear: ['FR', 'SO', 'JR', 'SR'].includes(classYear) ? classYear : '',
+        classYear: resolvedLegClass,
         splitInterval: 50,
         splitType: 'C',
         splitPages: [],
@@ -760,11 +780,16 @@ function parseSDIFContent(content) {
     }
   }
 
+  // Propagate preferredFirst and classYear across all individual & relay appearances of the same swimmer
   const preferredBySwimmerKey = new Map();
+  const classBySwimmerKey = new Map();
   teamsMap.forEach((team, tCode) => {
     team.swimmers.forEach((sw, sName) => {
       if (sw.preferredFirst) {
         preferredBySwimmerKey.set(`${tCode}|${sName}`, sw.preferredFirst);
+      }
+      if (sw.classYear) {
+        classBySwimmerKey.set(`${tCode}|${sName}`, sw.classYear);
       }
     });
   });
@@ -773,12 +798,18 @@ function parseSDIFContent(content) {
     if (!rec.preferredFirst) {
       rec.preferredFirst = preferredBySwimmerKey.get(`${rec.teamCode}|${rec.swimmerName}`) || '';
     }
+    if (!rec.classYear) {
+      rec.classYear = classBySwimmerKey.get(`${rec.teamCode}|${rec.swimmerName}`) || '';
+    }
   });
 
   relayResults.forEach((rel) => {
     rel.legs.forEach((leg) => {
       if (!leg.preferredFirst) {
         leg.preferredFirst = preferredBySwimmerKey.get(`${rel.teamCode}|${leg.swimmerName}`) || '';
+      }
+      if (!leg.classYear) {
+        leg.classYear = classBySwimmerKey.get(`${rel.teamCode}|${leg.swimmerName}`) || '';
       }
     });
   });
@@ -1120,9 +1151,13 @@ export default function App() {
   // Staging & Importer State
   const [pasteSheetText, setPasteSheetText] = useState('');
   const [stagedHistoryRows, setStagedHistoryRows] = useState([]);
+  const [reconcileSelections, setReconcileSelections] = useState({});
   const [benchmarkStatusMsg, setBenchmarkStatusMsg] = useState('');
+  const [meetReconcileSelections, setMeetReconcileSelections] = useState({});
+  const [meetClassOverrides, setMeetClassOverrides] = useState({});
+  const [excludedMeetCommitIds, setExcludedMeetCommitIds] = useState(new Set());
 
-  // Master List Forms & Bulk Text State
+  // Master List Quick-Add & Bulk Form State
   const [newAthleteName, setNewAthleteName] = useState('');
   const [newAthleteGender, setNewAthleteGender] = useState('Women');
   const [newAthleteActive, setNewAthleteActive] = useState(true);
@@ -1133,18 +1168,8 @@ export default function App() {
   const [bulkCompText, setBulkCompText] = useState('');
   const [newEventName, setNewEventName] = useState('');
   const [newEventAlias, setNewEventAlias] = useState('');
-  const [reconcileSelections, setReconcileSelections] = useState({});
 
-  // Record Book Viewer State
-  const [recordBookGender, setRecordBookGender] = useState('Women');
-  const [recordBookEventKey, setRecordBookEventKey] = useState('women 1000 freestyle');
-  const [recordBookSubTab, setRecordBookSubTab] = useState('top10'); // 'top10' | 'wins'
-  const [winsActiveOnly, setWinsActiveOnly] = useState(false);
-  const [winsCompetitionFilter, setWinsCompetitionFilter] = useState('ALL');
-  const [eventWinsActiveOnly, setEventWinsActiveOnly] = useState(false);
-  const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
-
-  // Committed Database Filter, Sort & Pagination State
+  // Committed Database Filter, Sort, Pagination & Bulk Delete State
   const [dbSearchName, setDbSearchName] = useState('');
   const [dbFilterEvent, setDbFilterEvent] = useState('ALL');
   const [dbFilterCompetition, setDbFilterCompetition] = useState('ALL');
@@ -1156,218 +1181,600 @@ export default function App() {
   const [selectedDbIds, setSelectedDbIds] = useState(new Set());
   const [pendingDbDeleteIds, setPendingDbDeleteIds] = useState(null);
 
-  // Anonymous Firebase Auth & Live Cloud Sync State
+  // Record Book & All-Time Wins State
+  const [recordBookSubTab, setRecordBookSubTab] = useState('top10');
+  const [recordBookGender, setRecordBookGender] = useState('Women');
+  const [recordBookEventKey, setRecordBookEventKey] = useState('women 50 freestyle');
+  const [eventWinsActiveOnly, setEventWinsActiveOnly] = useState(false);
+  const [winsActiveOnly, setWinsActiveOnly] = useState(false);
+  const [winsCompetitionFilter, setWinsCompetitionFilter] = useState('ALL');
+  const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
+
+  // File Input Refs
+  const fileInputRef = useRef(null);
+  const historyCsvInputRef = useRef(null);
+
+  // Firebase Cloud Sync State
   const [cloudUser, setCloudUser] = useState(null);
   const [cloudSyncStatus, setCloudSyncStatus] = useState('connecting');
   const [cloudErrorMsg, setCloudErrorMsg] = useState('');
 
-  const fileInputRef = useRef(null);
-  const historyCsvInputRef = useRef(null);
-
-  // 1. Silent Anonymous Authentication on Mount
   useEffect(() => {
-    let isMounted = true;
-    try {
-      if (typeof signInAnonymously === 'function' && auth) {
-        signInAnonymously(auth).catch((err) => {
-          if (!isMounted) return;
-          setCloudSyncStatus('offline');
-          setCloudErrorMsg(err?.code || err?.message || 'Anonymous auth failed');
-        });
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setCloudUser(user);
+        setCloudErrorMsg('');
       } else {
-        setCloudSyncStatus('offline');
-        setCloudErrorMsg('Firebase auth module unavailable');
+        signInAnonymously(auth).catch((err) => {
+          setCloudSyncStatus('offline');
+          setCloudErrorMsg(err?.code || err?.message || 'auth-failed');
+        });
       }
-    } catch (err) {
-      if (isMounted) {
-        setCloudSyncStatus('offline');
-        setCloudErrorMsg(err?.message || 'Auth initialization error');
-      }
-    }
-
-    const unsubAuth =
-      typeof onAuthStateChanged === 'function' && auth
-        ? onAuthStateChanged(auth, (u) => {
-            if (!isMounted) return;
-            setCloudUser(u);
-            if (u) {
-              setCloudSyncStatus('synced');
-              setCloudErrorMsg('');
-            }
-          })
-        : () => {};
-
-    return () => {
-      isMounted = false;
-      unsubAuth();
-    };
+    });
+    return () => unsubAuth();
   }, []);
 
-  // 2. Real-time Firestore Listeners once Anonymous Auth is active
   useEffect(() => {
-    if (!cloudUser || typeof onSnapshot !== 'function' || !db) return;
+    if (!cloudUser) return;
 
-    const unsubPerfs = onSnapshot(
+    const unsubPerf = onSnapshot(
       collection(db, 'performances'),
       (snap) => {
-        if (!snap.empty) {
-          const rows = snap.docs.map((d) => {
-            const data = d.data();
-            return {
-              ...data,
-              id: d.id,
-              dateObj: parseFlexibleDate(data.date),
-            };
-          });
-          setHistoricalRecords(rows);
-          try {
-            localStorage.setItem('swimmeet_historical_records_v1', JSON.stringify(rows));
-          } catch {}
-        }
+        const rows = snap.docs.map((d) => {
+          const data = d.data();
+          return { ...data, id: d.id, dateObj: parseFlexibleDate(data.date) };
+        });
+        setHistoricalRecords(rows);
+        try {
+          localStorage.setItem('swimmeet_historical_records_v1', JSON.stringify(rows));
+        } catch {}
         setCloudSyncStatus('synced');
         setCloudErrorMsg('');
       },
       (err) => {
         setCloudSyncStatus('offline');
-        setCloudErrorMsg(err?.code || err?.message || 'Firestore read blocked');
+        setCloudErrorMsg(err?.code || err?.message || 'firestore-error');
       }
     );
 
-    const unsubRoster = onSnapshot(
-      collection(db, 'master_roster'),
-      (snap) => {
-        if (!snap.empty) {
-          const rows = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-          setMasterRoster(rows);
-          try {
-            localStorage.setItem('swimmeet_master_roster_v1', JSON.stringify(rows));
-          } catch {}
-        }
-      },
-      (err) => {
-        setCloudSyncStatus('offline');
-        setCloudErrorMsg(err?.code || err?.message || 'Roster read blocked');
-      }
-    );
+    const unsubRoster = onSnapshot(collection(db, 'master_roster'), (snap) => {
+      const rows = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+      setMasterRoster(rows);
+      try {
+        localStorage.setItem('swimmeet_master_roster_v1', JSON.stringify(rows));
+      } catch {}
+    });
 
-    const unsubComps = onSnapshot(
-      collection(db, 'master_competitions'),
-      (snap) => {
-        if (!snap.empty) {
-          const rows = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-          setMasterCompetitions(rows);
-          try {
-            localStorage.setItem('swimmeet_master_competitions_v1', JSON.stringify(rows));
-          } catch {}
-        }
-      },
-      (err) => {
-        setCloudSyncStatus('offline');
-        setCloudErrorMsg(err?.code || err?.message || 'Competitions read blocked');
-      }
-    );
+    const unsubComps = onSnapshot(collection(db, 'master_competitions'), (snap) => {
+      const rows = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+      setMasterCompetitions(rows);
+      try {
+        localStorage.setItem('swimmeet_master_competitions_v1', JSON.stringify(rows));
+      } catch {}
+    });
 
-    const unsubEvents = onSnapshot(
-      collection(db, 'master_events'),
-      (snap) => {
-        if (!snap.empty) {
-          const rows = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-          // Keep default canonical events intact if Firestore only had a partial write
-          const existingKeys = new Set(rows.map((r) => r.eventKey));
-          const merged = [
-            ...rows,
-            ...DEFAULT_MASTER_EVENTS.filter((def) => !existingKeys.has(def.eventKey)),
-          ];
-          setMasterEvents(merged);
-          try {
-            localStorage.setItem('swimmeet_master_events_v1', JSON.stringify(merged));
-          } catch {}
-        }
-      },
-      (err) => {
-        setCloudSyncStatus('offline');
-        setCloudErrorMsg(err?.code || err?.message || 'Events read blocked');
+    const unsubEvents = onSnapshot(collection(db, 'master_events'), (snap) => {
+      if (!snap.empty) {
+        const cloudRows = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+        const mergedMap = new Map(DEFAULT_MASTER_EVENTS.map((ev) => [ev.eventKey, ev]));
+        cloudRows.forEach((ev) => {
+          mergedMap.set(ev.eventKey || ev.id, ev);
+        });
+        const mergedList = Array.from(mergedMap.values());
+        setMasterEvents(mergedList);
+        try {
+          localStorage.setItem('swimmeet_master_events_v1', JSON.stringify(mergedList));
+        } catch {}
       }
-    );
+    });
 
     return () => {
-      unsubPerfs();
+      unsubPerf();
       unsubRoster();
       unsubComps();
       unsubEvents();
     };
   }, [cloudUser]);
 
-  // Helper to batch-sync an array of documents to Firestore
   const syncCollectionToCloud = async (colName, items, replaceAll = false) => {
     if (!cloudUser) return;
     try {
       if (replaceAll) {
         const existingSnap = await getDocs(collection(db, colName));
         const delDocs = existingSnap.docs;
-        for (let i = 0; i < delDocs.length; i += 450) {
+        for (let i = 0; i < delDocs.length; i += 400) {
           const batch = writeBatch(db);
-          delDocs.slice(i, i + 450).forEach((d) => batch.delete(d.ref));
+          delDocs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
           await batch.commit();
         }
       }
-      for (let i = 0; i < items.length; i += 450) {
+      for (let i = 0; i < items.length; i += 400) {
         const batch = writeBatch(db);
-        items.slice(i, i + 450).forEach((item) => {
-          const clean = { ...item };
-          delete clean.dateObj;
-          const safeId = String(
-            clean.id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-          ).replace(/\//g, '_');
-          batch.set(doc(db, colName, safeId), clean, { merge: true });
+        items.slice(i, i + 400).forEach((item) => {
+          const { dateObj, ...serializable } = item;
+          const docId = String(item.id || `${colName}-${Date.now()}-${Math.random()}`);
+          batch.set(doc(db, colName, docId), { ...serializable, id: docId });
         });
         await batch.commit();
       }
       setCloudSyncStatus('synced');
+      setCloudErrorMsg('');
     } catch (err) {
       setCloudSyncStatus('offline');
-      setCloudErrorMsg(err?.code || err?.message || 'Cloud sync write error');
+      setCloudErrorMsg(err?.code || err?.message || 'sync-failed');
     }
   };
 
-  // Delete specific performance IDs from both local state and Firestore
   const handleDeleteDbRecords = async (idsToDelete) => {
     const idSet = new Set(idsToDelete);
-    if (idSet.size === 0) return;
-
     const next = historicalRecords.filter((r) => !idSet.has(r.id));
     setHistoricalRecords(next);
+    setSelectedDbIds((prev) => {
+      const updatedSel = new Set(prev);
+      idsToDelete.forEach((id) => updatedSel.delete(id));
+      return updatedSel;
+    });
+    setPendingDbDeleteIds(null);
     try {
       localStorage.setItem('swimmeet_historical_records_v1', JSON.stringify(next));
     } catch {}
 
-    setSelectedDbIds((prev) => {
-      const updated = new Set(prev);
-      idSet.forEach((id) => updated.delete(id));
-      return updated;
-    });
-    setPendingDbDeleteIds(null);
-
-    if (cloudUser && db) {
+    if (cloudUser) {
       try {
-        const idArray = Array.from(idSet);
-        for (let i = 0; i < idArray.length; i += 450) {
+        for (let i = 0; i < idsToDelete.length; i += 400) {
           const batch = writeBatch(db);
-          idArray.slice(i, i + 450).forEach((rawId) => {
-            const safeId = String(rawId).replace(/\//g, '_');
-            batch.delete(doc(db, 'performances', safeId));
+          idsToDelete.slice(i, i + 400).forEach((id) => {
+            batch.delete(doc(db, 'performances', String(id)));
           });
           await batch.commit();
         }
-        setCloudSyncStatus('synced');
       } catch (err) {
         setCloudSyncStatus('offline');
-        setCloudErrorMsg(err?.code || err?.message || 'Cloud delete error');
+        setCloudErrorMsg(err?.code || err?.message || 'delete-failed');
       }
     }
 
     setBenchmarkStatusMsg(
-      `Deleted ${idSet.size} record${idSet.size === 1 ? '' : 's'} from database (${next.length} remaining).`
+      `Deleted ${idsToDelete.length} record${idsToDelete.length === 1 ? '' : 's'} from database.`
+    );
+  };
+
+  // Build staged rows & unmatched Master List items for the loaded .cl2 meet (Section 5)
+  const meetCommitPreview = useMemo(() => {
+    if (!parsedData || !selectedTeam || selectedTeam === 'ALL') {
+      return {
+        rows: [],
+        unmatchedCompetition: null,
+        unmatchedAthletes: [],
+        unmatchedEvents: [],
+      };
+    }
+
+    const targetCode = selectedTeam;
+    const meetComp = parsedData.meetInfo.name || 'Imported Meet';
+    const meetLoc = [parsedData.meetInfo.city, parsedData.meetInfo.state]
+      .filter(Boolean)
+      .join(', ');
+    const meetDate = normalizeDateIso(
+      parsedData.meetInfo.isoDate || parsedData.meetInfo.startDate || ''
+    );
+
+    const matchedComp = resolveMasterCompetition(meetComp, meetDate);
+    const finalComp = matchedComp ? matchedComp.canonicalName : meetComp;
+    const finalDate = matchedComp?.date ? normalizeDateIso(matchedComp.date) : meetDate;
+    const finalLoc = matchedComp?.defaultLocation || meetLoc;
+
+    const existingHashes = new Set(
+      historicalRecords.map(
+        (r) =>
+          `${r.swimmerKey}|${r.eventKey}|${r.seconds.toFixed(2)}|${r.date}|${r.round || 'Finals'}|${r.place}`
+      )
+    );
+
+    const unmatchedAthletesMap = new Map();
+    const unmatchedEventsMap = new Map();
+    const rows = [];
+
+    const registerSwimmerAndEvent = (displaySwimmer, genderLabel, eventLabel) => {
+      const resolvedAth = resolveMasterAthlete(displaySwimmer);
+      const finalName = resolvedAth ? resolvedAth.canonicalName : displaySwimmer;
+      if (!resolvedAth) {
+        const aKey = normalizeSwimmerKey(displaySwimmer);
+        if (!unmatchedAthletesMap.has(aKey)) {
+          unmatchedAthletesMap.set(aKey, {
+            rawName: displaySwimmer,
+            inferredGender: genderLabel === 'Men' ? 'Men' : 'Women',
+            count: 1,
+          });
+        } else {
+          unmatchedAthletesMap.get(aKey).count += 1;
+        }
+      }
+
+      const resolvedEv = resolveMasterEvent(eventLabel, genderLabel);
+      const evKey = normalizeEventKey(eventLabel, genderLabel);
+      const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
+      const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : eventLabel;
+      if (!resolvedEv && eventLabel) {
+        const eKey = `${eventLabel.trim().toLowerCase()}|${genderLabel}`;
+        if (!unmatchedEventsMap.has(eKey)) {
+          unmatchedEventsMap.set(eKey, {
+            rawEvent: eventLabel.trim(),
+            genderHint: genderLabel,
+            count: 1,
+          });
+        } else {
+          unmatchedEventsMap.get(eKey).count += 1;
+        }
+      }
+
+      return { finalName, finalEvKey, finalEvLabel };
+    };
+
+    // 1. Individual swims
+    parsedData.individualResults.forEach((entry) => {
+      if (entry.teamCode !== targetCode) return;
+      if (
+        !entry.finalsTime ||
+        entry.finalsTime === 'NT' ||
+        entry.finalsTime === 'DQ' ||
+        entry.finalsTime === 'SCR'
+      )
+        return;
+      const sec = timeToSeconds(entry.finalsTime);
+      if (sec === null) return;
+
+      const displaySwimmer = formatSwimmerDisplay(entry.swimmerName, entry.preferredFirst);
+      const { finalName, finalEvKey, finalEvLabel } = registerSwimmerAndEvent(
+        displaySwimmer,
+        entry.genderLabel,
+        entry.eventLabel
+      );
+      const swKey = normalizeSwimmerKey(finalName);
+      const effectiveClass =
+        meetClassOverrides[swKey] !== undefined
+          ? meetClassOverrides[swKey]
+          : normalizeClass(entry.classYear);
+      const placeStr = entry.place ? String(entry.place) : '';
+      const hash = `${swKey}|${finalEvKey}|${sec.toFixed(2)}|${finalDate}|Finals|${placeStr}`;
+      const isDuplicate = existingHashes.has(hash);
+      const rowId = `cl2-ind-${entry.id}`;
+
+      rows.push({
+        id: rowId,
+        swimmerName: finalName,
+        swimmerKey: swKey,
+        classYear: effectiveClass,
+        eventKey: finalEvKey,
+        eventLabel: finalEvLabel,
+        time: entry.finalsTime,
+        seconds: sec,
+        date: finalDate,
+        dateObj: parseFlexibleDate(finalDate),
+        location: finalLoc,
+        competition: finalComp,
+        round: 'Finals',
+        place: placeStr,
+        swimType: 'OFFICIAL',
+        isOfficial: true,
+        splitContext: '',
+        source: 'cl2_meet',
+        isDuplicate,
+        selected: !isDuplicate && !excludedMeetCommitIds.has(rowId),
+      });
+
+      // Optional legal opening splits
+      if (includeSplitsOnCommit && entry.splits && entry.splits.length > 0) {
+        const legalSplits = extractLegalOpeningSplits(
+          Number(entry.distance) || 0,
+          entry.genderLabel,
+          entry.strokeName,
+          finalEvLabel,
+          entry.splits,
+          entry.splitInterval,
+          entry.splitType
+        );
+        legalSplits.forEach((spItem, sIdx) => {
+          const spResolved = registerSwimmerAndEvent(
+            displaySwimmer,
+            entry.genderLabel,
+            spItem.eventLabel
+          );
+          if (!spResolved.finalEvKey) return;
+          const sHash = `${swKey}|${spResolved.finalEvKey}|${spItem.seconds.toFixed(2)}|${finalDate}|Finals|S`;
+          const sDup = existingHashes.has(sHash);
+          const sRowId = `cl2-sp-${entry.id}-${sIdx}`;
+          rows.push({
+            id: sRowId,
+            swimmerName: finalName,
+            swimmerKey: swKey,
+            classYear: effectiveClass,
+            eventKey: spResolved.finalEvKey,
+            eventLabel: spResolved.finalEvLabel,
+            time: spItem.time,
+            seconds: spItem.seconds,
+            date: finalDate,
+            dateObj: parseFlexibleDate(finalDate),
+            location: finalLoc,
+            competition: finalComp,
+            round: 'Finals',
+            place: 'S',
+            swimType: 'INTERMEDIATE_SPLIT',
+            isOfficial: true,
+            splitContext: spItem.context,
+            source: 'cl2_split',
+            isDuplicate: sDup,
+            selected: !sDup && !excludedMeetCommitIds.has(sRowId),
+          });
+        });
+      }
+    });
+
+    // 2. Relay Lead-Offs (R) & Relay Team Wins
+    parsedData.relayResults.forEach((entry) => {
+      if (entry.teamCode !== targetCode) return;
+      if (!entry.legs || entry.legs.length === 0) return;
+
+      const legDist = Math.round((Number(entry.distance) || 0) / 4);
+      const legStroke = String(entry.strokeName || '').includes('Medley')
+        ? 'Backstroke'
+        : 'Freestyle';
+      const legEvLabel = `${entry.genderLabel} ${legDist} ${legStroke}`;
+      const legBreakdown = calculateRelayLegBreakdown(entry);
+
+      const leadOffLeg = legBreakdown.find((l) => l.legOrder === 1);
+      if (leadOffLeg && leadOffLeg.swimmerName && leadOffLeg.legTotalTime !== '-') {
+        const splitSec = timeToSeconds(leadOffLeg.legTotalTime);
+        if (splitSec !== null) {
+          const displayLead = formatSwimmerDisplay(
+            leadOffLeg.swimmerName,
+            leadOffLeg.preferredFirst
+          );
+          const { finalName, finalEvKey, finalEvLabel } = registerSwimmerAndEvent(
+            displayLead,
+            entry.genderLabel,
+            legEvLabel
+          );
+          const swKey = normalizeSwimmerKey(finalName);
+          const effectiveClass =
+            meetClassOverrides[swKey] !== undefined
+              ? meetClassOverrides[swKey]
+              : normalizeClass(leadOffLeg.classYear);
+          const hash = `${swKey}|${finalEvKey}|${splitSec.toFixed(2)}|${finalDate}|Finals|R`;
+          const isDup = existingHashes.has(hash);
+          const rRowId = `cl2-lo-${entry.id}`;
+          rows.push({
+            id: rRowId,
+            swimmerName: finalName,
+            swimmerKey: swKey,
+            classYear: effectiveClass,
+            eventKey: finalEvKey,
+            eventLabel: finalEvLabel,
+            time: leadOffLeg.legTotalTime,
+            seconds: splitSec,
+            date: finalDate,
+            dateObj: parseFlexibleDate(finalDate),
+            location: finalLoc,
+            competition: finalComp,
+            round: 'Finals',
+            place: 'R',
+            swimType: 'RELAY_LEADOFF',
+            isOfficial: true,
+            splitContext: `Lead-Off (${entry.eventLabel})`,
+            source: 'cl2_leadoff',
+            isDuplicate: isDup,
+            selected: !isDup && !excludedMeetCommitIds.has(rRowId),
+          });
+        }
+      }
+
+      if (Number(entry.place) === 1) {
+        const relaySec = timeToSeconds(entry.finalsTime);
+        if (relaySec !== null) {
+          legBreakdown.forEach((leg) => {
+            if (!leg.swimmerName) return;
+            const displaySwimmer = formatSwimmerDisplay(leg.swimmerName, leg.preferredFirst);
+            const { finalName, finalEvKey, finalEvLabel } = registerSwimmerAndEvent(
+              displaySwimmer,
+              entry.genderLabel,
+              entry.eventLabel
+            );
+            const swKey = normalizeSwimmerKey(finalName);
+            const effectiveClass =
+              meetClassOverrides[swKey] !== undefined
+                ? meetClassOverrides[swKey]
+                : normalizeClass(leg.classYear);
+            const winHash = `${swKey}|${finalEvKey}|${relaySec.toFixed(2)}|${finalDate}|Finals|1`;
+            const isDup = existingHashes.has(winHash);
+            const wRowId = `cl2-rw-${entry.id}-leg${leg.legOrder}`;
+            rows.push({
+              id: wRowId,
+              swimmerName: finalName,
+              swimmerKey: swKey,
+              classYear: effectiveClass,
+              eventKey: finalEvKey,
+              eventLabel: finalEvLabel,
+              time: entry.finalsTime,
+              seconds: relaySec,
+              date: finalDate,
+              dateObj: parseFlexibleDate(finalDate),
+              location: finalLoc,
+              competition: finalComp,
+              round: 'Finals',
+              place: '1',
+              swimType: 'RELAY_WIN',
+              isOfficial: false,
+              splitContext: `Leg ${leg.legOrder}${
+                leg.legTotalTime !== '-' ? ` (${leg.legTotalTime})` : ''
+              }`,
+              source: 'cl2_relay_win',
+              isDuplicate: isDup,
+              selected: !isDup && !excludedMeetCommitIds.has(wRowId),
+            });
+          });
+        }
+      }
+    });
+
+    return {
+      rows,
+      matchedComp,
+      unmatchedCompetition: !matchedComp
+        ? {
+            rawName: meetComp,
+            sampleDate: meetDate,
+            sampleLocation: meetLoc,
+          }
+        : null,
+      unmatchedAthletes: Array.from(unmatchedAthletesMap.values()),
+      unmatchedEvents: Array.from(unmatchedEventsMap.values()),
+    };
+  }, [
+    parsedData,
+    selectedTeam,
+    historicalRecords,
+    masterRoster,
+    masterCompetitions,
+    masterEvents,
+    includeSplitsOnCommit,
+    meetClassOverrides,
+    excludedMeetCommitIds,
+  ]);
+
+  // Apply Master List reconciliations directly for the active .cl2 meet
+  const handleApplyMeetReconciliations = () => {
+    let nextRoster = [...masterRoster];
+    let nextComps = [...masterCompetitions];
+    let nextEvents = [...masterEvents];
+    const changedRoster = [];
+    const changedComps = [];
+    const changedEvents = [];
+
+    if (meetCommitPreview.unmatchedCompetition) {
+      const item = meetCommitPreview.unmatchedCompetition;
+      const selKey = `comp:${normalizeCompKey(item.rawName)}|${item.sampleDate}`;
+      const choice = meetReconcileSelections[selKey] || '__NEW__';
+      if (choice === '__NEW__') {
+        const created = {
+          id: `comp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          canonicalName: item.rawName,
+          date: item.sampleDate,
+          defaultLocation: item.sampleLocation,
+          aliases: [],
+        };
+        nextComps.push(created);
+        changedComps.push(created);
+      } else {
+        nextComps = nextComps.map((c) => {
+          if (c.id !== choice) return c;
+          const updated = {
+            ...c,
+            date: normalizeDateIso(c.date) || item.sampleDate,
+            aliases: Array.from(new Set([...(c.aliases || []), item.rawName])),
+          };
+          changedComps.push(updated);
+          return updated;
+        });
+      }
+    }
+
+    meetCommitPreview.unmatchedAthletes.forEach((item) => {
+      const selKey = `ath:${normalizeSwimmerKey(item.rawName)}`;
+      const choice = meetReconcileSelections[selKey] || '__NEW__';
+      if (choice === '__NEW__') {
+        const created = {
+          id: `ath-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          canonicalName: item.rawName,
+          gender: item.inferredGender,
+          isActive: true,
+          aliases: [],
+        };
+        nextRoster.push(created);
+        changedRoster.push(created);
+      } else {
+        nextRoster = nextRoster.map((ath) => {
+          if (ath.id !== choice) return ath;
+          const updated = {
+            ...ath,
+            aliases: Array.from(new Set([...(ath.aliases || []), item.rawName])),
+          };
+          changedRoster.push(updated);
+          return updated;
+        });
+      }
+    });
+
+    meetCommitPreview.unmatchedEvents.forEach((item) => {
+      const selKey = `ev:${item.rawEvent.toLowerCase()}|${item.genderHint}`;
+      const choice = meetReconcileSelections[selKey] || '__NEW__';
+      if (choice === '__NEW__') {
+        const evKey = normalizeEventKey(item.rawEvent, item.genderHint) || item.rawEvent.toLowerCase();
+        const created = {
+          id: `ev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          canonicalName: item.rawEvent,
+          eventKey: evKey,
+          gender: item.genderHint === 'Men' ? 'Men' : 'Women',
+          isRelay: item.rawEvent.toLowerCase().includes('relay'),
+          aliases: [],
+        };
+        nextEvents.push(created);
+        changedEvents.push(created);
+      } else {
+        nextEvents = nextEvents.map((ev) => {
+          if (ev.id !== choice) return ev;
+          const updated = {
+            ...ev,
+            aliases: Array.from(new Set([...(ev.aliases || []), item.rawEvent])),
+          };
+          changedEvents.push(updated);
+          return updated;
+        });
+      }
+    });
+
+    if (changedRoster.length > 0) updateMasterRoster(nextRoster, changedRoster);
+    if (changedComps.length > 0) updateMasterCompetitions(nextComps, changedComps);
+    if (changedEvents.length > 0) updateMasterEvents(nextEvents, changedEvents);
+    setMeetReconcileSelections({});
+    setBenchmarkStatusMsg(
+      'Reconciled meet competition, athletes, and events into Master Lists.'
+    );
+  };
+
+  // Commit current loaded meet performances to database using verified staged rows
+  const handleCommitCurrentMeet = () => {
+    if (!parsedData) return;
+
+    if (!selectedTeam || selectedTeam === 'ALL') {
+      setBenchmarkStatusMsg(
+        'Select a specific Primary Program Focus (e.g., Gettysburg College) before committing so opponent times are not imported.'
+      );
+      return;
+    }
+
+    const targetCode = selectedTeam;
+    const targetTeamObj = parsedData.teams.find((t) => t.code === targetCode);
+    const targetName = targetTeamObj?.name || targetCode;
+    const meetComp = parsedData.meetInfo.name || 'Imported Meet';
+
+    const chosenEntries = meetCommitPreview.rows
+      .filter((r) => r.selected)
+      .map(({ isDuplicate, selected, ...cleanRow }, idx) => ({
+        ...cleanRow,
+        id: `meet-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+      }));
+
+    if (chosenEntries.length === 0) {
+      setBenchmarkStatusMsg(
+        `No new ${targetName} performances selected to commit (all eligible times are already in the database or unchecked).`
+      );
+      return;
+    }
+
+    const updated = [...historicalRecords, ...chosenEntries];
+    updateHistoricalRecords(updated, chosenEntries, false);
+    setBenchmarkStatusMsg(
+      `Committed ${chosenEntries.length} verified ${targetName} performances from "${meetComp}" to database (${updated.length} total records).`
     );
   };
 
@@ -1972,241 +2379,6 @@ export default function App() {
     setPasteSheetText('');
   };
 
-  // Commit current loaded meet performances to database
-  const handleCommitCurrentMeet = () => {
-    if (!parsedData) return;
-
-    if (!selectedTeam || selectedTeam === 'ALL') {
-      setBenchmarkStatusMsg(
-        'Select a specific Primary Program Focus (e.g., Gettysburg College) in Section 4 or Post-Meet Tools before committing so opponent times are not imported.'
-      );
-      return;
-    }
-
-    const targetCode = selectedTeam;
-    const targetTeamObj = parsedData.teams.find((t) => t.code === targetCode);
-    const targetName = targetTeamObj?.name || targetCode;
-    const meetComp = parsedData.meetInfo.name || 'Imported Meet';
-    const meetLoc = [parsedData.meetInfo.city, parsedData.meetInfo.state]
-      .filter(Boolean)
-      .join(', ');
-    const meetDate = parsedData.meetInfo.isoDate || parsedData.meetInfo.startDate || '';
-
-    const existingHashes = new Set(
-      historicalRecords.map(
-        (r) =>
-          `${r.swimmerKey}|${r.eventKey}|${r.seconds.toFixed(2)}|${r.date}|${r.place}`
-      )
-    );
-
-    const newEntries = [];
-
-    // 1. Individual Results
-    parsedData.individualResults.forEach((entry) => {
-      if (entry.teamCode !== targetCode) return;
-      if (
-        !entry.finalsTime ||
-        entry.finalsTime === 'NT' ||
-        entry.finalsTime === 'DQ' ||
-        entry.finalsTime === 'SCR'
-      )
-        return;
-      const sec = timeToSeconds(entry.finalsTime);
-      if (sec === null) return;
-
-      const displaySwimmer = formatSwimmerDisplay(entry.swimmerName, entry.preferredFirst);
-      const resolvedAth = resolveMasterAthlete(displaySwimmer);
-      const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
-      const resolvedEv = resolveMasterEvent(entry.eventLabel, entry.genderLabel);
-      const finalName = resolvedAth ? resolvedAth.canonicalName : displaySwimmer;
-      const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
-      const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
-      const finalLoc = resolvedComp?.defaultLocation || meetLoc;
-      const evKey = normalizeEventKey(entry.eventLabel, entry.genderLabel);
-      const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
-      const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : entry.eventLabel;
-      const placeStr = entry.place ? String(entry.place) : '';
-
-      const hash = `${normalizeSwimmerKey(finalName)}|${finalEvKey}|${sec.toFixed(2)}|${finalDate}|Finals|${placeStr}`;
-      if (!existingHashes.has(hash)) {
-        existingHashes.add(hash);
-        newEntries.push({
-          id: `meet-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
-          swimmerName: finalName,
-          swimmerKey: normalizeSwimmerKey(finalName),
-          classYear: normalizeClass(entry.classYear),
-          eventKey: finalEvKey,
-          eventLabel: finalEvLabel,
-          time: entry.finalsTime,
-          seconds: sec,
-          date: finalDate,
-          dateObj: parseFlexibleDate(finalDate),
-          location: finalLoc,
-          competition: finalComp,
-          round: 'Finals',
-          place: placeStr,
-          swimType: 'OFFICIAL',
-          isOfficial: true,
-          source: 'cl2_meet',
-        });
-      }
-
-      if (includeSplitsOnCommit && entry.splits && entry.splits.length > 0) {
-        const legalSplits = extractLegalOpeningSplits(
-          Number(entry.distance) || 0,
-          entry.genderLabel,
-          entry.strokeName,
-          finalEvLabel,
-          entry.splits,
-          entry.splitInterval,
-          entry.splitType
-        );
-        legalSplits.forEach((spItem) => {
-          const resolvedSplitEv = resolveMasterEvent(spItem.eventLabel, entry.genderLabel);
-          const splitEvKey = resolvedSplitEv ? resolvedSplitEv.eventKey : spItem.eventKey;
-          const splitEvLabel = resolvedSplitEv ? resolvedSplitEv.canonicalName : spItem.eventLabel;
-          if (!splitEvKey) return;
-
-          const sHash = `${normalizeSwimmerKey(finalName)}|${splitEvKey}|${spItem.seconds.toFixed(2)}|${finalDate}|Finals|S`;
-          if (!existingHashes.has(sHash)) {
-            existingHashes.add(sHash);
-            newEntries.push({
-              id: `meet-split-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
-              swimmerName: finalName,
-              swimmerKey: normalizeSwimmerKey(finalName),
-              classYear: normalizeClass(entry.classYear),
-              eventKey: splitEvKey,
-              eventLabel: splitEvLabel,
-              time: spItem.time,
-              seconds: spItem.seconds,
-              date: finalDate,
-              dateObj: parseFlexibleDate(finalDate),
-              location: finalLoc,
-              competition: finalComp,
-              round: 'Finals',
-              place: 'S',
-              swimType: 'INTERMEDIATE_SPLIT',
-              isOfficial: true,
-              splitContext: spItem.context,
-              source: 'cl2_split',
-            });
-          }
-        });
-      }
-    });
-
-    // 2. Relay Results (Lead-Offs "R" + Relay Team Wins)
-    parsedData.relayResults.forEach((entry) => {
-      if (entry.teamCode !== targetCode) return;
-      if (!entry.legs || entry.legs.length === 0) return;
-
-      const legDist = Math.round((Number(entry.distance) || 0) / 4);
-      const legStroke = String(entry.strokeName || '').includes('Medley')
-        ? 'Backstroke'
-        : 'Freestyle';
-      const legEvLabel = `${entry.genderLabel} ${legDist} ${legStroke}`;
-      const legEvKey = normalizeEventKey(legEvLabel, entry.genderLabel);
-      const legBreakdown = calculateRelayLegBreakdown(entry);
-
-      const leadOffLeg = legBreakdown.find((l) => l.legOrder === 1);
-      if (leadOffLeg && leadOffLeg.swimmerName && leadOffLeg.legTotalTime !== '-') {
-        const splitSec = timeToSeconds(leadOffLeg.legTotalTime);
-        if (splitSec !== null && legEvKey) {
-          const displayLead = formatSwimmerDisplay(
-            leadOffLeg.swimmerName,
-            leadOffLeg.preferredFirst
-          );
-          const resolvedAth = resolveMasterAthlete(displayLead);
-          const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
-          const finalName = resolvedAth ? resolvedAth.canonicalName : displayLead;
-          const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
-          const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
-          const finalLoc = resolvedComp?.defaultLocation || meetLoc;
-
-          const hash = `${normalizeSwimmerKey(finalName)}|${legEvKey}|${splitSec.toFixed(2)}|${finalDate}|R`;
-          if (!existingHashes.has(hash)) {
-            existingHashes.add(hash);
-            newEntries.push({
-              id: `meet-relay-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
-              swimmerName: finalName,
-              swimmerKey: normalizeSwimmerKey(finalName),
-              classYear: normalizeClass(leadOffLeg.classYear),
-              eventKey: legEvKey,
-              eventLabel: legEvLabel,
-              time: leadOffLeg.legTotalTime,
-              seconds: splitSec,
-              date: finalDate,
-              dateObj: parseFlexibleDate(finalDate),
-              location: finalLoc,
-              competition: finalComp,
-              place: 'R',
-              swimType: 'RELAY_LEADOFF',
-              isOfficial: true,
-              splitContext: `Lead-Off (${entry.eventLabel})`,
-              source: 'cl2_leadoff',
-            });
-          }
-        }
-      }
-
-      if (Number(entry.place) === 1) {
-        const relaySec = timeToSeconds(entry.finalsTime);
-        const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
-        const resolvedEv = resolveMasterEvent(entry.eventLabel, entry.genderLabel);
-        const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
-        const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
-        const finalLoc = resolvedComp?.defaultLocation || meetLoc;
-        const evKey = normalizeEventKey(entry.eventLabel, entry.genderLabel);
-        const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
-        const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : entry.eventLabel;
-
-        legBreakdown.forEach((leg) => {
-          if (!leg.swimmerName || relaySec === null) return;
-          const displaySwimmer = formatSwimmerDisplay(leg.swimmerName, leg.preferredFirst);
-          const resolvedAth = resolveMasterAthlete(displaySwimmer);
-          const finalName = resolvedAth ? resolvedAth.canonicalName : displaySwimmer;
-          const winHash = `${normalizeSwimmerKey(finalName)}|${finalEvKey}|${relaySec.toFixed(2)}|${finalDate}|1`;
-          if (!existingHashes.has(winHash)) {
-            existingHashes.add(winHash);
-            newEntries.push({
-              id: `meet-relwin-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
-              swimmerName: finalName,
-              swimmerKey: normalizeSwimmerKey(finalName),
-              classYear: normalizeClass(leg.classYear),
-              eventKey: finalEvKey,
-              eventLabel: finalEvLabel,
-              time: entry.finalsTime,
-              seconds: relaySec,
-              date: finalDate,
-              dateObj: parseFlexibleDate(finalDate),
-              location: finalLoc,
-              competition: finalComp,
-              round: 'Finals',
-              place: '1',
-              swimType: 'RELAY_WIN',
-              isOfficial: false,
-              splitContext: `Leg ${leg.legOrder}${leg.legTotalTime !== '-' ? ` (${leg.legTotalTime})` : ''}`,
-              source: 'cl2_relay_win',
-            });
-          }
-        });
-      }
-    });
-
-    if (newEntries.length === 0) {
-      setBenchmarkStatusMsg(
-        `No new ${targetName} performances to commit (all eligible times are already in the database).`
-      );
-      return;
-    }
-
-    const updated = [...historicalRecords, ...newEntries];
-    updateHistoricalRecords(updated, newEntries, false);
-    setBenchmarkStatusMsg(
-      `Committed ${newEntries.length} new ${targetName} performances from "${meetComp}" to database (${updated.length} total records).`
-    );
-  };
-
   // Export Master Database back in 12-column Google Sheet CSV format
   const handleExportMasterCsv = () => {
     const headers = [
@@ -2263,7 +2435,9 @@ export default function App() {
       setSearchQuery('');
       setExpandedRows(new Set());
       setMeetSubTab('individual');
-
+      setMeetReconcileSelections({});
+      setMeetClassOverrides({});
+      setExcludedMeetCommitIds(new Set());
       if (parsed.teams.length > 0) {
         const gettysburgTeam = parsed.teams.find((t) =>
           t.name.toLowerCase().includes('gettysburg')
@@ -6573,60 +6747,344 @@ export default function App() {
               </div>
             ) : (
               <>
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
-                      Commit Meet Performances to Master Database
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Imports only{' '}
-                      <strong>
-                        {parsedData.teams.find((t) => t.code === selectedTeam)?.name ||
-                          selectedTeam}
-                      </strong>{' '}
-                      swims and resolves athlete, competition & event names against your Master
-                      Lists.
-                    </p>
-                    <div className="pt-1 flex flex-wrap items-center gap-3">
-                      <select
-                        value={selectedTeam}
-                        onChange={(e) => {
-                          setSelectedTeam(e.target.value);
-                          try {
-                            localStorage.setItem('swimmeet_primary_team_v1', e.target.value);
-                          } catch {}
-                        }}
-                        className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5"
-                      >
-                        <option value="ALL">-- Select Primary Program Team --</option>
-                        {parsedData.teams.map((t) => (
-                          <option key={t.code} value={t.code}>
-                            {t.name} ({t.code})
-                          </option>
-                        ))}
-                      </select>
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-5">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
+                        Commit Meet Performances to Master Database
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Imports only{' '}
+                        <strong>
+                          {parsedData.teams.find((t) => t.code === selectedTeam)?.name ||
+                            selectedTeam}
+                        </strong>{' '}
+                        swims with extracted Class Year (`FR`/`SO`/`JR`/`SR`) and reconciles
+                        competition, athletes, and events against your Master Lists.
+                      </p>
+                      <div className="pt-1 flex flex-wrap items-center gap-3">
+                        <select
+                          value={selectedTeam}
+                          onChange={(e) => {
+                            setSelectedTeam(e.target.value);
+                            setExcludedMeetCommitIds(new Set());
+                            try {
+                              localStorage.setItem('swimmeet_primary_team_v1', e.target.value);
+                            } catch {}
+                          }}
+                          className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5"
+                        >
+                          <option value="ALL">-- Select Primary Program Team --</option>
+                          {parsedData.teams.map((t) => (
+                            <option key={t.code} value={t.code}>
+                              {t.name} ({t.code})
+                            </option>
+                          ))}
+                        </select>
 
-                      <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={includeSplitsOnCommit}
-                          onChange={(e) => setIncludeSplitsOnCommit(e.target.checked)}
-                          className="rounded text-cyan-600"
-                        />
-                        Also save legal opening splits (e.g., 50 Back off 100 Back, 1000 Free off
-                        1650 Free as Place = S; Relay Lead-Offs &quot;R&quot; are always saved)
-                      </label>
+                        <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={includeSplitsOnCommit}
+                            onChange={(e) => setIncludeSplitsOnCommit(e.target.checked)}
+                            className="rounded text-cyan-600"
+                          />
+                          Also save legal opening splits (e.g., 50 Back off 100 Back, 1000 Free off
+                          1650 Free as Place = S; Relay Lead-Offs &quot;R&quot; are always saved)
+                        </label>
+                      </div>
                     </div>
+
+                    <button
+                      onClick={handleCommitCurrentMeet}
+                      disabled={
+                        !selectedTeam ||
+                        selectedTeam === 'ALL' ||
+                        meetCommitPreview.rows.filter((r) => r.selected).length === 0
+                      }
+                      className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-xs sm:text-sm font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-sm transition cursor-pointer shrink-0"
+                    >
+                      <Database className="w-4 h-4" />
+                      Commit{' '}
+                      {meetCommitPreview.rows.filter((r) => r.selected).length > 0
+                        ? `${meetCommitPreview.rows.filter((r) => r.selected).length} Selected `
+                        : ''}
+                      Swims
+                    </button>
                   </div>
 
-                  <button
-                    onClick={handleCommitCurrentMeet}
-                    className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-xs sm:text-sm font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer shrink-0"
-                  >
-                    <Database className="w-4 h-4" />
-                    Commit{' '}
-                    {parsedData.teams.find((t) => t.code === selectedTeam)?.name || selectedTeam}
-                  </button>
+                  {/* Pre-Commit Master List Reconciliation Panel (Competition + Athletes + Events) */}
+                  {selectedTeam &&
+                    selectedTeam !== 'ALL' &&
+                    (meetCommitPreview.unmatchedCompetition ||
+                      meetCommitPreview.unmatchedAthletes.length > 0 ||
+                      meetCommitPreview.unmatchedEvents.length > 0) && (
+                      <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <h4 className="text-sm font-extrabold text-amber-950 flex items-center gap-1.5">
+                              <Link2 className="w-4 h-4 text-amber-700" />
+                              Pre-Commit Master List Reconciliation (
+                              {meetCommitPreview.unmatchedCompetition ? '1 Competition, ' : ''}
+                              {meetCommitPreview.unmatchedAthletes.length} Athletes,{' '}
+                              {meetCommitPreview.unmatchedEvents.length} Events)
+                            </h4>
+                            <p className="text-xs text-amber-800 mt-0.5">
+                              Confirm matching to existing Master Lists or add new canonical entries
+                              before committing to the database.
+                            </p>
+                          </div>
+                          <button
+                            onClick={handleApplyMeetReconciliations}
+                            className="px-4 py-2 rounded-xl text-xs font-extrabold bg-amber-600 hover:bg-amber-500 text-white shadow-sm transition cursor-pointer"
+                          >
+                            Apply &amp; Sync Master Lists
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                          {meetCommitPreview.unmatchedCompetition && (
+                            <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2 text-xs">
+                              <div className="font-bold uppercase text-slate-600">
+                                Unmatched Meet (Name + Date)
+                              </div>
+                              <div className="font-bold text-slate-900">
+                                {meetCommitPreview.unmatchedCompetition.rawName}{' '}
+                                <span className="font-mono text-cyan-700">
+                                  [{meetCommitPreview.unmatchedCompetition.sampleDate || 'No Date'}]
+                                </span>
+                              </div>
+                              {(() => {
+                                const item = meetCommitPreview.unmatchedCompetition;
+                                const selKey = `comp:${normalizeCompKey(item.rawName)}|${item.sampleDate}`;
+                                return (
+                                  <select
+                                    value={meetReconcileSelections[selKey] || '__NEW__'}
+                                    onChange={(e) =>
+                                      setMeetReconcileSelections((prev) => ({
+                                        ...prev,
+                                        [selKey]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                                  >
+                                    <option value="__NEW__">
+                                      + Create New Meet &quot;{item.rawName}&quot; (
+                                      {item.sampleDate || 'Any Date'})
+                                    </option>
+                                    {masterCompetitions.map((c) => (
+                                      <option key={c.id} value={c.id}>
+                                        Alias → {c.canonicalName} ({c.date || 'Any Date'})
+                                      </option>
+                                    ))}
+                                  </select>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {meetCommitPreview.unmatchedAthletes.length > 0 && (
+                            <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2.5 max-h-56 overflow-y-auto">
+                              <div className="text-xs font-bold uppercase text-slate-600">
+                                Unmatched Athletes ({meetCommitPreview.unmatchedAthletes.length})
+                              </div>
+                              {meetCommitPreview.unmatchedAthletes.map((item) => {
+                                const selKey = `ath:${normalizeSwimmerKey(item.rawName)}`;
+                                return (
+                                  <div key={selKey} className="space-y-1 text-xs">
+                                    <div className="font-bold text-slate-900">
+                                      {item.rawName}{' '}
+                                      <span className="text-slate-400 font-normal">
+                                        ({item.inferredGender})
+                                      </span>
+                                    </div>
+                                    <select
+                                      value={meetReconcileSelections[selKey] || '__NEW__'}
+                                      onChange={(e) =>
+                                        setMeetReconcileSelections((prev) => ({
+                                          ...prev,
+                                          [selKey]: e.target.value,
+                                        }))
+                                      }
+                                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                                    >
+                                      <option value="__NEW__">
+                                        + Add &quot;{item.rawName}&quot; to Roster
+                                      </option>
+                                      {masterRoster
+                                        .slice()
+                                        .sort((a, b) =>
+                                          compareByLastName(a.canonicalName, b.canonicalName)
+                                        )
+                                        .map((ath) => (
+                                          <option key={ath.id} value={ath.id}>
+                                            Alias → {ath.canonicalName} ({ath.gender})
+                                          </option>
+                                        ))}
+                                    </select>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {meetCommitPreview.unmatchedEvents.length > 0 && (
+                            <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2.5 max-h-56 overflow-y-auto">
+                              <div className="text-xs font-bold uppercase text-slate-600">
+                                Unmatched Events ({meetCommitPreview.unmatchedEvents.length})
+                              </div>
+                              {meetCommitPreview.unmatchedEvents.map((item) => {
+                                const selKey = `ev:${item.rawEvent.toLowerCase()}|${item.genderHint}`;
+                                return (
+                                  <div key={selKey} className="space-y-1 text-xs">
+                                    <div className="font-bold text-slate-900">{item.rawEvent}</div>
+                                    <select
+                                      value={meetReconcileSelections[selKey] || '__NEW__'}
+                                      onChange={(e) =>
+                                        setMeetReconcileSelections((prev) => ({
+                                          ...prev,
+                                          [selKey]: e.target.value,
+                                        }))
+                                      }
+                                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                                    >
+                                      <option value="__NEW__">
+                                        + Create New Event &quot;{item.rawEvent}&quot;
+                                      </option>
+                                      {masterEvents.map((ev) => (
+                                        <option key={ev.id} value={ev.id}>
+                                          Alias → {ev.canonicalName}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                  {/* Staged Pre-Commit Swims & Class Year Verification Table */}
+                  {selectedTeam && selectedTeam !== 'ALL' && meetCommitPreview.rows.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="font-bold text-slate-700">
+                          Staged Swims Preview ({meetCommitPreview.rows.filter((r) => r.selected).length}{' '}
+                          new selected,{' '}
+                          {meetCommitPreview.rows.filter((r) => r.isDuplicate).length} already in
+                          database)
+                        </span>
+                        <span className="text-slate-500">
+                          Tip: Verify or fill in any blank Class Year (`FR`–`GR`) directly in the
+                          table before committing
+                        </span>
+                      </div>
+
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-80">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
+                            <tr>
+                              <th className="py-2 px-3 w-9">Include</th>
+                              <th className="py-2 px-3">Athlete</th>
+                              <th className="py-2 px-3 w-24">Class Year</th>
+                              <th className="py-2 px-3">Event</th>
+                              <th className="py-2 px-3">Time</th>
+                              <th className="py-2 px-3">Type</th>
+                              <th className="py-2 px-3">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {meetCommitPreview.rows.map((row) => (
+                              <tr
+                                key={row.id}
+                                className={row.isDuplicate ? 'bg-slate-50/70 text-slate-400' : ''}
+                              >
+                                <td className="py-2 px-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={row.selected}
+                                    onChange={(e) => {
+                                      const checked = e.target.checked;
+                                      setExcludedMeetCommitIds((prev) => {
+                                        const next = new Set(prev);
+                                        if (checked) next.delete(row.id);
+                                        else next.add(row.id);
+                                        return next;
+                                      });
+                                    }}
+                                    className="rounded text-cyan-600 cursor-pointer"
+                                  />
+                                </td>
+                                <td className="py-2 px-3 font-bold text-slate-900">
+                                  {row.swimmerName}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <select
+                                    value={row.classYear || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setMeetClassOverrides((prev) => ({
+                                        ...prev,
+                                        [row.swimmerKey]: val,
+                                      }));
+                                    }}
+                                    className={`px-2 py-1 border rounded text-[11px] font-bold ${
+                                      row.classYear
+                                        ? 'bg-white border-slate-200 text-slate-800'
+                                        : 'bg-amber-50 border-amber-300 text-amber-800'
+                                    }`}
+                                  >
+                                    <option value="">—</option>
+                                    <option value="FR">FR</option>
+                                    <option value="SO">SO</option>
+                                    <option value="JR">JR</option>
+                                    <option value="SR">SR</option>
+                                    <option value="GR">GR</option>
+                                  </select>
+                                </td>
+                                <td className="py-2 px-3">{row.eventLabel}</td>
+                                <td className="py-2 px-3 font-mono font-bold text-cyan-800">
+                                  {row.time}
+                                </td>
+                                <td className="py-2 px-3">
+                                  {row.swimType === 'RELAY_LEADOFF' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800">
+                                      Relay Lead-Off (R)
+                                    </span>
+                                  ) : row.swimType === 'INTERMEDIATE_SPLIT' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
+                                      Split (S) • {row.splitContext}
+                                    </span>
+                                  ) : row.swimType === 'RELAY_WIN' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
+                                      Relay Win • {row.splitContext}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                      Official
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3">
+                                  {row.isDuplicate ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-600">
+                                      Already in DB
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                      Ready
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Event Winners & Multi-Win Leaderboard */}
