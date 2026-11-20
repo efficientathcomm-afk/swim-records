@@ -1153,6 +1153,8 @@ export default function App() {
   const [dbSortConfig, setDbSortConfig] = useState({ key: 'date', direction: 'desc' });
   const [dbPage, setDbPage] = useState(1);
   const [dbPageSize, setDbPageSize] = useState(100);
+  const [selectedDbIds, setSelectedDbIds] = useState(new Set());
+  const [pendingDbDeleteIds, setPendingDbDeleteIds] = useState(null);
 
   // Anonymous Firebase Auth & Live Cloud Sync State
   const [cloudUser, setCloudUser] = useState(null);
@@ -1326,6 +1328,47 @@ export default function App() {
       setCloudSyncStatus('offline');
       setCloudErrorMsg(err?.code || err?.message || 'Cloud sync write error');
     }
+  };
+
+  // Delete specific performance IDs from both local state and Firestore
+  const handleDeleteDbRecords = async (idsToDelete) => {
+    const idSet = new Set(idsToDelete);
+    if (idSet.size === 0) return;
+
+    const next = historicalRecords.filter((r) => !idSet.has(r.id));
+    setHistoricalRecords(next);
+    try {
+      localStorage.setItem('swimmeet_historical_records_v1', JSON.stringify(next));
+    } catch {}
+
+    setSelectedDbIds((prev) => {
+      const updated = new Set(prev);
+      idSet.forEach((id) => updated.delete(id));
+      return updated;
+    });
+    setPendingDbDeleteIds(null);
+
+    if (cloudUser && db) {
+      try {
+        const idArray = Array.from(idSet);
+        for (let i = 0; i < idArray.length; i += 450) {
+          const batch = writeBatch(db);
+          idArray.slice(i, i + 450).forEach((rawId) => {
+            const safeId = String(rawId).replace(/\//g, '_');
+            batch.delete(doc(db, 'performances', safeId));
+          });
+          await batch.commit();
+        }
+        setCloudSyncStatus('synced');
+      } catch (err) {
+        setCloudSyncStatus('offline');
+        setCloudErrorMsg(err?.code || err?.message || 'Cloud delete error');
+      }
+    }
+
+    setBenchmarkStatusMsg(
+      `Deleted ${idSet.size} record${idSet.size === 1 ? '' : 's'} from database (${next.length} remaining).`
+    );
   };
 
   // Master List Lookups
@@ -4354,7 +4397,16 @@ export default function App() {
                         dbFilterCompetition !== 'ALL' ||
                         dbFilterDate ||
                         dbFilterType !== 'ALL') && (
-                        <div className="flex justify-end">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <button
+                            onClick={() =>
+                              setPendingDbDeleteIds(filteredSortedDbRecords.map((r) => r.id))
+                            }
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            Delete All {filteredSortedDbRecords.length} Filtered Records
+                          </button>
                           <button
                             onClick={() => {
                               setDbSearchName('');
@@ -4373,6 +4425,61 @@ export default function App() {
                     </div>
                   )}
 
+                  {/* Selected Rows Action Bar */}
+                  {selectedDbIds.size > 0 && (
+                    <div className="bg-slate-900 text-white px-4 py-2.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-cyan-300">
+                          {selectedDbIds.size} record{selectedDbIds.size === 1 ? '' : 's'} selected
+                        </span>
+                        <button
+                          onClick={() => setSelectedDbIds(new Set())}
+                          className="text-slate-300 hover:text-white underline cursor-pointer"
+                        >
+                          Clear selection
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => setPendingDbDeleteIds(Array.from(selectedDbIds))}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold bg-red-600 hover:bg-red-500 text-white transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete Selected ({selectedDbIds.size})
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Inline Two-Step Delete Confirmation Banner */}
+                  {pendingDbDeleteIds && pendingDbDeleteIds.length > 0 && (
+                    <div className="bg-red-50 border border-red-300 text-red-950 px-4 py-3 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                        <span>
+                          Permanently delete{' '}
+                          <strong>
+                            {pendingDbDeleteIds.length} database record
+                            {pendingDbDeleteIds.length === 1 ? '' : 's'}
+                          </strong>{' '}
+                          from local storage and Firestore?
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setPendingDbDeleteIds(null)}
+                          className="px-3 py-1.5 rounded-lg font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDbRecords(pendingDbDeleteIds)}
+                          className="px-3.5 py-1.5 rounded-lg font-extrabold bg-red-600 hover:bg-red-500 text-white cursor-pointer"
+                        >
+                          Yes, Delete Permanently
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {historicalRecords.length === 0 ? (
                     <div className="text-center py-12 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
                       No historical performances committed yet. Import rows from Google Sheets in
@@ -4388,6 +4495,28 @@ export default function App() {
                         <table className="w-full text-left text-xs">
                           <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0 z-10">
                             <tr>
+                              <th className="py-2.5 px-3 w-9">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    paginatedDbRecords.length > 0 &&
+                                    paginatedDbRecords.every((r) => selectedDbIds.has(r.id))
+                                  }
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setSelectedDbIds((prev) => {
+                                      const next = new Set(prev);
+                                      paginatedDbRecords.forEach((r) => {
+                                        if (checked) next.add(r.id);
+                                        else next.delete(r.id);
+                                      });
+                                      return next;
+                                    });
+                                  }}
+                                  title="Select all rows on this page"
+                                  className="rounded text-cyan-600 cursor-pointer"
+                                />
+                              </th>
                               <th
                                 onClick={() => handleDbSort('swimmerName')}
                                 className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
@@ -4443,58 +4572,92 @@ export default function App() {
                                   <ArrowUpDown className="w-3 h-3 text-slate-400" />
                                 </div>
                               </th>
+                              <th className="py-2.5 px-3 text-center w-14">Delete</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {paginatedDbRecords.map((r) => (
-                              <tr key={r.id} className="hover:bg-slate-50">
-                                <td className="py-2 px-3 font-bold text-slate-900">
-                                  {r.swimmerName}
-                                </td>
-                                <td className="py-2 px-3">{r.classYear || '—'}</td>
-                                <td className="py-2 px-3">{r.eventLabel}</td>
-                                <td className="py-2 px-3 font-mono font-bold text-cyan-800">
-                                  {r.time}
-                                </td>
-                                <td className="py-2 px-3 text-slate-600">
-                                  <div className="flex flex-wrap items-center gap-1.5">
-                                    <span>{r.competition || '—'}</span>
-                                    {r.round === 'Prelims' && (
-                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
-                                        Prelims (SF)
+                            {paginatedDbRecords.map((r) => {
+                              const isChecked = selectedDbIds.has(r.id);
+                              return (
+                                <tr
+                                  key={r.id}
+                                  className={
+                                    isChecked ? 'bg-cyan-50/60' : 'hover:bg-slate-50'
+                                  }
+                                >
+                                  <td className="py-2 px-3">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setSelectedDbIds((prev) => {
+                                          const next = new Set(prev);
+                                          if (checked) next.add(r.id);
+                                          else next.delete(r.id);
+                                          return next;
+                                        });
+                                      }}
+                                      className="rounded text-cyan-600 cursor-pointer"
+                                    />
+                                  </td>
+                                  <td className="py-2 px-3 font-bold text-slate-900">
+                                    {r.swimmerName}
+                                  </td>
+                                  <td className="py-2 px-3">{r.classYear || '—'}</td>
+                                  <td className="py-2 px-3">{r.eventLabel}</td>
+                                  <td className="py-2 px-3 font-mono font-bold text-cyan-800">
+                                    {r.time}
+                                  </td>
+                                  <td className="py-2 px-3 text-slate-600">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <span>{r.competition || '—'}</span>
+                                      {r.round === 'Prelims' && (
+                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                          Prelims (SF)
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-2 px-3 font-mono text-slate-500">
+                                    {r.date || '—'}
+                                  </td>
+                                  <td className="py-2 px-3">
+                                    {r.swimType === 'RELAY_LEADOFF' ||
+                                    r.place === 'R' ||
+                                    r.place === 'LR' ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800">
+                                        Relay Lead-Off (R)
+                                      </span>
+                                    ) : r.swimType === 'INTERMEDIATE_SPLIT' || r.place === 'S' ? (
+                                      <span
+                                        title={r.splitContext || 'Intermediate Distance Split'}
+                                        className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900"
+                                      >
+                                        Split (S){r.splitContext ? ` • ${r.splitContext}` : ''}
+                                      </span>
+                                    ) : r.swimType === 'RELAY_WIN' ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
+                                        Relay Win{r.splitContext ? ` • ${r.splitContext}` : ''}
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                        Official
                                       </span>
                                     )}
-                                  </div>
-                                </td>
-                                <td className="py-2 px-3 font-mono text-slate-500">
-                                  {r.date || '—'}
-                                </td>
-                                <td className="py-2 px-3">
-                                  {r.swimType === 'RELAY_LEADOFF' ||
-                                  r.place === 'R' ||
-                                  r.place === 'LR' ? (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800">
-                                      Relay Lead-Off (R)
-                                    </span>
-                                  ) : r.swimType === 'INTERMEDIATE_SPLIT' || r.place === 'S' ? (
-                                    <span
-                                      title={r.splitContext || 'Intermediate Distance Split'}
-                                      className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900"
+                                  </td>
+                                  <td className="py-2 px-3 text-center">
+                                    <button
+                                      onClick={() => handleDeleteDbRecords([r.id])}
+                                      title="Delete this record"
+                                      className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
                                     >
-                                      Split (S){r.splitContext ? ` • ${r.splitContext}` : ''}
-                                    </span>
-                                  ) : r.swimType === 'RELAY_WIN' ? (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
-                                      Relay Win{r.splitContext ? ` • ${r.splitContext}` : ''}
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                                      Official
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
