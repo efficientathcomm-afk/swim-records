@@ -4556,7 +4556,7 @@ export default function App() {
                                   <tr>
                                     <th className="py-2.5 px-4">Canonical Name</th>
                                     <th className="py-2.5 px-4">Gender</th>
-                                    <th className="py-2.5 px-4 text-center">Active</th>
+                                    <th className="py-2.5 px-4 text-center">Status</th>
                                     <th className="py-2.5 px-4">Saved Aliases</th>
                                     <th className="py-2.5 px-4 text-center">Remove</th>
                                   </tr>
@@ -4569,12 +4569,10 @@ export default function App() {
                                       </td>
                                       <td className="py-2.5 px-4 text-slate-600">{ath.gender}</td>
                                       <td className="py-2.5 px-4 text-center">
-                                        <input
-                                          type="checkbox"
-                                          checked={Boolean(ath.isActive)}
-                                          onChange={(e) => {
-                                            const checked = e.target.checked;
-                                            const updatedItem = { ...ath, isActive: checked };
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const updatedItem = { ...ath, isActive: !ath.isActive };
                                             updateMasterRoster(
                                               masterRoster.map((item) =>
                                                 item.id === ath.id ? updatedItem : item
@@ -4582,8 +4580,15 @@ export default function App() {
                                               [updatedItem]
                                             );
                                           }}
-                                          className="rounded text-cyan-600 focus:ring-cyan-500 cursor-pointer"
-                                        />
+                                          title="Click to toggle Active / Inactive status"
+                                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold transition cursor-pointer ${
+                                            ath.isActive
+                                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                              : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                                          }`}
+                                        >
+                                          {ath.isActive ? 'Active' : 'Inactive'}
+                                        </button>
                                       </td>
                                       <td className="py-2.5 px-4 text-slate-500">
                                         {(ath.aliases || []).length > 0 ? (
