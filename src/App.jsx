@@ -1144,6 +1144,16 @@ export default function App() {
   const [eventWinsActiveOnly, setEventWinsActiveOnly] = useState(false);
   const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
 
+  // Committed Database Filter, Sort & Pagination State
+  const [dbSearchName, setDbSearchName] = useState('');
+  const [dbFilterEvent, setDbFilterEvent] = useState('ALL');
+  const [dbFilterCompetition, setDbFilterCompetition] = useState('ALL');
+  const [dbFilterDate, setDbFilterDate] = useState('');
+  const [dbFilterType, setDbFilterType] = useState('ALL');
+  const [dbSortConfig, setDbSortConfig] = useState({ key: 'date', direction: 'desc' });
+  const [dbPage, setDbPage] = useState(1);
+  const [dbPageSize, setDbPageSize] = useState(100);
+
   // Anonymous Firebase Auth & Live Cloud Sync State
   const [cloudUser, setCloudUser] = useState(null);
   const [cloudSyncStatus, setCloudSyncStatus] = useState('connecting');
@@ -2452,6 +2462,95 @@ export default function App() {
     });
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [masterCompetitions, historicalRecords]);
+
+  // Distinct options & filtered/sorted/paginated view for Committed Database
+  const dbFilterOptions = useMemo(() => {
+    const eventsSet = new Set();
+    const compsSet = new Set();
+    historicalRecords.forEach((r) => {
+      if (r.eventLabel) eventsSet.add(r.eventLabel.trim());
+      if (r.competition) compsSet.add(r.competition.trim());
+    });
+    return {
+      events: Array.from(eventsSet).sort((a, b) => a.localeCompare(b)),
+      competitions: Array.from(compsSet).sort((a, b) => a.localeCompare(b)),
+    };
+  }, [historicalRecords]);
+
+  const filteredSortedDbRecords = useMemo(() => {
+    const qName = dbSearchName.trim().toLowerCase();
+    const qDate = dbFilterDate.trim().toLowerCase();
+
+    const getRecordCategory = (r) => {
+      const placeUp = String(r.place || '').toUpperCase();
+      if (r.swimType === 'RELAY_LEADOFF' || placeUp === 'R' || placeUp === 'LR') {
+        return 'RELAY_LEADOFF';
+      }
+      if (r.swimType === 'INTERMEDIATE_SPLIT' || placeUp === 'S') {
+        return 'INTERMEDIATE_SPLIT';
+      }
+      if (r.swimType === 'RELAY_WIN' || String(r.eventLabel || '').toLowerCase().includes('relay')) {
+        return 'RELAY_WIN';
+      }
+      return 'OFFICIAL';
+    };
+
+    const filtered = historicalRecords.filter((r) => {
+      if (qName && !String(r.swimmerName || '').toLowerCase().includes(qName)) return false;
+      if (dbFilterEvent !== 'ALL' && (r.eventLabel || '').trim() !== dbFilterEvent) return false;
+      if (dbFilterCompetition !== 'ALL' && (r.competition || '').trim() !== dbFilterCompetition) {
+        return false;
+      }
+      if (qDate && !String(r.date || '').toLowerCase().includes(qDate)) return false;
+      if (dbFilterType !== 'ALL' && getRecordCategory(r) !== dbFilterType) return false;
+      return true;
+    });
+
+    const dir = dbSortConfig.direction === 'asc' ? 1 : -1;
+    return filtered.slice().sort((a, b) => {
+      switch (dbSortConfig.key) {
+        case 'swimmerName':
+          return compareByLastName(a.swimmerName, b.swimmerName) * dir;
+        case 'eventLabel':
+          return String(a.eventLabel || '').localeCompare(String(b.eventLabel || '')) * dir;
+        case 'time':
+          return ((a.seconds ?? Infinity) - (b.seconds ?? Infinity)) * dir;
+        case 'competition':
+          return String(a.competition || '').localeCompare(String(b.competition || '')) * dir;
+        case 'type':
+          return getRecordCategory(a).localeCompare(getRecordCategory(b)) * dir;
+        case 'date':
+        default: {
+          const cmp = String(a.date || '').localeCompare(String(b.date || ''));
+          if (cmp !== 0) return cmp * dir;
+          return compareByLastName(a.swimmerName, b.swimmerName);
+        }
+      }
+    });
+  }, [
+    historicalRecords,
+    dbSearchName,
+    dbFilterEvent,
+    dbFilterCompetition,
+    dbFilterDate,
+    dbFilterType,
+    dbSortConfig,
+  ]);
+
+  const dbTotalPages = Math.max(1, Math.ceil(filteredSortedDbRecords.length / dbPageSize));
+  const safeDbPage = Math.min(dbPage, dbTotalPages);
+  const paginatedDbRecords = useMemo(() => {
+    const start = (safeDbPage - 1) * dbPageSize;
+    return filteredSortedDbRecords.slice(start, start + dbPageSize);
+  }, [filteredSortedDbRecords, safeDbPage, dbPageSize]);
+
+  const handleDbSort = (key) => {
+    setDbSortConfig((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
+    }));
+    setDbPage(1);
+  };
 
   // All-Time Career Wins Leaderboard (Individual + Relay Finals Wins, optional Competition filter)
   const allTimeWinsLeaderboard = useMemo(() => {
@@ -4142,10 +4241,11 @@ export default function App() {
                 <div className="p-5 sm:p-6 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="text-xs font-bold text-slate-700">
-                      Showing {Math.min(historicalRecords.length, 200)} of{' '}
-                      {historicalRecords.length} committed records
+                      {filteredSortedDbRecords.length === historicalRecords.length
+                        ? `${historicalRecords.length} total committed records`
+                        : `Showing ${filteredSortedDbRecords.length} matching records (of ${historicalRecords.length} total)`}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {historicalRecords.length > 0 && (
                         <>
                           <button
@@ -4170,72 +4270,296 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Multi-Field Filter Bar */}
+                  {historicalRecords.length > 0 && (
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={dbSearchName}
+                            onChange={(e) => {
+                              setDbSearchName(e.target.value);
+                              setDbPage(1);
+                            }}
+                            placeholder="Filter by athlete name..."
+                            className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                          />
+                        </div>
+
+                        <select
+                          value={dbFilterEvent}
+                          onChange={(e) => {
+                            setDbFilterEvent(e.target.value);
+                            setDbPage(1);
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                          <option value="ALL">All Events ({dbFilterOptions.events.length})</option>
+                          {dbFilterOptions.events.map((ev) => (
+                            <option key={ev} value={ev}>
+                              {ev}
+                            </option>
+                          ))}
+                        </select>
+
+                        <select
+                          value={dbFilterCompetition}
+                          onChange={(e) => {
+                            setDbFilterCompetition(e.target.value);
+                            setDbPage(1);
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                          <option value="ALL">
+                            All Competitions ({dbFilterOptions.competitions.length})
+                          </option>
+                          {dbFilterOptions.competitions.map((comp) => (
+                            <option key={comp} value={comp}>
+                              {comp}
+                            </option>
+                          ))}
+                        </select>
+
+                        <input
+                          type="text"
+                          value={dbFilterDate}
+                          onChange={(e) => {
+                            setDbFilterDate(e.target.value);
+                            setDbPage(1);
+                          }}
+                          placeholder="Filter date (e.g., 2026 or 2026-02)"
+                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        />
+
+                        <select
+                          value={dbFilterType}
+                          onChange={(e) => {
+                            setDbFilterType(e.target.value);
+                            setDbPage(1);
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                          <option value="ALL">All Record Types</option>
+                          <option value="OFFICIAL">Official Individual</option>
+                          <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
+                          <option value="INTERMEDIATE_SPLIT">Intermediate Split (S)</option>
+                          <option value="RELAY_WIN">Relay Win</option>
+                        </select>
+                      </div>
+
+                      {(dbSearchName ||
+                        dbFilterEvent !== 'ALL' ||
+                        dbFilterCompetition !== 'ALL' ||
+                        dbFilterDate ||
+                        dbFilterType !== 'ALL') && (
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() => {
+                              setDbSearchName('');
+                              setDbFilterEvent('ALL');
+                              setDbFilterCompetition('ALL');
+                              setDbFilterDate('');
+                              setDbFilterType('ALL');
+                              setDbPage(1);
+                            }}
+                            className="text-[11px] font-bold text-cyan-700 hover:underline cursor-pointer"
+                          >
+                            Reset All Filters
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {historicalRecords.length === 0 ? (
                     <div className="text-center py-12 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
                       No historical performances committed yet. Import rows from Google Sheets in
                       the first tab or commit a `.cl2` meet in Post-Meet Tools.
                     </div>
+                  ) : filteredSortedDbRecords.length === 0 ? (
+                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No database records match your active filters.
+                    </div>
                   ) : (
-                    <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[500px]">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
-                          <tr>
-                            <th className="py-2.5 px-3">Athlete</th>
-                            <th className="py-2.5 px-3">Class</th>
-                            <th className="py-2.5 px-3">Event</th>
-                            <th className="py-2.5 px-3">Time</th>
-                            <th className="py-2.5 px-3">Competition</th>
-                            <th className="py-2.5 px-3">Date</th>
-                            <th className="py-2.5 px-3">Type</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {historicalRecords.slice(0, 200).map((r) => (
-                            <tr key={r.id} className="hover:bg-slate-50">
-                              <td className="py-2 px-3 font-bold text-slate-900">
-                                {r.swimmerName}
-                              </td>
-                              <td className="py-2 px-3">{r.classYear || '—'}</td>
-                              <td className="py-2 px-3">{r.eventLabel}</td>
-                              <td className="py-2 px-3 font-mono font-bold text-cyan-800">
-                                {r.time}
-                              </td>
-                              <td className="py-2 px-3 text-slate-600">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <span>{r.competition || '—'}</span>
-                                  {r.round === 'Prelims' && (
-                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
-                                      Prelims (SF)
+                    <>
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[540px]">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0 z-10">
+                            <tr>
+                              <th
+                                onClick={() => handleDbSort('swimmerName')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Athlete</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th className="py-2.5 px-3">Class</th>
+                              <th
+                                onClick={() => handleDbSort('eventLabel')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Event</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th
+                                onClick={() => handleDbSort('time')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Time</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th
+                                onClick={() => handleDbSort('competition')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Competition</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th
+                                onClick={() => handleDbSort('date')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Date</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                              <th
+                                onClick={() => handleDbSort('type')}
+                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
+                              >
+                                <div className="inline-flex items-center gap-1">
+                                  <span>Type</span>
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                </div>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {paginatedDbRecords.map((r) => (
+                              <tr key={r.id} className="hover:bg-slate-50">
+                                <td className="py-2 px-3 font-bold text-slate-900">
+                                  {r.swimmerName}
+                                </td>
+                                <td className="py-2 px-3">{r.classYear || '—'}</td>
+                                <td className="py-2 px-3">{r.eventLabel}</td>
+                                <td className="py-2 px-3 font-mono font-bold text-cyan-800">
+                                  {r.time}
+                                </td>
+                                <td className="py-2 px-3 text-slate-600">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span>{r.competition || '—'}</span>
+                                    {r.round === 'Prelims' && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                        Prelims (SF)
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-2 px-3 font-mono text-slate-500">
+                                  {r.date || '—'}
+                                </td>
+                                <td className="py-2 px-3">
+                                  {r.swimType === 'RELAY_LEADOFF' ||
+                                  r.place === 'R' ||
+                                  r.place === 'LR' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800">
+                                      Relay Lead-Off (R)
+                                    </span>
+                                  ) : r.swimType === 'INTERMEDIATE_SPLIT' || r.place === 'S' ? (
+                                    <span
+                                      title={r.splitContext || 'Intermediate Distance Split'}
+                                      className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900"
+                                    >
+                                      Split (S){r.splitContext ? ` • ${r.splitContext}` : ''}
+                                    </span>
+                                  ) : r.swimType === 'RELAY_WIN' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
+                                      Relay Win{r.splitContext ? ` • ${r.splitContext}` : ''}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                      Official
                                     </span>
                                   )}
-                                </div>
-                              </td>
-                              <td className="py-2 px-3 text-slate-500">{r.date || '—'}</td>
-                              <td className="py-2 px-3">
-                                {r.swimType === 'RELAY_LEADOFF' ||
-                                r.place === 'R' ||
-                                r.place === 'LR' ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800">
-                                    Relay Lead-Off (R)
-                                  </span>
-                                ) : r.swimType === 'INTERMEDIATE_SPLIT' || r.place === 'S' ? (
-                                  <span
-                                    title={r.splitContext || 'Intermediate Distance Split'}
-                                    className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900"
-                                  >
-                                    Split (S){r.splitContext ? ` • ${r.splitContext}` : ''}
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                                    Official
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Pagination Bar */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 text-xs text-slate-600">
+                        <div className="flex items-center gap-2">
+                          <span>
+                            Showing{' '}
+                            <strong>
+                              {(safeDbPage - 1) * dbPageSize + 1}–
+                              {Math.min(safeDbPage * dbPageSize, filteredSortedDbRecords.length)}
+                            </strong>{' '}
+                            of <strong>{filteredSortedDbRecords.length}</strong> records
+                          </span>
+                          <select
+                            value={dbPageSize}
+                            onChange={(e) => {
+                              setDbPageSize(Number(e.target.value));
+                              setDbPage(1);
+                            }}
+                            className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold"
+                          >
+                            <option value={50}>50 / page</option>
+                            <option value={100}>100 / page</option>
+                            <option value={250}>250 / page</option>
+                            <option value={500}>500 / page</option>
+                          </select>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => setDbPage(1)}
+                            disabled={safeDbPage <= 1}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
+                          >
+                            First
+                          </button>
+                          <button
+                            onClick={() => setDbPage((p) => Math.max(1, p - 1))}
+                            disabled={safeDbPage <= 1}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
+                          >
+                            Prev
+                          </button>
+                          <span className="px-3 py-1.5 font-bold text-slate-800">
+                            Page {safeDbPage} of {dbTotalPages}
+                          </span>
+                          <button
+                            onClick={() => setDbPage((p) => Math.min(dbTotalPages, p + 1))}
+                            disabled={safeDbPage >= dbTotalPages}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
+                          >
+                            Next
+                          </button>
+                          <button
+                            onClick={() => setDbPage(dbTotalPages)}
+                            disabled={safeDbPage >= dbTotalPages}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
+                          >
+                            Last
+                          </button>
+                        </div>
+                      </div>
+                    </>
                   )}
                 </div>
               )}
