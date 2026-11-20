@@ -1350,6 +1350,33 @@ export default function App() {
   const [winsCompetitionFilter, setWinsCompetitionFilter] = useState('ALL');
   const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
 
+  // Section 3: In-Meet Deck & Broadcast Console State
+  const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'standards'
+  const [inMeetSearch, setInMeetSearch] = useState('');
+  const [inMeetGender, setInMeetGender] = useState('ALL');
+  const [inMeetTargetEventKey, setInMeetTargetEventKey] = useState('women 50 freestyle');
+  const [selectedHeatEventLabel, setSelectedHeatEventLabel] = useState('');
+  const [selectedHeatNum, setSelectedHeatNum] = useState('ALL');
+  const [teamColors, setTeamColors] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('swimmeet_team_colors_v1') || '{}');
+    } catch {
+      return {};
+    }
+  });
+  const [qualStandards, setQualStandards] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('swimmeet_qual_standards_v1') || 'null');
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+  const [newStdLabel, setNewStdLabel] = useState('NCAA B');
+  const [newStdEventKey, setNewStdEventKey] = useState('women 50 freestyle');
+  const [newStdTime, setNewStdTime] = useState('');
+  const [newStdType, setNewStdType] = useState('STANDARD'); // 'STANDARD' | 'POOL_RECORD'
+
   // File Input Refs
   const fileInputRef = useRef(null);
   const historyCsvInputRef = useRef(null);
@@ -2794,6 +2821,37 @@ const rRowId = `cl2-lo-${entry.id}`;
       setDayRangeEndEvent('');
       setDayRangeTargetDate(parsed.meetInfo.isoDate || '');
       setExcludedMeetCommitIds(new Set());
+
+      // Assign default distinct hex colors to any teams not yet configured
+      const palette = [
+        '#0284c7',
+        '#d97706',
+        '#059669',
+        '#7c3aed',
+        '#e11d48',
+        '#0d9488',
+        '#4f46e5',
+        '#ca8a04',
+      ];
+      setTeamColors((prev) => {
+        const next = { ...prev };
+        parsed.teams.forEach((t, idx) => {
+          if (!next[t.code]) {
+            next[t.code] = t.name.toLowerCase().includes('gettysburg')
+              ? '#0284c7'
+              : palette[idx % palette.length];
+          }
+        });
+        try {
+          localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+
+      const firstEv = parsed.individualResults[0]?.eventLabel || '';
+      setSelectedHeatEventLabel(firstEv);
+      setSelectedHeatNum('ALL');
+
       if (parsed.teams.length > 0) {
         const gettysburgTeam = parsed.teams.find((t) =>
           t.name.toLowerCase().includes('gettysburg')
@@ -2845,6 +2903,41 @@ const rRowId = `cl2-lo-${entry.id}`;
       key,
       direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
     }));
+  };
+
+  const getTeamHexColor = (teamCode, teamName = '') => {
+    if (teamColors[teamCode]) return teamColors[teamCode];
+    if (String(teamName).toLowerCase().includes('gettysburg')) return '#0284c7';
+    return '#64748b';
+  };
+
+  const handleSetTeamHexColor = (teamCode, hex) => {
+    const cleanHex = String(hex || '').trim();
+    setTeamColors((prev) => {
+      const next = { ...prev, [teamCode]: cleanHex };
+      try {
+        localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const updateQualStandardsList = (nextList) => {
+    setQualStandards(nextList);
+    try {
+      localStorage.setItem('swimmeet_qual_standards_v1', JSON.stringify(nextList));
+    } catch {}
+  };
+
+  const evaluateStandardsForSwim = (eventLabel, timeStr) => {
+    const sec = timeToSeconds(timeStr);
+    const evKey = normalizeEventKey(eventLabel);
+    if (sec === null || !evKey || qualStandards.length === 0) return [];
+    return qualStandards.filter((std) => {
+      if (std.eventKey !== evKey) return false;
+      const cutSec = timeToSeconds(std.time);
+      return cutSec !== null && sec <= cutSec + 0.005;
+    });
   };
 
   // Benchmark Evaluation Engine (Dual Full-Distance vs Split PB/SB, All-Time Top-10, Freshman Record)
@@ -5881,110 +5974,827 @@ const rRowId = `cl2-lo-${entry.id}`;
         {/* SECTION 3: IN-MEET BROADCASTER & DECK TOOLS                          */}
         {/* ==================================================================== */}
         {activeSection === 'inmeet' && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-              <div>
-                <h2 className="text-lg sm:text-xl font-extrabold text-slate-900">
-                  In-Meet Deck & Broadcaster Reference
-                </h2>
-                <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                  Active roster swimmers and their current Full-Distance Bests & Split Bests.
-                </p>
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 sm:px-6 py-4 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg sm:text-xl font-extrabold flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-indigo-400" />
+                    In-Meet Deck &amp; Broadcaster Console
+                  </h2>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Heat lane sheets (Lanes 1–8) with team color bars, active roster bests, and
+                    qualifying standards / pool records.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-1.5 bg-slate-800 p-1 rounded-xl text-xs font-bold">
+                  {[
+                    { id: 'heatsheet', label: 'Heat Sheet (Lanes 1–8)' },
+                    { id: 'roster', label: `Active Roster (${masterRoster.filter((a) => a.isActive).length})` },
+                    { id: 'standards', label: `Standards & Pool Recs (${qualStandards.length})` },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setInMeetSubTab(tab.id)}
+                      className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                        inMeetSubTab === tab.id
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                {masterRoster.filter((a) => a.isActive).length} Active Roster Athletes
-              </span>
-            </div>
 
-            {masterRoster.filter((a) => a.isActive).length === 0 ? (
-              <div className="text-center py-12 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                Add active swimmers in <strong>Section 1 → Master Roster</strong> to populate your
-                deck reference board.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {masterRoster
-                  .filter((a) => a.isActive)
-                  .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
-                  .map((ath) => {
-                    const swKey = normalizeSwimmerKey(ath.canonicalName);
-                    const swFullBestMap = new Map();
-                    const swSplitBestMap = new Map();
-                    historicalRecords
-                      .filter((r) => r.isOfficial !== false && r.swimmerKey === swKey)
-                      .forEach((r) => {
-                        const isSplit =
-                          r.swimType === 'INTERMEDIATE_SPLIT' ||
-                          String(r.place || '').toUpperCase() === 'S';
-                        const targetMap = isSplit ? swSplitBestMap : swFullBestMap;
-                        if (
-                          !targetMap.has(r.eventKey) ||
-                          r.seconds < targetMap.get(r.eventKey).seconds
-                        ) {
-                          targetMap.set(r.eventKey, r);
-                        }
-                      });
-                    const eventKeys = Array.from(
-                      new Set([...swFullBestMap.keys(), ...swSplitBestMap.keys()])
-                    ).slice(0, 4);
-
-                    return (
-                      <div
-                        key={ath.id}
-                        className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2.5"
+              {/* SUB-TAB 1: HEAT SHEET (LANES 1-8) + TEAM HEX COLOR SETUP */}
+              {inMeetSubTab === 'heatsheet' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  {!parsedData ? (
+                    <div className="text-center py-10 space-y-3 border border-dashed border-slate-200 rounded-xl">
+                      <p className="text-sm text-slate-600">
+                        Import a `.cl2` meet or pre-meet/psych file in{' '}
+                        <strong>Section 4 (Import Meet Results)</strong> or load the sample meet to
+                        view lane-by-lane heat sheets.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="font-extrabold text-sm text-slate-900">
-                            {ath.canonicalName}
-                          </div>
-                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-600">
-                            {ath.gender}
+                        Load Sample Meet
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Team Hex Color Bar (Pre-Meet / Multi-Team Setup) */}
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                            Team Color Coding (Lane End-Bars)
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            Pick a color or enter a hex code per team
                           </span>
                         </div>
-                        {eventKeys.length === 0 ? (
-                          <div className="text-xs text-slate-400 italic">
-                            No career marks recorded yet
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
-                            {eventKeys.map((evKey) => {
-                              const fullBest = swFullBestMap.get(evKey);
-                              const splitBest = swSplitBestMap.get(evKey);
-                              const label = (fullBest || splitBest).eventLabel.replace(
-                                /^(Women|Men)\s+/i,
-                                ''
-                              );
-                              return (
-                                <div
-                                  key={evKey}
-                                  className="flex items-center justify-between text-xs bg-white px-2.5 py-1.5 rounded-lg border border-slate-100 gap-2"
-                                >
-                                  <span className="text-slate-600 truncate">{label}</span>
-                                  <div className="flex items-center gap-1.5 font-mono font-bold shrink-0">
-                                    {fullBest && (
-                                      <span className="text-slate-900">{fullBest.time}</span>
-                                    )}
-                                    {splitBest && (
-                                      <span
-                                        title={
-                                          splitBest.splitContext || 'Best Intermediate Split (S)'
-                                        }
-                                        className="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
+                        <div className="flex flex-wrap gap-2.5">
+                          {parsedData.teams.map((t) => {
+                            const hexVal = getTeamHexColor(t.code, t.name);
+                            return (
+                              <div
+                                key={t.code}
+                                className="inline-flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs"
+                              >
+                                <span
+                                  className="w-2.5 h-5 rounded-xs shrink-0"
+                                  style={{ backgroundColor: hexVal }}
+                                />
+                                <span className="font-bold text-slate-800">{t.name}</span>
+                                <input
+                                  type="color"
+                                  value={/^#[0-9a-fA-F]{6}$/.test(hexVal) ? hexVal : '#64748b'}
+                                  onChange={(e) => handleSetTeamHexColor(t.code, e.target.value)}
+                                  className="w-5 h-5 p-0 border-0 bg-transparent cursor-pointer"
+                                />
+                                <input
+                                  type="text"
+                                  value={hexVal}
+                                  onChange={(e) => handleSetTeamHexColor(t.code, e.target.value)}
+                                  className="w-20 px-1.5 py-0.5 text-[11px] font-mono bg-slate-50 border border-slate-200 rounded"
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Event & Heat Selector */}
+                      {(() => {
+                        const eventOptions = Array.from(
+                          new Map(
+                            parsedData.individualResults.map((r) => [r.eventLabel, r.eventNumber])
+                          ).entries()
+                        )
+                          .sort((a, b) => a[1] - b[1])
+                          .map(([label, num]) => ({ label, num }));
+
+                        const activeEvLabel =
+                          eventOptions.find((e) => e.label === selectedHeatEventLabel)?.label ||
+                          eventOptions[0]?.label ||
+                          '';
+
+                        const evSwims = parsedData.individualResults.filter(
+                          (r) => r.eventLabel === activeEvLabel
+                        );
+
+                        const heatOptions = Array.from(
+                          new Set(evSwims.map((r) => r.heat).filter(Boolean))
+                        ).sort((a, b) => Number(a) - Number(b));
+
+                        const heatSwims = evSwims.filter((r) =>
+                          selectedHeatNum === 'ALL' ? true : String(r.heat) === String(selectedHeatNum)
+                        );
+
+                        const laneMap = new Map();
+                        heatSwims.forEach((sw) => {
+                          const laneNum = parseInt(sw.lane, 10);
+                          if (laneNum >= 1 && laneNum <= 8 && !laneMap.has(laneNum)) {
+                            laneMap.set(laneNum, sw);
+                          }
+                        });
+
+                        const officialEvPool = historicalRecords.filter(
+                          (r) => r.isOfficial !== false && r.eventKey === normalizeEventKey(activeEvLabel)
+                        );
+
+                        const allTimeRankBySwimmer = new Map();
+                        const bestBySw = new Map();
+                        officialEvPool.forEach((r) => {
+                          if (!bestBySw.has(r.swimmerKey) || r.seconds < bestBySw.get(r.swimmerKey)) {
+                            bestBySw.set(r.swimmerKey, r);
+                          }
+                        });
+                        Array.from(bestBySw.entries())
+                          .sort((a, b) => a[1] - b[1])
+                          .forEach(([k], idx) => {
+                            if (idx < 10) allTimeRankBySwimmer.set(k, idx + 1);
+                          });
+
+                        return (
+                          <div className="space-y-4">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <select
+                                value={activeEvLabel}
+                                onChange={(e) => {
+                                  setSelectedHeatEventLabel(e.target.value);
+                                  setSelectedHeatNum('ALL');
+                                }}
+                                className="flex-1 min-w-[220px] px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              >
+                                {eventOptions.map((ev) => (
+                                  <option key={ev.label} value={ev.label}>
+                                    #{ev.num} — {ev.label}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <select
+                                value={selectedHeatNum}
+                                onChange={(e) => setSelectedHeatNum(e.target.value)}
+                                className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              >
+                                <option value="ALL">All Heats ({evSwims.length} swims)</option>
+                                {heatOptions.map((h) => (
+                                  <option key={h} value={h}>
+                                    Heat {h}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                              <table className="w-full text-left text-xs">
+                                <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
+                                  <tr>
+                                    <th className="py-2.5 px-3 w-16 text-center">Lane</th>
+                                    <th className="py-2.5 px-3">Swimmer / Team</th>
+                                    <th className="py-2.5 px-3">PB / SB</th>
+                                    <th className="py-2.5 px-3 text-center">Wins</th>
+                                    <th className="py-2.5 px-3">Last Swim in Event</th>
+                                    <th className="py-2.5 px-3">Event Trend</th>
+                                    <th className="py-2.5 px-3">All-Time / Cuts</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {[1, 2, 3, 4, 5, 6, 7, 8].map((laneNum) => {
+                                    const entry = laneMap.get(laneNum);
+                                    if (!entry) {
+                                      return (
+                                        <tr key={laneNum} className="bg-slate-50/50 text-slate-400">
+                                          <td className="py-3 px-3 text-center font-mono font-bold">
+                                            L{laneNum}
+                                          </td>
+                                          <td colSpan={6} className="py-3 px-3 italic">
+                                            Open / Empty Lane
+                                          </td>
+                                        </tr>
+                                      );
+                                    }
+
+                                    const displaySw = formatSwimmerDisplay(
+                                      entry.swimmerName,
+                                      entry.preferredFirst
+                                    );
+                                    const resolvedAth = resolveMasterAthlete(displaySw);
+                                    const canonicalName = resolvedAth
+                                      ? resolvedAth.canonicalName
+                                      : displaySw;
+                                    const swKey = normalizeSwimmerKey(canonicalName);
+                                    const evKey = normalizeEventKey(entry.eventLabel);
+                                    const teamHex = getTeamHexColor(
+                                      entry.teamCode,
+                                      entry.teamName
+                                    );
+
+                                    const swEventHistory = historicalRecords
+                                      .filter(
+                                        (r) =>
+                                          r.isOfficial !== false &&
+                                          r.swimmerKey === swKey &&
+                                          r.eventKey === evKey &&
+                                          r.swimType !== 'INTERMEDIATE_SPLIT' &&
+                                          String(r.place || '').toUpperCase() !== 'S'
+                                      )
+                                      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+                                    const pbRec =
+                                      swEventHistory.length > 0
+                                        ? swEventHistory.reduce((best, cur) =>
+                                            cur.seconds < best.seconds ? cur : best
+                                          )
+                                        : null;
+
+                                    const seasonStart = getCurrentSeasonStart();
+                                    const sbSwims = swEventHistory.filter(
+                                      (r) => r.dateObj && r.dateObj >= seasonStart
+                                    );
+                                    const sbRec =
+                                      sbSwims.length > 0
+                                        ? sbSwims.reduce((best, cur) =>
+                                            cur.seconds < best.seconds ? cur : best
+                                          )
+                                        : null;
+
+                                    const eventWinsCount = historicalRecords.filter(
+                                      (r) =>
+                                        r.eventKey === evKey &&
+                                        normalizeSwimmerKey(
+                                          resolveMasterAthlete(r.swimmerName)?.canonicalName ||
+                                            r.swimmerName
+                                        ) === swKey &&
+                                        String(r.place || '').trim() === '1' &&
+                                        String(r.round || 'Finals').toLowerCase() !== 'prelims' &&
+                                        String(r.round || 'Finals').toLowerCase() !== 'time trial'
+                                    ).length;
+
+                                    const lastSwim = swEventHistory[0] || null;
+                                    const curSec = timeToSeconds(entry.finalsTime);
+                                    let trendText = '—';
+                                    let trendTone = 'text-slate-500';
+                                    if (curSec !== null && lastSwim) {
+                                      const diff = curSec - lastSwim.seconds;
+                                      if (diff < -0.005) {
+                                        trendText = `${diff.toFixed(2)}s vs last`;
+                                        trendTone = 'text-emerald-700 font-bold';
+                                      } else if (diff > 0.005) {
+                                        trendText = `+${diff.toFixed(2)}s vs last`;
+                                        trendTone = 'text-amber-700 font-semibold';
+                                      } else {
+                                        trendText = 'Exact last mark';
+                                      }
+                                    }
+
+                                    const rankNum = allTimeRankBySwimmer.get(swKey);
+                                    const hitStandards = evaluateStandardsForSwim(
+                                      entry.eventLabel,
+                                      entry.finalsTime
+                                    );
+
+                                    return (
+                                      <tr
+                                        key={laneNum}
+                                        className="hover:bg-slate-50/80 transition"
+                                        style={{
+                                          boxShadow: `inset 5px 0 0 ${teamHex}, inset -5px 0 0 ${teamHex}`,
+                                        }}
                                       >
-                                        {splitBest.time} (S)
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
+                                        <td className="py-3 px-3 text-center font-mono font-black text-slate-900">
+                                          {laneNum}
+                                        </td>
+                                        <td className="py-3 px-3">
+                                          <div className="font-bold text-slate-900">
+                                            {canonicalName}
+                                            {entry.classYear ? ` (${entry.classYear})` : ''}
+                                          </div>
+                                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
+                                            <span
+                                              className="w-2 h-2 rounded-full inline-block"
+                                              style={{ backgroundColor: teamHex }}
+                                            />
+                                            <span>{entry.teamName}</span>
+                                            {entry.finalsTime && entry.finalsTime !== 'NT' && (
+                                              <span className="font-mono font-bold text-slate-800 ml-1">
+                                                • {entry.finalsTime}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </td>
+                                        <td className="py-3 px-3 font-mono text-[11px]">
+                                          <div>
+                                            PB:{' '}
+                                            <strong className="text-slate-900">
+                                              {pbRec ? pbRec.time : '—'}
+                                            </strong>
+                                          </div>
+                                          <div className="text-slate-500">
+                                            SB: {sbRec ? sbRec.time : '—'}
+                                          </div>
+                                        </td>
+                                        <td className="py-3 px-3 text-center font-mono font-bold text-cyan-800">
+                                          {eventWinsCount}
+                                        </td>
+                                        <td className="py-3 px-3 text-[11px]">
+                                          {lastSwim ? (
+                                            <div>
+                                              <span className="font-mono font-bold text-slate-800">
+                                                {lastSwim.time}
+                                              </span>
+                                              <span className="text-slate-500 ml-1.5">
+                                                ({formatDisplayDateMDY(lastSwim.date)})
+                                              </span>
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-400">—</span>
+                                          )}
+                                        </td>
+                                        <td className={`py-3 px-3 text-[11px] font-mono ${trendTone}`}>
+                                          {trendText}
+                                        </td>
+                                        <td className="py-3 px-3">
+                                          <div className="flex flex-wrap gap-1">
+                                            {rankNum && (
+                                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">
+                                                {rankNum === 1 ? '#1 Rec' : `#${rankNum} All-Time`}
+                                              </span>
+                                            )}
+                                            {hitStandards.map((std) => (
+                                              <span
+                                                key={std.id}
+                                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900"
+                                              >
+                                                {std.label}
+                                              </span>
+                                            ))}
+                                            {!rankNum && hitStandards.length === 0 && (
+                                              <span className="text-slate-400 text-[11px]">—</span>
+                                            )}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
-                        )}
+                        );
+                      })()}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* SUB-TAB 2: ACTIVE ROSTER OVERVIEW */}
+              {inMeetSubTab === 'roster' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  {/* Filter & Event Target Cut Bar */}
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 items-center">
+                    <div className="md:col-span-4 relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={inMeetSearch}
+                        onChange={(e) => setInMeetSearch(e.target.value)}
+                        placeholder="Filter active swimmers..."
+                        className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div className="md:col-span-3 flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                      {['ALL', 'Women', 'Men'].map((g) => (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => {
+                            setInMeetGender(g);
+                            if (g === 'Women' || g === 'Men') {
+                              const firstEv = CANONICAL_EVENTS.find((e) => e.startsWith(g));
+                              if (firstEv) setInMeetTargetEventKey(firstEv.toLowerCase());
+                            }
+                          }}
+                          className={`flex-1 py-1 rounded-md transition cursor-pointer ${
+                            inMeetGender === g
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {g === 'ALL' ? 'All' : g}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="md:col-span-5 flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-bold uppercase text-slate-500 shrink-0">
+                        Target Cuts:
+                      </span>
+                      <select
+                        value={inMeetTargetEventKey}
+                        onChange={(e) => setInMeetTargetEventKey(e.target.value)}
+                        className="flex-1 min-w-[170px] px-2.5 py-1.5 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        {CANONICAL_EVENTS.filter((e) =>
+                          inMeetGender === 'ALL' ? true : e.startsWith(inMeetGender)
+                        ).map((ev) => (
+                          <option key={ev} value={ev.toLowerCase()}>
+                            {ev}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Event Record & Top-10 Cut Strip */}
+                  {(() => {
+                    const evPool = historicalRecords.filter(
+                      (r) => r.isOfficial !== false && r.eventKey === inMeetTargetEventKey
+                    );
+                    const bestByAthlete = new Map();
+                    evPool.forEach((r) => {
+                      if (
+                        !bestByAthlete.has(r.swimmerKey) ||
+                        r.seconds < bestByAthlete.get(r.swimmerKey).seconds
+                      ) {
+                        bestByAthlete.set(r.swimmerKey, r);
+                      }
+                    });
+                    const sortedBests = Array.from(bestByAthlete.values()).sort(
+                      (a, b) => a.seconds - b.seconds
+                    );
+                    const schoolRec = sortedBests[0] || null;
+                    const tenthMark = sortedBests[9] || null;
+                    const frRec =
+                      evPool
+                        .filter((r) => normalizeClass(r.classYear) === 'FR')
+                        .sort((a, b) => a.seconds - b.seconds)[0] || null;
+
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-xs">
+                          <div className="text-[10px] font-bold uppercase text-amber-800">
+                            #1 Program Record
+                          </div>
+                          <div className="font-extrabold text-slate-900 mt-0.5">
+                            {schoolRec ? (
+                              <>
+                                <span className="font-mono text-amber-900">{schoolRec.time}</span>{' '}
+                                — {schoolRec.swimmerName}
+                              </>
+                            ) : (
+                              <span className="text-slate-500 font-normal">No mark in DB</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 text-xs">
+                          <div className="text-[10px] font-bold uppercase text-indigo-800">
+                            #10 All-Time Cut
+                          </div>
+                          <div className="font-extrabold text-slate-900 mt-0.5">
+                            {tenthMark ? (
+                              <>
+                                <span className="font-mono text-indigo-900">{tenthMark.time}</span>{' '}
+                                — {tenthMark.swimmerName}
+                              </>
+                            ) : (
+                              <span className="text-slate-500 font-normal">
+                                {sortedBests.length > 0
+                                  ? `Open spot (${sortedBests.length}/10 athletes)`
+                                  : 'No mark in DB'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="p-3 rounded-xl bg-cyan-50/70 border border-cyan-200 text-xs">
+                          <div className="text-[10px] font-bold uppercase text-cyan-800">
+                            Freshman (FR) Record
+                          </div>
+                          <div className="font-extrabold text-slate-900 mt-0.5">
+                            {frRec ? (
+                              <>
+                                <span className="font-mono text-cyan-900">{frRec.time}</span> —{' '}
+                                {frRec.swimmerName}
+                              </>
+                            ) : (
+                              <span className="text-slate-500 font-normal">No FR mark in DB</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     );
-                  })}
-              </div>
-            )}
+                  })()}
+
+                  {masterRoster.filter((a) => a.isActive).length === 0 ? (
+                    <div className="text-center py-12 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      Add active swimmers in <strong>Section 1 → Master Roster</strong> to populate
+                      your deck reference board.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {masterRoster
+                        .filter((a) => {
+                          if (!a.isActive) return false;
+                          if (inMeetGender !== 'ALL' && a.gender !== inMeetGender) return false;
+                          if (inMeetSearch.trim() !== '') {
+                            const q = inMeetSearch.toLowerCase();
+                            const hay = `${a.canonicalName} ${(a.aliases || []).join(' ')}`.toLowerCase();
+                            if (!hay.includes(q)) return false;
+                          }
+                          return true;
+                        })
+                        .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
+                        .map((ath) => {
+                          const swKey = normalizeSwimmerKey(ath.canonicalName);
+                          const swFullBestMap = new Map();
+                          const swSplitBestMap = new Map();
+                          historicalRecords
+                            .filter((r) => r.isOfficial !== false && r.swimmerKey === swKey)
+                            .forEach((r) => {
+                              const isSplit =
+                                r.swimType === 'INTERMEDIATE_SPLIT' ||
+                                String(r.place || '').toUpperCase() === 'S';
+                              const targetMap = isSplit ? swSplitBestMap : swFullBestMap;
+                              if (
+                                !targetMap.has(r.eventKey) ||
+                                r.seconds < targetMap.get(r.eventKey).seconds
+                              ) {
+                                targetMap.set(r.eventKey, r);
+                              }
+                            });
+                          const eventKeys = Array.from(
+                            new Set([...swFullBestMap.keys(), ...swSplitBestMap.keys()])
+                          ).slice(0, 4);
+
+                          const meetEntries = parsedData
+                            ? parsedData.individualResults.filter((entry) => {
+                                const displaySw = formatSwimmerDisplay(
+                                  entry.swimmerName,
+                                  entry.preferredFirst
+                                );
+                                const resolved = resolveMasterAthlete(displaySw);
+                                const matchKey = normalizeSwimmerKey(
+                                  resolved ? resolved.canonicalName : displaySw
+                                );
+                                return matchKey === swKey;
+                              })
+                            : [];
+
+                          return (
+                            <div
+                              key={ath.id}
+                              className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2.5"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="font-extrabold text-sm text-slate-900">
+                                  {ath.canonicalName}
+                                </div>
+                                <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-600 shrink-0">
+                                  {ath.gender}
+                                </span>
+                              </div>
+                              {eventKeys.length === 0 ? (
+                                <div className="text-xs text-slate-400 italic">
+                                  No career marks recorded yet
+                                </div>
+                              ) : (
+                                <div className="space-y-1">
+                                  {eventKeys.map((evKey) => {
+                                    const fullBest = swFullBestMap.get(evKey);
+                                    const splitBest = swSplitBestMap.get(evKey);
+                                    const label = (fullBest || splitBest).eventLabel.replace(
+                                      /^(Women|Men)\s+/i,
+                                      ''
+                                    );
+                                    return (
+                                      <div
+                                        key={evKey}
+                                        className="flex items-center justify-between text-xs bg-white px-2.5 py-1.5 rounded-lg border border-slate-100 gap-2"
+                                      >
+                                        <span className="text-slate-600 truncate">{label}</span>
+                                        <div className="flex items-center gap-1.5 font-mono font-bold shrink-0">
+                                          {fullBest && (
+                                            <span className="text-slate-900">{fullBest.time}</span>
+                                          )}
+                                          {splitBest && (
+                                            <span
+                                              title={
+                                                splitBest.splitContext ||
+                                                'Best Intermediate Split (S)'
+                                              }
+                                              className="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
+                                            >
+                                              {splitBest.time} (S)
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {meetEntries.length > 0 && (
+                                <div className="pt-2 border-t border-slate-200/80 space-y-1">
+                                  <div className="text-[10px] font-bold uppercase text-indigo-700">
+                                    Loaded Meet Swims ({meetEntries.length})
+                                  </div>
+                                  {meetEntries.map((mEntry) => {
+                                    const badges = benchmarkIndex.evaluateSwim(
+                                      ath.canonicalName,
+                                      mEntry.eventLabel,
+                                      mEntry.finalsTime,
+                                      mEntry.classYear
+                                    );
+                                    const hitStds = evaluateStandardsForSwim(
+                                      mEntry.eventLabel,
+                                      mEntry.finalsTime
+                                    );
+                                    return (
+                                      <div
+                                        key={mEntry.id}
+                                        className="flex items-center justify-between gap-1.5 text-[11px] bg-indigo-50/70 px-2 py-1 rounded border border-indigo-100"
+                                      >
+                                        <span className="text-slate-700 truncate">
+                                          {mEntry.eventLabel.replace(/^(Women|Men)\s+/i, '')}
+                                        </span>
+                                        <div className="flex items-center gap-1 font-mono font-bold shrink-0">
+                                          <span className="text-slate-900">
+                                            {mEntry.finalsTime}
+                                          </span>
+                                          {badges.slice(0, 2).map((b, idx) => (
+                                            <span
+                                              key={idx}
+                                              className="px-1 py-0.2 rounded text-[9px] font-sans font-bold bg-amber-100 text-amber-900"
+                                            >
+                                              {b.label}
+                                            </span>
+                                          ))}
+                                          {hitStds.map((s) => (
+                                            <span
+                                              key={s.id}
+                                              className="px-1 py-0.2 rounded text-[9px] font-sans font-bold bg-emerald-100 text-emerald-900"
+                                            >
+                                              {s.label}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* SUB-TAB 3: QUALIFYING STANDARDS & POOL RECORDS */}
+              {inMeetSubTab === 'standards' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                        Category
+                      </label>
+                      <select
+                        value={newStdType}
+                        onChange={(e) => setNewStdType(e.target.value)}
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                      >
+                        <option value="STANDARD">Qualifying Cut</option>
+                        <option value="POOL_RECORD">Pool Record</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                        Badge Label
+                      </label>
+                      <input
+                        type="text"
+                        value={newStdLabel}
+                        onChange={(e) => setNewStdLabel(e.target.value)}
+                        placeholder="e.g., NCAA B"
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                      />
+                    </div>
+                    <div className="lg:col-span-2">
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                        Event
+                      </label>
+                      <select
+                        value={newStdEventKey}
+                        onChange={(e) => setNewStdEventKey(e.target.value)}
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                      >
+                        {CANONICAL_EVENTS.map((ev) => (
+                          <option key={ev} value={ev.toLowerCase()}>
+                            {ev}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newStdTime}
+                        onChange={(e) => setNewStdTime(e.target.value)}
+                        placeholder="Time (e.g., 23.15)"
+                        className="flex-1 min-w-0 px-2.5 py-2 text-xs font-mono font-bold bg-white border border-slate-200 rounded-lg"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const cleanLbl = newStdLabel.trim();
+                          const secVal = timeToSeconds(newStdTime);
+                          if (!cleanLbl || secVal === null) return;
+                          const created = {
+                            id: `std-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                            type: newStdType,
+                            label: cleanLbl,
+                            eventKey: newStdEventKey,
+                            eventLabel: toTitleEventLabel(newStdEventKey),
+                            time: newStdTime.trim(),
+                            seconds: secVal,
+                          };
+                          updateQualStandardsList([...qualStandards, created]);
+                          setNewStdTime('');
+                        }}
+                        className="px-3.5 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shrink-0"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {qualStandards.length === 0 ? (
+                    <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      Add qualifying standards (such as `NCAA B` or `Conference Cut`) or pool records
+                      above to highlight matching swims on the Heat Sheet and in Section 4 results.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                          <tr>
+                            <th className="py-2.5 px-4">Type</th>
+                            <th className="py-2.5 px-4">Badge</th>
+                            <th className="py-2.5 px-4">Event</th>
+                            <th className="py-2.5 px-4">Standard Time</th>
+                            <th className="py-2.5 px-4 text-center">Remove</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {qualStandards.map((std) => (
+                            <tr key={std.id} className="hover:bg-slate-50">
+                              <td className="py-2.5 px-4 text-slate-600">
+                                {std.type === 'POOL_RECORD' ? 'Pool Record' : 'Qualifying Cut'}
+                              </td>
+                              <td className="py-2.5 px-4">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900">
+                                  {std.label}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-4 font-bold text-slate-900">
+                                {std.eventLabel}
+                              </td>
+                              <td className="py-2.5 px-4 font-mono font-bold text-indigo-800">
+                                {std.time}
+                              </td>
+                              <td className="py-2.5 px-4 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateQualStandardsList(
+                                      qualStandards.filter((item) => item.id !== std.id)
+                                    )
+                                  }
+                                  className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -6565,11 +7375,19 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       row.finalsTime,
                                       row.classYear
                                     );
+                                    const hitStds = evaluateStandardsForSwim(
+                                      row.eventLabel,
+                                      row.finalsTime
+                                    );
+                                    const teamHex = getTeamHexColor(row.teamCode, row.teamName);
 
                                     return (
                                       <React.Fragment key={row.id}>
                                         <tr
                                           onClick={() => hasSplits && toggleRow(row.id)}
+                                          style={{
+                                            boxShadow: `inset 4px 0 0 ${teamHex}`,
+                                          }}
                                           className={`transition ${
                                             hasSplits
                                               ? 'cursor-pointer hover:bg-cyan-50/40'
@@ -6619,6 +7437,14 @@ const rRowId = `cl2-lo-${entry.id}`;
                                                   className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
                                                 >
                                                   {t.label}
+                                                </span>
+                                              ))}
+                                              {hitStds.map((s) => (
+                                                <span
+                                                  key={s.id}
+                                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900"
+                                                >
+                                                  {s.label}
                                                 </span>
                                               ))}
                                             </div>
