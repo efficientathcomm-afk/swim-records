@@ -3024,7 +3024,7 @@ const rRowId = `cl2-lo-${entry.id}`;
         }
       }
 
-      // All-Time Top 10 (includes full-distance, R lead-offs, and S intermediate splits)
+// All-Time Top 10 (includes full-distance, R lead-offs, and S intermediate splits)
       const athleteBestMap = new Map();
       eventPool.forEach((r) => {
         const currentBest = athleteBestMap.get(r.swimmerKey);
@@ -3032,6 +3032,11 @@ const rRowId = `cl2-lo-${entry.id}`;
           athleteBestMap.set(r.swimmerKey, Number(r.seconds));
         }
       });
+
+      const prevSortedTop10 = Array.from(athleteBestMap.entries())
+        .filter(([, bestSec]) => Number.isFinite(bestSec) && bestSec > 0)
+        .sort((a, b) => a[1] - b[1]);
+      const prevRankIdx = prevSortedTop10.findIndex(([k]) => k === swKey);
 
       const existingBestForSwimmer = athleteBestMap.get(swKey);
       const effectiveBestForSwimmer =
@@ -3043,7 +3048,12 @@ const rRowId = `cl2-lo-${entry.id}`;
         .sort((a, b) => a[1] - b[1]);
 
       const rankIdx = sortedTop10.findIndex(([k]) => k === swKey);
-      if (rankIdx >= 0 && rankIdx < 10) {
+      const improvedRank =
+        rankIdx >= 0 &&
+        rankIdx < 10 &&
+        (prevRankIdx === -1 || rankIdx < prevRankIdx || (rankIdx === 0 && sec < (prevSortedTop10[0]?.[1] ?? Infinity) - 0.005));
+
+      if (improvedRank) {
         const isRecordHolder =
           rankIdx === 0 ||
           (sortedTop10[0] && sec <= sortedTop10[0][1] + 0.005);
@@ -6388,6 +6398,16 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       entry.eventLabel,
                                       entry.finalsTime
                                     );
+                                    const seasonHitStandards = sbRec
+                                      ? evaluateStandardsForSwim(entry.eventLabel, sbRec.time)
+                                      : [];
+                                    const combinedStandardsMap = new Map();
+                                    [...hitStandards, ...seasonHitStandards].forEach((std) => {
+                                      combinedStandardsMap.set(std.id, std);
+                                    });
+                                    const displayStandards = Array.from(
+                                      combinedStandardsMap.values()
+                                    );
 
                                     return (
                                       <tr
@@ -6451,12 +6471,12 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         </td>
                                         <td className="py-3 px-3">
                                           <div className="flex flex-wrap gap-1">
-                                            {rankNum && (
+{rankNum && (
                                               <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">
                                                 {rankNum === 1 ? '#1 Rec' : `#${rankNum} All-Time`}
                                               </span>
                                             )}
-                                            {hitStandards.map((std) => (
+                                            {displayStandards.map((std) => (
                                               <span
                                                 key={std.id}
                                                 className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${getStandardBadgeStyle(
@@ -6466,7 +6486,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                                                 {std.label}
                                               </span>
                                             ))}
-                                            {!rankNum && hitStandards.length === 0 && (
+                                            {!rankNum && displayStandards.length === 0 && (
                                               <span className="text-slate-400 text-[11px]">—</span>
                                             )}
                                           </div>
@@ -7504,18 +7524,29 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       row.swimmerName,
                                       row.preferredFirst
                                     );
-                                    const tags = benchmarkIndex.evaluateSwim(
-                                      displaySwimmer,
-                                      row.eventLabel,
-                                      row.finalsTime,
-                                      row.classYear
-                                    );
+                                    const isPrimaryProgramRow =
+                                      selectedTeam !== 'ALL'
+                                        ? row.teamCode === selectedTeam
+                                        : String(row.teamName || '')
+                                            .toLowerCase()
+                                            .includes('gettysburg') ||
+                                          String(row.teamCode || '')
+                                            .toLowerCase()
+                                            .includes('gett');
+                                    const tags = isPrimaryProgramRow
+                                      ? benchmarkIndex.evaluateSwim(
+                                          displaySwimmer,
+                                          row.eventLabel,
+                                          row.finalsTime,
+                                          row.classYear
+                                        )
+                                      : [];
                                     const hitStds = evaluateStandardsForSwim(
                                       row.eventLabel,
                                       row.finalsTime
                                     );
                                     const teamHex = getTeamHexColor(row.teamCode, row.teamName);
-
+                            
                                     return (
                                       <React.Fragment key={row.id}>
                                         <tr
