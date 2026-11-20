@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
 
+// Tailwind CSS v4 runs cleanly via postcss.config.js (@tailwindcss/postcss)
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react()],
 });
