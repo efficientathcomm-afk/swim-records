@@ -494,7 +494,9 @@ function parseSDIFContent(content) {
     city: '',
     state: '',
     startDate: '',
+    endDate: '',
     isoDate: '',
+    endIsoDate: '',
     software: '',
   };
 
@@ -518,9 +520,12 @@ function parseSDIFContent(content) {
       meetInfo.name = sliceCol(line, 12, 41) || 'Unnamed Swim Meet';
       meetInfo.city = sliceCol(line, 86, 105);
       meetInfo.state = sliceCol(line, 106, 107);
-      const rawDate = sliceCol(line, 122, 129);
-      meetInfo.startDate = formatDateSDIF(rawDate);
-      meetInfo.isoDate = formatSdifDate(rawDate);
+      const rawStartDate = sliceCol(line, 122, 129);
+      const rawEndDate = sliceCol(line, 130, 137);
+      meetInfo.startDate = formatDateSDIF(rawStartDate);
+      meetInfo.endDate = formatDateSDIF(rawEndDate);
+      meetInfo.isoDate = formatSdifDate(rawStartDate);
+      meetInfo.endIsoDate = formatSdifDate(rawEndDate);
     } else if (recType === 'C1') {
       const code = sliceCol(line, 12, 17);
       const name = sliceCol(line, 18, 47) || code;
@@ -570,6 +575,11 @@ function parseSDIFContent(content) {
       const distance = sliceCol(line, 68, 71);
       const strokeCode = sliceCol(line, 72, 72);
       const eventNumber = sliceCol(line, 73, 76);
+      const rawSwimDate = sliceCol(line, 95, 102);
+      const swimIsoDate =
+        /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
+          ? formatSdifDate(rawSwimDate)
+          : '';
       const finalsTimeRaw = sliceCol(line, 116, 123);
       const courseCode = sliceCol(line, 124, 124);
 
@@ -601,6 +611,7 @@ function parseSDIFContent(content) {
         strokeName,
         eventNumber: parseInt(eventNumber, 10) || eventNumber,
         eventLabel,
+        swimDate: swimIsoDate || meetInfo.isoDate || '',
         finalsTime: finalsTimeRaw || 'NT',
         timeSeconds: parsedSec === null ? Infinity : parsedSec,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
@@ -1297,6 +1308,10 @@ export default function App() {
   const [benchmarkStatusMsg, setBenchmarkStatusMsg] = useState('');
   const [meetReconcileSelections, setMeetReconcileSelections] = useState({});
   const [meetClassOverrides, setMeetClassOverrides] = useState({});
+  const [meetDateOverrides, setMeetDateOverrides] = useState({});
+  const [dayRangeStartEvent, setDayRangeStartEvent] = useState('');
+  const [dayRangeEndEvent, setDayRangeEndEvent] = useState('');
+  const [dayRangeTargetDate, setDayRangeTargetDate] = useState('');
   const [excludedMeetCommitIds, setExcludedMeetCommitIds] = useState(new Set());
 
   // Master List Quick-Add & Bulk Form State
@@ -1549,6 +1564,7 @@ export default function App() {
     if (!parsedData || !selectedTeam || selectedTeam === 'ALL') {
       return {
         rows: [],
+        meetDays: [],
         unmatchedCompetition: null,
         unmatchedAthletes: [],
         unmatchedEvents: [],
@@ -1560,14 +1576,44 @@ export default function App() {
     const meetLoc = [parsedData.meetInfo.city, parsedData.meetInfo.state]
       .filter(Boolean)
       .join(', ');
-    const meetDate = normalizeDateIso(
+    const defaultMeetDate = normalizeDateIso(
       parsedData.meetInfo.isoDate || parsedData.meetInfo.startDate || ''
     );
 
-    const matchedComp = resolveMasterCompetition(meetComp, meetDate);
+    // Collect distinct dates across the meet (B1 range + D0 swim dates)
+    const distinctDatesSet = new Set();
+    const startObj = parseFlexibleDate(parsedData.meetInfo.isoDate || parsedData.meetInfo.startDate);
+    const endObj = parseFlexibleDate(parsedData.meetInfo.endIsoDate || parsedData.meetInfo.endDate);
+    if (startObj && endObj && endObj >= startObj) {
+      const cur = new Date(startObj.getFullYear(), startObj.getMonth(), startObj.getDate());
+      const last = new Date(endObj.getFullYear(), endObj.getMonth(), endObj.getDate());
+      let guard = 0;
+      while (cur <= last && guard < 14) {
+        const y = cur.getFullYear();
+        const m = String(cur.getMonth() + 1).padStart(2, '0');
+        const d = String(cur.getDate()).padStart(2, '0');
+        distinctDatesSet.add(`${y}-${m}-${d}`);
+        cur.setDate(cur.getDate() + 1);
+        guard++;
+      }
+    }
+    parsedData.individualResults.forEach((entry) => {
+      if (entry.swimDate) distinctDatesSet.add(normalizeDateIso(entry.swimDate));
+    });
+    if (defaultMeetDate) distinctDatesSet.add(defaultMeetDate);
+    const meetDays = Array.from(distinctDatesSet).sort((a, b) => a.localeCompare(b));
+
+    const matchedComp = resolveMasterCompetition(meetComp, defaultMeetDate);
     const finalComp = matchedComp ? matchedComp.canonicalName : meetComp;
-    const finalDate = matchedComp?.date ? normalizeDateIso(matchedComp.date) : meetDate;
     const finalLoc = matchedComp?.defaultLocation || meetLoc;
+
+    const resolveRowDate = (rowId, eventNum, naturalDate) => {
+      if (meetDateOverrides[`row:${rowId}`]) return meetDateOverrides[`row:${rowId}`];
+      if (eventNum !== undefined && eventNum !== null && meetDateOverrides[`ev:${eventNum}`]) {
+        return meetDateOverrides[`ev:${eventNum}`];
+      }
+      return naturalDate || (matchedComp?.date ? normalizeDateIso(matchedComp.date) : defaultMeetDate);
+    };
 
     const existingHashes = new Set(
       historicalRecords.map(
@@ -1640,13 +1686,19 @@ export default function App() {
         meetClassOverrides[swKey] !== undefined
           ? meetClassOverrides[swKey]
           : normalizeClass(entry.classYear);
-      const placeStr = entry.place ? String(entry.place) : '';
-      const hash = `${swKey}|${finalEvKey}|${sec.toFixed(2)}|${finalDate}|Finals|${placeStr}`;
-      const isDuplicate = existingHashes.has(hash);
       const rowId = `cl2-ind-${entry.id}`;
+      const rowDate = resolveRowDate(
+        rowId,
+        entry.eventNumber,
+        normalizeDateIso(entry.swimDate) || defaultMeetDate
+      );
+      const placeStr = entry.place ? String(entry.place) : '';
+      const hash = `${swKey}|${finalEvKey}|${sec.toFixed(2)}|${rowDate}|Finals|${placeStr}`;
+      const isDuplicate = existingHashes.has(hash);
 
       rows.push({
         id: rowId,
+        eventNumber: entry.eventNumber,
         swimmerName: finalName,
         swimmerKey: swKey,
         classYear: effectiveClass,
@@ -1654,8 +1706,8 @@ export default function App() {
         eventLabel: finalEvLabel,
         time: entry.finalsTime,
         seconds: sec,
-        date: finalDate,
-        dateObj: parseFlexibleDate(finalDate),
+        date: rowDate,
+        dateObj: parseFlexibleDate(rowDate),
         location: finalLoc,
         competition: finalComp,
         round: 'Finals',
@@ -1686,11 +1738,17 @@ export default function App() {
             spItem.eventLabel
           );
           if (!spResolved.finalEvKey) return;
-          const sHash = `${swKey}|${spResolved.finalEvKey}|${spItem.seconds.toFixed(2)}|${finalDate}|Finals|S`;
-          const sDup = existingHashes.has(sHash);
           const sRowId = `cl2-sp-${entry.id}-${sIdx}`;
+          const spDate = resolveRowDate(
+            sRowId,
+            entry.eventNumber,
+            normalizeDateIso(entry.swimDate) || defaultMeetDate
+          );
+          const sHash = `${swKey}|${spResolved.finalEvKey}|${spItem.seconds.toFixed(2)}|${spDate}|Finals|S`;
+          const sDup = existingHashes.has(sHash);
           rows.push({
             id: sRowId,
+            eventNumber: entry.eventNumber,
             swimmerName: finalName,
             swimmerKey: swKey,
             classYear: effectiveClass,
@@ -1698,8 +1756,8 @@ export default function App() {
             eventLabel: spResolved.finalEvLabel,
             time: spItem.time,
             seconds: spItem.seconds,
-            date: finalDate,
-            dateObj: parseFlexibleDate(finalDate),
+            date: spDate,
+            dateObj: parseFlexibleDate(spDate),
             location: finalLoc,
             competition: finalComp,
             round: 'Finals',
@@ -1745,11 +1803,13 @@ export default function App() {
             meetClassOverrides[swKey] !== undefined
               ? meetClassOverrides[swKey]
               : normalizeClass(leadOffLeg.classYear);
-          const hash = `${swKey}|${finalEvKey}|${splitSec.toFixed(2)}|${finalDate}|Finals|R`;
-          const isDup = existingHashes.has(hash);
           const rRowId = `cl2-lo-${entry.id}`;
+          const rDate = resolveRowDate(rRowId, entry.eventNumber, defaultMeetDate);
+          const hash = `${swKey}|${finalEvKey}|${splitSec.toFixed(2)}|${rDate}|Finals|R`;
+          const isDup = existingHashes.has(hash);
           rows.push({
             id: rRowId,
+            eventNumber: entry.eventNumber,
             swimmerName: finalName,
             swimmerKey: swKey,
             classYear: effectiveClass,
@@ -1757,8 +1817,8 @@ export default function App() {
             eventLabel: finalEvLabel,
             time: leadOffLeg.legTotalTime,
             seconds: splitSec,
-            date: finalDate,
-            dateObj: parseFlexibleDate(finalDate),
+            date: rDate,
+            dateObj: parseFlexibleDate(rDate),
             location: finalLoc,
             competition: finalComp,
             round: 'Finals',
@@ -1768,7 +1828,7 @@ export default function App() {
             splitContext: `Lead-Off (${entry.eventLabel})`,
             source: 'cl2_leadoff',
             isDuplicate: isDup,
-            selected: !isDup && !excludedMeetCommitIds.has(rRowId),
+            selected: !isDuplicate && !excludedMeetCommitIds.has(rRowId),
           });
         }
       }
@@ -1789,11 +1849,13 @@ export default function App() {
               meetClassOverrides[swKey] !== undefined
                 ? meetClassOverrides[swKey]
                 : normalizeClass(leg.classYear);
-            const winHash = `${swKey}|${finalEvKey}|${relaySec.toFixed(2)}|${finalDate}|Finals|1`;
-            const isDup = existingHashes.has(winHash);
             const wRowId = `cl2-rw-${entry.id}-leg${leg.legOrder}`;
+            const wDate = resolveRowDate(wRowId, entry.eventNumber, defaultMeetDate);
+            const winHash = `${swKey}|${finalEvKey}|${relaySec.toFixed(2)}|${wDate}|Finals|1`;
+            const isDup = existingHashes.has(winHash);
             rows.push({
               id: wRowId,
+              eventNumber: entry.eventNumber,
               swimmerName: finalName,
               swimmerKey: swKey,
               classYear: effectiveClass,
@@ -1801,8 +1863,8 @@ export default function App() {
               eventLabel: finalEvLabel,
               time: entry.finalsTime,
               seconds: relaySec,
-              date: finalDate,
-              dateObj: parseFlexibleDate(finalDate),
+              date: wDate,
+              dateObj: parseFlexibleDate(wDate),
               location: finalLoc,
               competition: finalComp,
               round: 'Finals',
@@ -1823,11 +1885,12 @@ export default function App() {
 
     return {
       rows,
+      meetDays,
       matchedComp,
       unmatchedCompetition: !matchedComp
         ? {
             rawName: meetComp,
-            sampleDate: meetDate,
+            sampleDate: defaultMeetDate,
             sampleLocation: meetLoc,
           }
         : null,
@@ -1843,6 +1906,7 @@ export default function App() {
     masterEvents,
     includeSplitsOnCommit,
     meetClassOverrides,
+    meetDateOverrides,
     excludedMeetCommitIds,
   ]);
 
@@ -2725,6 +2789,10 @@ export default function App() {
       setMeetSubTab('individual');
       setMeetReconcileSelections({});
       setMeetClassOverrides({});
+      setMeetDateOverrides({});
+      setDayRangeStartEvent('');
+      setDayRangeEndEvent('');
+      setDayRangeTargetDate(parsed.meetInfo.isoDate || '');
       setExcludedMeetCommitIds(new Set());
       if (parsed.teams.length > 0) {
         const gettysburgTeam = parsed.teams.find((t) =>
@@ -7455,7 +7523,94 @@ export default function App() {
 
                   {/* Staged Pre-Commit Swims & Class Year Verification Table */}
                   {selectedTeam && selectedTeam !== 'ALL' && meetCommitPreview.rows.length > 0 && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
+                      {/* Multi-Day / Event-Range Date Mapper */}
+                      {(meetCommitPreview.meetDays.length > 1 ||
+                        Boolean(parsedData.meetInfo.endIsoDate)) && (
+                        <div className="bg-cyan-50/70 border border-cyan-200 rounded-xl p-3.5 space-y-2.5 text-xs">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="font-bold text-cyan-950 flex items-center gap-1.5">
+                              <Calendar className="w-4 h-4 text-cyan-700" />
+                              <span>
+                                Multi-Day Meet Dates Detected (
+                                {meetCommitPreview.meetDays
+                                  .map((d, i) => `Day ${i + 1}: ${formatDisplayDateMDY(d)}`)
+                                  .join(' • ')}
+                                )
+                              </span>
+                            </div>
+                            {Object.keys(meetDateOverrides).length > 0 && (
+                              <button
+                                onClick={() => setMeetDateOverrides({})}
+                                className="text-[11px] font-bold text-cyan-800 hover:underline cursor-pointer"
+                              >
+                                Reset Date Overrides ({Object.keys(meetDateOverrides).length})
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-slate-600 font-medium">
+                              Assign Event # range (great for relays or overrides):
+                            </span>
+                            <input
+                              type="number"
+                              min="1"
+                              value={dayRangeStartEvent}
+                              onChange={(e) => setDayRangeStartEvent(e.target.value)}
+                              placeholder="From Ev #"
+                              className="w-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                            />
+                            <span className="text-slate-400">to</span>
+                            <input
+                              type="number"
+                              min="1"
+                              value={dayRangeEndEvent}
+                              onChange={(e) => setDayRangeEndEvent(e.target.value)}
+                              placeholder="To Ev #"
+                              className="w-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                            />
+                            <select
+                              value={dayRangeTargetDate}
+                              onChange={(e) => setDayRangeTargetDate(e.target.value)}
+                              className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                            >
+                              {meetCommitPreview.meetDays.map((d, idx) => (
+                                <option key={d} value={d}>
+                                  Day {idx + 1} ({formatDisplayDateMDY(d)})
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => {
+                                const startEv = parseInt(dayRangeStartEvent, 10);
+                                const endEv = parseInt(dayRangeEndEvent, 10);
+                                const targetD =
+                                  dayRangeTargetDate || meetCommitPreview.meetDays[0] || '';
+                                if (Number.isNaN(startEv) || Number.isNaN(endEv) || !targetD) {
+                                  return;
+                                }
+                                const lo = Math.min(startEv, endEv);
+                                const hi = Math.max(startEv, endEv);
+                                setMeetDateOverrides((prev) => {
+                                  const next = { ...prev };
+                                  meetCommitPreview.rows.forEach((r) => {
+                                    const num = parseInt(r.eventNumber, 10);
+                                    if (!Number.isNaN(num) && num >= lo && num <= hi) {
+                                      next[`ev:${num}`] = targetD;
+                                    }
+                                  });
+                                  return next;
+                                });
+                              }}
+                              className="px-3 py-1 rounded-lg text-xs font-bold bg-cyan-700 hover:bg-cyan-600 text-white transition cursor-pointer"
+                            >
+                              Apply to Range
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                         <span className="font-bold text-slate-700">
                           Staged Swims Preview ({meetCommitPreview.rows.filter((r) => r.selected).length}{' '}
@@ -7464,8 +7619,7 @@ export default function App() {
                           database)
                         </span>
                         <span className="text-slate-500">
-                          Tip: Verify or fill in any blank Class Year (`FR`–`GR`) directly in the
-                          table before committing
+                          Tip: Verify Class Year, Date, or exclude swims before committing
                         </span>
                       </div>
 
@@ -7478,6 +7632,7 @@ export default function App() {
                               <th className="py-2 px-3 w-24">Class Year</th>
                               <th className="py-2 px-3">Event</th>
                               <th className="py-2 px-3">Time</th>
+                              <th className="py-2 px-3 w-36">Date</th>
                               <th className="py-2 px-3">Type</th>
                               <th className="py-2 px-3">Status</th>
                             </tr>
@@ -7506,6 +7661,51 @@ export default function App() {
                                 </td>
                                 <td className="py-2 px-3 font-bold text-slate-900">
                                   {row.swimmerName}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <select
+                                    value={row.classYear || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setMeetClassOverrides((prev) => ({
+                                        ...prev,
+                                        [row.swimmerKey]: val,
+                                      }));
+                                    }}
+                                    className={`px-2 py-1 border rounded text-[11px] font-bold ${
+                                      row.classYear
+                                        ? 'bg-white border-slate-200 text-slate-800'
+                                        : 'bg-amber-50 border-amber-300 text-amber-800'
+                                    }`}
+                                  >
+                                    <option value="">—</option>
+                                    <option value="FR">FR</option>
+                                    <option value="SO">SO</option>
+                                    <option value="JR">JR</option>
+                                    <option value="SR">SR</option>
+                                    <option value="GR">GR</option>
+                                  </select>
+                                </td>
+                                <td className="py-2 px-3">
+                                  {row.eventNumber ? `#${row.eventNumber} ` : ''}
+                                  {row.eventLabel}
+                                </td>
+                                <td className="py-2 px-3 font-mono font-bold text-cyan-800">
+                                  {row.time}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <input
+                                    type="date"
+                                    value={row.date || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setMeetDateOverrides((prev) => ({
+                                        ...prev,
+                                        [`row:${row.id}`]: val,
+                                      }));
+                                    }}
+                                    className="px-2 py-1 bg-white border border-slate-200 rounded text-[11px] font-mono text-slate-800"
+                                  />
                                 </td>
                                 <td className="py-2 px-3">
                                   <select
