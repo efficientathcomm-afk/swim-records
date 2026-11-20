@@ -2940,6 +2940,27 @@ const rRowId = `cl2-lo-${entry.id}`;
     });
   };
 
+  // Deterministic palette for freeform standard/record badge labels
+  const getStandardBadgeStyle = (label = '') => {
+    const palettes = [
+      'bg-emerald-100 text-emerald-900 border border-emerald-300',
+      'bg-violet-100 text-violet-900 border border-violet-300',
+      'bg-rose-100 text-rose-900 border border-rose-300',
+      'bg-sky-100 text-sky-900 border border-sky-300',
+      'bg-teal-100 text-teal-900 border border-teal-300',
+      'bg-fuchsia-100 text-fuchsia-900 border border-fuchsia-300',
+      'bg-orange-100 text-orange-900 border border-orange-300',
+      'bg-lime-100 text-lime-900 border border-lime-300',
+    ];
+    const clean = String(label || '').trim().toLowerCase();
+    if (!clean) return palettes[0];
+    let hash = 0;
+    for (let i = 0; i < clean.length; i++) {
+      hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+    }
+    return palettes[hash % palettes.length];
+  };
+
   // Benchmark Evaluation Engine (Dual Full-Distance vs Split PB/SB, All-Time Top-10, Freshman Record)
   const benchmarkIndex = useMemo(() => {
     const officialRows = historicalRecords.filter((r) => r.isOfficial !== false);
@@ -6122,6 +6143,20 @@ const rRowId = `cl2-lo-${entry.id}`;
                             if (idx < 10) allTimeRankBySwimmer.set(k, idx + 1);
                           });
 
+                        const sortedEvBests = Array.from(bestBySw.values()).sort(
+                          (a, b) => a.seconds - b.seconds
+                        );
+                        const schoolRec = sortedEvBests[0] || null;
+                        const tenthMark = sortedEvBests[9] || null;
+                        const frRec =
+                          officialEvPool
+                            .filter((r) => normalizeClass(r.classYear) === 'FR')
+                            .sort((a, b) => a.seconds - b.seconds)[0] || null;
+                        const activeEvKey = normalizeEventKey(activeEvLabel);
+                        const matchingStandards = qualStandards.filter(
+                          (s) => s.eventKey === activeEvKey
+                        );
+
                         return (
                           <div className="space-y-4">
                             <div className="flex flex-wrap items-center gap-3">
@@ -6154,11 +6189,93 @@ const rRowId = `cl2-lo-${entry.id}`;
                               </select>
                             </div>
 
+                            {/* Top Event Cuts & Defined Standards Strip */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                              <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-amber-800">
+                                  #1 Program Record
+                                </div>
+                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                  {schoolRec ? (
+                                    <>
+                                      <span className="font-mono text-amber-900">
+                                        {schoolRec.time}
+                                      </span>{' '}
+                                      — {schoolRec.swimmerName}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-500 font-normal">No mark in DB</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-indigo-800">
+                                  #10 All-Time Cut
+                                </div>
+                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                  {tenthMark ? (
+                                    <>
+                                      <span className="font-mono text-indigo-900">
+                                        {tenthMark.time}
+                                      </span>{' '}
+                                      — {tenthMark.swimmerName}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-500 font-normal">
+                                      {sortedEvBests.length > 0
+                                        ? `Open spot (${sortedEvBests.length}/10 athletes)`
+                                        : 'No mark in DB'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="p-3 rounded-xl bg-cyan-50/70 border border-cyan-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-cyan-800">
+                                  Freshman (FR) Record
+                                </div>
+                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                  {frRec ? (
+                                    <>
+                                      <span className="font-mono text-cyan-900">{frRec.time}</span>{' '}
+                                      — {frRec.swimmerName}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-500 font-normal">
+                                      No FR mark in DB
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-slate-600">
+                                  Defined Standards &amp; Pool Recs
+                                </div>
+                                {matchingStandards.length === 0 ? (
+                                  <div className="text-slate-500 mt-0.5">
+                                    None set for this event
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {matchingStandards.map((std) => (
+                                      <span
+                                        key={std.id}
+                                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getStandardBadgeStyle(
+                                          std.label
+                                        )}`}
+                                      >
+                                        {std.label}: <span className="font-mono">{std.time}</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
                             <div className="overflow-x-auto border border-slate-200 rounded-xl">
                               <table className="w-full text-left text-xs">
                                 <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
                                   <tr>
-                                    <th className="py-2.5 px-3 w-16 text-center">Lane</th>
+                                    <th className="py-2.5 px-3 w-20 text-center">Lane</th>
                                     <th className="py-2.5 px-3">Swimmer / Team</th>
                                     <th className="py-2.5 px-3">PB / SB</th>
                                     <th className="py-2.5 px-3 text-center">Wins</th>
@@ -6173,8 +6290,8 @@ const rRowId = `cl2-lo-${entry.id}`;
                                     if (!entry) {
                                       return (
                                         <tr key={laneNum} className="bg-slate-50/50 text-slate-400">
-                                          <td className="py-3 px-3 text-center font-mono font-bold">
-                                            L{laneNum}
+                                          <td className="py-3 px-3 text-center font-mono text-base font-black">
+                                            {laneNum}
                                           </td>
                                           <td colSpan={6} className="py-3 px-3 italic">
                                             Open / Empty Lane
@@ -6266,11 +6383,11 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       <tr
                                         key={laneNum}
                                         className="hover:bg-slate-50/80 transition"
-                                        style={{
-                                          boxShadow: `inset 5px 0 0 ${teamHex}, inset -5px 0 0 ${teamHex}`,
-                                        }}
                                       >
-                                        <td className="py-3 px-3 text-center font-mono font-black text-slate-900">
+                                        <td
+                                          style={{ backgroundColor: teamHex }}
+                                          className="py-3 px-3 text-center font-mono text-xl sm:text-2xl font-black text-white select-none"
+                                        >
                                           {laneNum}
                                         </td>
                                         <td className="py-3 px-3">
@@ -6332,7 +6449,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                                             {hitStandards.map((std) => (
                                               <span
                                                 key={std.id}
-                                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900"
+                                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${getStandardBadgeStyle(
+                                                  std.label
+                                                )}`}
                                               >
                                                 {std.label}
                                               </span>
@@ -6642,7 +6761,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                                           {hitStds.map((s) => (
                                             <span
                                               key={s.id}
-                                              className="px-1 py-0.2 rounded text-[9px] font-sans font-bold bg-emerald-100 text-emerald-900"
+                                              className={`px-1 py-0.2 rounded text-[9px] font-sans font-bold ${getStandardBadgeStyle(
+                                                s.label
+                                              )}`}
                                             >
                                               {s.label}
                                             </span>
@@ -6763,7 +6884,11 @@ const rRowId = `cl2-lo-${entry.id}`;
                                 {std.type === 'POOL_RECORD' ? 'Pool Record' : 'Qualifying Cut'}
                               </td>
                               <td className="py-2.5 px-4">
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getStandardBadgeStyle(
+                                    std.label
+                                  )}`}
+                                >
                                   {std.label}
                                 </span>
                               </td>
@@ -7442,7 +7567,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                                               {hitStds.map((s) => (
                                                 <span
                                                   key={s.id}
-                                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900"
+                                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${getStandardBadgeStyle(
+                                                    s.label
+                                                  )}`}
                                                 >
                                                   {s.label}
                                                 </span>
