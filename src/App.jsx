@@ -6153,12 +6153,15 @@ const rRowId = `cl2-lo-${entry.id}`;
                         const allTimeRankBySwimmer = new Map();
                         const bestBySw = new Map();
                         officialEvPool.forEach((r) => {
-                          if (!bestBySw.has(r.swimmerKey) || r.seconds < bestBySw.get(r.swimmerKey)) {
+                          if (
+                            !bestBySw.has(r.swimmerKey) ||
+                            r.seconds < bestBySw.get(r.swimmerKey).seconds
+                          ) {
                             bestBySw.set(r.swimmerKey, r);
                           }
                         });
                         Array.from(bestBySw.entries())
-                          .sort((a, b) => a[1] - b[1])
+                          .sort((a, b) => a[1].seconds - b[1].seconds)
                           .forEach(([k], idx) => {
                             if (idx < 10) allTimeRankBySwimmer.set(k, idx + 1);
                           });
@@ -6471,7 +6474,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         </td>
                                         <td className="py-3 px-3">
                                           <div className="flex flex-wrap gap-1">
-{rankNum && (
+                                            {rankNum && (
                                               <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">
                                                 {rankNum === 1 ? '#1 Rec' : `#${rankNum} All-Time`}
                                               </span>
