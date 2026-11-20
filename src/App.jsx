@@ -723,8 +723,10 @@ function parseSDIFContent(content) {
         : ['FR', 'SO', 'JR', 'SR', 'GR'].includes(altClassYear)
         ? altClassYear
         : '';
-      // Cols 99-113 hold Preferred First Name directly after the 14-char swimmer ID/checksum (cols 85-98)
-      const prefFirst = sliceCol(line, 99, 113).trim();
+      // Cols 87-100 hold the 14-char swimmer ID/checksum; cols 101-115 hold Preferred First Name
+      const rawPrefFirst = sliceCol(line, 101, 115).trim();
+      const prefFirst =
+        rawPrefFirst && !/^[0-9A-F]{4,}/i.test(rawPrefFirst) ? rawPrefFirst : '';
 
       const parsedLegOrder = /^[1-4]$/.test(legOrderRaw)
         ? parseInt(legOrderRaw, 10)
