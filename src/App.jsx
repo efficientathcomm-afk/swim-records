@@ -7405,6 +7405,25 @@ const rRowId = `cl2-lo-${entry.id}`;
                           expandableSwims.length > 0 &&
                           expandableSwims.every((r) => expandedRows.has(r.id));
 
+                        // Compute current All-Time Top-10 rank map for this event
+                        const eventKey = normalizeEventKey(eventGroup.eventLabel);
+                        const officialEvPool = historicalRecords.filter(
+                          (r) => r.isOfficial !== false && r.eventKey === eventKey
+                        );
+                        const bestBySw = new Map();
+                        officialEvPool.forEach((r) => {
+                          if (!bestBySw.has(r.swimmerKey) || r.seconds < bestBySw.get(r.swimmerKey)) {
+                            bestBySw.set(r.swimmerKey, r.seconds);
+                          }
+                        });
+                        const allTimeRankBySwimmer = new Map();
+                        Array.from(bestBySw.entries())
+                          .sort((a, b) => a[1] - b[1])
+                          .forEach(([k], idx) => {
+                            if (idx < 10) allTimeRankBySwimmer.set(k, idx + 1);
+                          });
+                        const seasonStart = getCurrentSeasonStart();
+
                         return (
                           <div
                             key={eventGroup.key}
@@ -7533,10 +7552,26 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       ? evaluateStandardsForSwim(row.eventLabel, row.finalsTime)
                                       : [];
                                     const teamHex = getTeamHexColor(row.teamCode, row.teamName);
-                                    const rankNum = allTimeRankBySwimmer.get(swKey);
+                                    const resolvedAth = resolveMasterAthlete(displaySwimmer);
+                                    const swKey = normalizeSwimmerKey(
+                                      resolvedAth ? resolvedAth.canonicalName : displaySwimmer
+                                    );
+                                    const rankNum = isPrimaryProgramSwim
+                                      ? allTimeRankBySwimmer.get(swKey)
+                                      : null;
+                                    const sbSwims = isPrimaryProgramSwim
+                                      ? historicalRecords.filter(
+                                          (r) =>
+                                            r.isOfficial !== false &&
+                                            r.swimmerKey === swKey &&
+                                            r.eventKey === eventKey &&
+                                            r.dateObj &&
+                                            r.dateObj >= seasonStart
+                                        )
+                                      : [];
                                     const seasonQualStandards = sbSwims.reduce((acc, sRow) => {
                                       evaluateStandardsForSwim(
-                                        entry.eventLabel,
+                                        row.eventLabel,
                                         sRow.time
                                       ).forEach((std) => {
                                         if (!acc.some((existing) => existing.id === std.id)) {
