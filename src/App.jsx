@@ -710,6 +710,9 @@ export default function App() {
   // Record Book Viewer State
   const [recordBookGender, setRecordBookGender] = useState('Women');
   const [recordBookEventKey, setRecordBookEventKey] = useState('women 1000 freestyle');
+  const [recordBookSubTab, setRecordBookSubTab] = useState('top10'); // 'top10' | 'wins'
+  const [winsActiveOnly, setWinsActiveOnly] = useState(false);
+  const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
 
   // Anonymous Firebase Auth & Live Cloud Sync State
   const [cloudUser, setCloudUser] = useState(null);
@@ -1599,39 +1602,81 @@ export default function App() {
 
           // Only flat-start Relay Lead-Off (Leg 1) is recorded with Place = "R"
           const leadOffLeg = entry.legs.find((l) => l.leg === 1);
-          if (!leadOffLeg || !leadOffLeg.name || !leadOffLeg.split) return;
+          if (leadOffLeg && leadOffLeg.name && leadOffLeg.split) {
+            const splitSec = timeToSeconds(leadOffLeg.split);
+            if (splitSec !== null && legEvKey) {
+              const resolvedAth = resolveMasterAthlete(leadOffLeg.name);
+              const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
+              const finalName = resolvedAth ? resolvedAth.canonicalName : leadOffLeg.name;
+              const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
+              const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
+              const finalLoc = resolvedComp?.defaultLocation || meetLoc;
 
-          const splitSec = timeToSeconds(leadOffLeg.split);
-          if (splitSec === null || !legEvKey) return;
+              const hash = `${normalizeSwimmerKey(finalName)}|${legEvKey}|${splitSec.toFixed(2)}|${finalDate}|R`;
+              if (!existingHashes.has(hash)) {
+                existingHashes.add(hash);
+                newEntries.push({
+                  id: `meet-relay-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
+                  swimmerName: finalName,
+                  swimmerKey: normalizeSwimmerKey(finalName),
+                  classYear: normalizeClass(leadOffLeg.classYear),
+                  eventKey: legEvKey,
+                  eventLabel: legEvLabel,
+                  time: leadOffLeg.split,
+                  seconds: splitSec,
+                  date: finalDate,
+                  dateObj: parseFlexibleDate(finalDate),
+                  location: finalLoc,
+                  competition: finalComp,
+                  place: 'R',
+                  swimType: 'RELAY_LEADOFF',
+                  isOfficial: true,
+                  splitContext: `Lead-Off (${ev.eventLabel})`,
+                  source: 'cl2_leadoff',
+                });
+              }
+            }
+          }
 
-          const resolvedAth = resolveMasterAthlete(leadOffLeg.name);
-          const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
-          const finalName = resolvedAth ? resolvedAth.canonicalName : leadOffLeg.name;
-          const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
-          const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
-          const finalLoc = resolvedComp?.defaultLocation || meetLoc;
+          // Also record 1st-place Relay Team Wins (Legs 1-4) for All-Time Wins tracking
+          if (String(entry.place || '').trim() === '1') {
+            const relaySec = timeToSeconds(entry.finalsTime);
+            const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
+            const resolvedEv = resolveMasterEvent(ev.eventLabel, ev.gender);
+            const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
+            const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
+            const finalLoc = resolvedComp?.defaultLocation || meetLoc;
+            const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
+            const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : ev.eventLabel;
 
-          const hash = `${normalizeSwimmerKey(finalName)}|${legEvKey}|${splitSec.toFixed(2)}|${finalDate}|R`;
-          if (!existingHashes.has(hash)) {
-            existingHashes.add(hash);
-            newEntries.push({
-              id: `meet-relay-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
-              swimmerName: finalName,
-              swimmerKey: normalizeSwimmerKey(finalName),
-              classYear: normalizeClass(leadOffLeg.classYear),
-              eventKey: legEvKey,
-              eventLabel: legEvLabel,
-              time: leadOffLeg.split,
-              seconds: splitSec,
-              date: finalDate,
-              dateObj: parseFlexibleDate(finalDate),
-              location: finalLoc,
-              competition: finalComp,
-              place: 'R',
-              swimType: 'RELAY_LEADOFF',
-              isOfficial: true,
-              splitContext: `Lead-Off (${ev.eventLabel})`,
-              source: 'cl2_leadoff',
+            entry.legs.forEach((leg) => {
+              if (!leg.name || relaySec === null) return;
+              const resolvedAth = resolveMasterAthlete(leg.name);
+              const finalName = resolvedAth ? resolvedAth.canonicalName : leg.name;
+              const winHash = `${normalizeSwimmerKey(finalName)}|${finalEvKey}|${relaySec.toFixed(2)}|${finalDate}|1`;
+              if (!existingHashes.has(winHash)) {
+                existingHashes.add(winHash);
+                newEntries.push({
+                  id: `meet-relwin-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
+                  swimmerName: finalName,
+                  swimmerKey: normalizeSwimmerKey(finalName),
+                  classYear: normalizeClass(leg.classYear),
+                  eventKey: finalEvKey,
+                  eventLabel: finalEvLabel,
+                  time: entry.finalsTime,
+                  seconds: relaySec,
+                  date: finalDate,
+                  dateObj: parseFlexibleDate(finalDate),
+                  location: finalLoc,
+                  competition: finalComp,
+                  round: 'Finals',
+                  place: '1',
+                  swimType: 'RELAY_WIN',
+                  isOfficial: false,
+                  splitContext: `Leg ${leg.leg}${leg.split ? ` (${leg.split})` : ''}`,
+                  source: 'cl2_relay_win',
+                });
+              }
             });
           }
         });
@@ -1850,6 +1895,81 @@ export default function App() {
       totalMatchedCount: officialRows.length,
     };
   }, [historicalRecords, recordBookEventKey]);
+
+  // All-Time Career Wins Leaderboard (Individual + Relay Finals Wins)
+  const allTimeWinsLeaderboard = useMemo(() => {
+    const activeSet = new Set(
+      masterRoster
+        .filter((a) => a.isActive)
+        .map((a) => normalizeSwimmerKey(a.canonicalName))
+    );
+
+    const athleteMap = new Map();
+
+    historicalRecords.forEach((r) => {
+      // Only count 1st-place finishes outside of Prelims / Time Trials
+      const placeClean = String(r.place || '').trim();
+      const roundClean = String(r.round || 'Finals').toLowerCase();
+      if (placeClean !== '1') return;
+      if (roundClean === 'prelims' || roundClean === 'time trial') return;
+
+      // Filter by selected gender
+      const evLower = String(r.eventKey || r.eventLabel || '').toLowerCase();
+      const athRecord = resolveMasterAthlete(r.swimmerName);
+      const gender =
+        athRecord?.gender ||
+        (evLower.startsWith('men') ? 'Men' : evLower.startsWith('women') ? 'Women' : '');
+      if (gender !== recordBookGender) return;
+
+      const canonicalName = athRecord ? athRecord.canonicalName : r.swimmerName;
+      const swKey = normalizeSwimmerKey(canonicalName);
+      if (winsActiveOnly && !activeSet.has(swKey)) return;
+
+      const isRelayWin =
+        r.swimType === 'RELAY_WIN' || evLower.includes('relay');
+
+      if (!athleteMap.has(swKey)) {
+        athleteMap.set(swKey, {
+          swimmerKey: swKey,
+          swimmerName: canonicalName,
+          isActive: activeSet.has(swKey),
+          indWins: 0,
+          relWins: 0,
+          totalWins: 0,
+          winLog: [],
+        });
+      }
+
+      const entry = athleteMap.get(swKey);
+      if (isRelayWin) {
+        entry.relWins += 1;
+      } else {
+        entry.indWins += 1;
+      }
+      entry.totalWins += 1;
+      entry.winLog.push({
+        id: r.id,
+        eventLabel: r.eventLabel,
+        time: r.time,
+        competition: r.competition,
+        date: r.date,
+        isRelay: isRelayWin,
+        splitContext: r.splitContext || '',
+      });
+    });
+
+    return Array.from(athleteMap.values())
+      .map((ath) => ({
+        ...ath,
+        winLog: ath.winLog.sort((a, b) => (b.date || '').localeCompare(a.date || '')),
+      }))
+      .sort(
+        (a, b) =>
+          b.totalWins - a.totalWins ||
+          b.indWins - a.indWins ||
+          compareByLastName(a.swimmerName, b.swimmerName)
+      );
+  }, [historicalRecords, masterRoster, recordBookGender, winsActiveOnly]);
 
   // Post-Meet Win Summary & Multi-Win Athletes
   const winSummary = useMemo(() => {
@@ -3341,16 +3461,43 @@ export default function App() {
                 <div>
                   <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 flex items-center gap-2">
                     <Trophy className="w-5 h-5 text-amber-500" />
-                    Program All-Time Top-10 & Freshman Record Book
+                    {recordBookSubTab === 'top10'
+                      ? 'Program All-Time Top-10 & Freshman Record Book'
+                      : `All-Time Career Wins Leaderboard (${recordBookGender})`}
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Ranked exclusively from official individual swims, relay lead-offs (R), &
-                    intermediate splits (S) ({recordBookData.totalMatchedCount} official marks
-                    matched for this event).
+                    {recordBookSubTab === 'top10'
+                      ? `Ranked exclusively from official individual swims, relay lead-offs (R), & intermediate splits (S) (${recordBookData.totalMatchedCount} official marks matched for this event).`
+                      : 'Ranked by 1st-place Finals victories across Individual and Relay events (Prelims/SF excluded).'}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* View Toggle: Event Top-10 vs All-Time Wins */}
+                  <div className="flex bg-slate-100 p-1 rounded-xl">
+                    <button
+                      onClick={() => setRecordBookSubTab('top10')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        recordBookSubTab === 'top10'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600'
+                      }`}
+                    >
+                      Event Top-10
+                    </button>
+                    <button
+                      onClick={() => setRecordBookSubTab('wins')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        recordBookSubTab === 'wins'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600'
+                      }`}
+                    >
+                      All-Time Wins
+                    </button>
+                  </div>
+
+                  {/* Gender Toggle */}
                   <div className="flex bg-slate-100 p-1 rounded-xl">
                     {['Women', 'Men'].map((g) => (
                       <button
@@ -3371,113 +3518,262 @@ export default function App() {
                     ))}
                   </div>
 
-                  <select
-                    value={recordBookEventKey}
-                    onChange={(e) => setRecordBookEventKey(e.target.value)}
-                    className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                  >
-                    {CANONICAL_EVENTS.filter((e) => e.startsWith(recordBookGender)).map((ev) => (
-                      <option key={ev} value={ev.toLowerCase()}>
-                        {ev}
-                      </option>
-                    ))}
-                  </select>
+                  {recordBookSubTab === 'top10' ? (
+                    <select
+                      value={recordBookEventKey}
+                      onChange={(e) => setRecordBookEventKey(e.target.value)}
+                      className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    >
+                      {CANONICAL_EVENTS.filter((e) => e.startsWith(recordBookGender)).map((ev) => (
+                        <option key={ev} value={ev.toLowerCase()}>
+                          {ev}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={winsActiveOnly}
+                        onChange={(e) => setWinsActiveOnly(e.target.checked)}
+                        className="rounded text-cyan-600"
+                      />
+                      Active Roster Only
+                    </label>
+                  )}
                 </div>
               </div>
 
-              {/* Freshman Record Spotlight Card */}
-              <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
-                    <Star className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-amber-800">
-                      Program Freshman Record ({toTitleEventLabel(recordBookEventKey)})
-                    </div>
-                    {recordBookData.freshmanRecord ? (
-                      <div className="text-sm sm:text-base font-extrabold text-slate-900">
-                        {recordBookData.freshmanRecord.swimmerName} —{' '}
-                        <span className="font-mono text-amber-800">
-                          {recordBookData.freshmanRecord.time}
-                        </span>
+              {recordBookSubTab === 'top10' ? (
+                <>
+                  {/* Freshman Record Spotlight Card */}
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
+                        <Star className="w-5 h-5" />
                       </div>
-                    ) : (
-                      <div className="text-xs text-slate-600">
-                        No official Freshman (`FR`) mark recorded for this event yet.
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                          Program Freshman Record ({toTitleEventLabel(recordBookEventKey)})
+                        </div>
+                        {recordBookData.freshmanRecord ? (
+                          <div className="text-sm sm:text-base font-extrabold text-slate-900">
+                            {recordBookData.freshmanRecord.swimmerName} —{' '}
+                            <span className="font-mono text-amber-800">
+                              {recordBookData.freshmanRecord.time}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-xs text-slate-600">
+                            No official Freshman (`FR`) mark recorded for this event yet.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {recordBookData.freshmanRecord && (
+                      <div className="text-xs text-amber-900 font-medium">
+                        {recordBookData.freshmanRecord.competition} •{' '}
+                        {recordBookData.freshmanRecord.date}
                       </div>
                     )}
                   </div>
-                </div>
-                {recordBookData.freshmanRecord && (
-                  <div className="text-xs text-amber-900 font-medium">
-                    {recordBookData.freshmanRecord.competition} •{' '}
-                    {recordBookData.freshmanRecord.date}
-                  </div>
-                )}
-              </div>
 
-              {/* Top-10 Table */}
-              {recordBookData.top10.length === 0 ? (
-                <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                  No official marks in the database for {toTitleEventLabel(recordBookEventKey)} yet.
-                </div>
+                  {/* Top-10 Table */}
+                  {recordBookData.top10.length === 0 ? (
+                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No official marks in the database for {toTitleEventLabel(recordBookEventKey)} yet.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
+                          <tr>
+                            <th className="py-3 px-4 w-16">Rank</th>
+                            <th className="py-3 px-4">Athlete</th>
+                            <th className="py-3 px-4">Class</th>
+                            <th className="py-3 px-4">Time</th>
+                            <th className="py-3 px-4">Competition</th>
+                            <th className="py-3 px-4">Date</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {recordBookData.top10.map((row, idx) => (
+                            <tr key={row.id} className={idx === 0 ? 'bg-amber-50/40' : 'hover:bg-slate-50'}>
+                              <td className="py-3 px-4 font-black text-slate-900">#{idx + 1}</td>
+                              <td className="py-3 px-4 font-bold text-slate-900">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span>{row.swimmerName}</span>
+                                  {(row.swimType === 'RELAY_LEADOFF' ||
+                                    row.place === 'R' ||
+                                    row.place === 'LR') && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-100 text-cyan-800">
+                                      R
+                                    </span>
+                                  )}
+                                  {(row.swimType === 'INTERMEDIATE_SPLIT' || row.place === 'S') && (
+                                    <span
+                                      title={row.splitContext || 'Intermediate Distance Split'}
+                                      className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
+                                    >
+                                      S{row.splitContext ? ` (${row.splitContext})` : ''}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-slate-600">{row.classYear || '—'}</td>
+                              <td className="py-3 px-4 font-mono font-extrabold text-cyan-800">
+                                {row.time}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span>{row.competition || '—'}</span>
+                                  {row.round === 'Prelims' && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                      Prelims (SF)
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-slate-500">{row.date || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               ) : (
-                <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
-                      <tr>
-                        <th className="py-3 px-4 w-16">Rank</th>
-                        <th className="py-3 px-4">Athlete</th>
-                        <th className="py-3 px-4">Class</th>
-                        <th className="py-3 px-4">Time</th>
-                        <th className="py-3 px-4">Competition</th>
-                        <th className="py-3 px-4">Date</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {recordBookData.top10.map((row, idx) => (
-                        <tr key={row.id} className={idx === 0 ? 'bg-amber-50/40' : 'hover:bg-slate-50'}>
-                          <td className="py-3 px-4 font-black text-slate-900">#{idx + 1}</td>
-                          <td className="py-3 px-4 font-bold text-slate-900">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span>{row.swimmerName}</span>
-                              {(row.swimType === 'RELAY_LEADOFF' ||
-                                row.place === 'R' ||
-                                row.place === 'LR') && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-100 text-cyan-800">
-                                  R
-                                </span>
-                              )}
-                              {(row.swimType === 'INTERMEDIATE_SPLIT' || row.place === 'S') && (
-                                <span
-                                  title={row.splitContext || 'Intermediate Distance Split'}
-                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
+                /* ALL-TIME CAREER WINS LEADERBOARD */
+                <div className="space-y-4">
+                  {/* Summary Stat Strip */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                      <div className="text-[11px] font-bold uppercase text-slate-500">
+                        Total Event Winners ({recordBookGender})
+                      </div>
+                      <div className="text-xl font-black text-slate-900 mt-0.5">
+                        {allTimeWinsLeaderboard.length}
+                      </div>
+                    </div>
+                    <div className="bg-cyan-50/70 border border-cyan-200 rounded-xl p-3.5">
+                      <div className="text-[11px] font-bold uppercase text-cyan-800">
+                        Total Individual Wins Recorded
+                      </div>
+                      <div className="text-xl font-black text-cyan-900 mt-0.5">
+                        {allTimeWinsLeaderboard.reduce((acc, a) => acc + a.indWins, 0)}
+                      </div>
+                    </div>
+                    <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5">
+                      <div className="text-[11px] font-bold uppercase text-amber-800">
+                        All-Time Wins Leader
+                      </div>
+                      <div className="text-sm sm:text-base font-extrabold text-slate-900 mt-0.5 truncate">
+                        {allTimeWinsLeaderboard[0]
+                          ? `${allTimeWinsLeaderboard[0].swimmerName} (${allTimeWinsLeaderboard[0].totalWins})`
+                          : '—'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {allTimeWinsLeaderboard.length === 0 ? (
+                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No 1st-place Finals victories recorded for {recordBookGender} yet.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
+                          <tr>
+                            <th className="py-3 px-4 w-16">Rank</th>
+                            <th className="py-3 px-4">Athlete</th>
+                            <th className="py-3 px-4 text-center">Total Wins</th>
+                            <th className="py-3 px-4 text-center">Individual</th>
+                            <th className="py-3 px-4 text-center">Relay</th>
+                            <th className="py-3 px-4 text-right">Win Log</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {allTimeWinsLeaderboard.map((ath, idx) => {
+                            const isOpen = expandedWinAthlete === ath.swimmerKey;
+                            return (
+                              <React.Fragment key={ath.swimmerKey}>
+                                <tr
+                                  className={
+                                    idx === 0 ? 'bg-amber-50/40' : 'hover:bg-slate-50'
+                                  }
                                 >
-                                  S{row.splitContext ? ` (${row.splitContext})` : ''}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-slate-600">{row.classYear || '—'}</td>
-                          <td className="py-3 px-4 font-mono font-extrabold text-cyan-800">
-                            {row.time}
-                          </td>
-                          <td className="py-3 px-4 text-slate-600">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span>{row.competition || '—'}</span>
-                              {row.round === 'Prelims' && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
-                                  Prelims (SF)
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-slate-500">{row.date || '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                                  <td className="py-3 px-4 font-black text-slate-900">
+                                    #{idx + 1}
+                                  </td>
+                                  <td className="py-3 px-4 font-bold text-slate-900">
+                                    <div className="flex items-center gap-2">
+                                      <span>{ath.swimmerName}</span>
+                                      {ath.isActive && (
+                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                          Active
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-4 text-center font-black text-sm text-cyan-800">
+                                    {ath.totalWins}
+                                  </td>
+                                  <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
+                                    {ath.indWins}
+                                  </td>
+                                  <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
+                                    {ath.relWins}
+                                  </td>
+                                  <td className="py-3 px-4 text-right">
+                                    <button
+                                      onClick={() =>
+                                        setExpandedWinAthlete(isOpen ? null : ath.swimmerKey)
+                                      }
+                                      className="inline-flex items-center gap-1 text-xs font-bold text-cyan-700 hover:underline cursor-pointer"
+                                    >
+                                      {isOpen ? 'Hide' : 'View'} ({ath.winLog.length})
+                                      {isOpen ? (
+                                        <ChevronUp className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <ChevronDown className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                  </td>
+                                </tr>
+                                {isOpen && (
+                                  <tr className="bg-slate-50">
+                                    <td colSpan={6} className="px-4 py-3">
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        {ath.winLog.map((w) => (
+                                          <div
+                                            key={w.id}
+                                            className="bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2 text-[11px]"
+                                          >
+                                            <div>
+                                              <div className="font-bold text-slate-900">
+                                                {w.eventLabel}
+                                                {w.splitContext ? ` (${w.splitContext})` : ''}
+                                              </div>
+                                              <div className="text-slate-500">
+                                                {w.competition || 'Meet'} • {w.date || '—'}
+                                              </div>
+                                            </div>
+                                            <span className="font-mono font-extrabold text-cyan-800 shrink-0">
+                                              {w.time}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
