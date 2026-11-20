@@ -1163,6 +1163,9 @@ export default function App() {
   const [newAthleteName, setNewAthleteName] = useState('');
   const [newAthleteGender, setNewAthleteGender] = useState('Women');
   const [newAthleteActive, setNewAthleteActive] = useState(true);
+  const [rosterSearchQuery, setRosterSearchQuery] = useState('');
+  const [rosterFilterGender, setRosterFilterGender] = useState('ALL');
+  const [rosterFilterActive, setRosterFilterActive] = useState('ALL');
   const [bulkRosterText, setBulkRosterText] = useState('');
   const [newCompName, setNewCompName] = useState('');
   const [newCompDate, setNewCompDate] = useState('');
@@ -4092,79 +4095,183 @@ export default function App() {
                       sync from your database.
                     </div>
                   ) : (
-                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
-                          <tr>
-                            <th className="py-2.5 px-4">Canonical Name</th>
-                            <th className="py-2.5 px-4">Gender</th>
-                            <th className="py-2.5 px-4 text-center">Active</th>
-                            <th className="py-2.5 px-4">Saved Aliases</th>
-                            <th className="py-2.5 px-4 text-center">Remove</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {masterRoster
-                            .slice()
-                            .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
-                            .map((ath) => (
-                              <tr key={ath.id} className="hover:bg-slate-50">
-                                <td className="py-2.5 px-4 font-bold text-slate-900">
-                                  {ath.canonicalName}
-                                </td>
-                                <td className="py-2.5 px-4 text-slate-600">{ath.gender}</td>
-                                <td className="py-2.5 px-4 text-center">
-                                  <input
-                                    type="checkbox"
-                                    checked={Boolean(ath.isActive)}
-                                    onChange={(e) => {
-                                      const checked = e.target.checked;
-                                      const updatedItem = { ...ath, isActive: checked };
-                                      updateMasterRoster(
-                                        masterRoster.map((item) =>
-                                          item.id === ath.id ? updatedItem : item
-                                        ),
-                                        [updatedItem]
-                                      );
-                                    }}
-                                    className="rounded text-cyan-600 focus:ring-cyan-500 cursor-pointer"
-                                  />
-                                </td>
-                                <td className="py-2.5 px-4 text-slate-500">
-                                  {(ath.aliases || []).length > 0 ? (
-                                    <div className="flex flex-wrap gap-1">
-                                      {ath.aliases.map((al) => (
-                                        <span
-                                          key={al}
-                                          className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
-                                        >
-                                          {al}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-400 italic">None</span>
-                                  )}
-                                </td>
-                                <td className="py-2.5 px-4 text-center">
+                    (() => {
+                      const filteredRoster = masterRoster
+                        .filter((ath) => {
+                          if (rosterFilterGender !== 'ALL' && ath.gender !== rosterFilterGender) {
+                            return false;
+                          }
+                          if (rosterFilterActive === 'ACTIVE' && !ath.isActive) return false;
+                          if (rosterFilterActive === 'INACTIVE' && ath.isActive) return false;
+                          if (rosterSearchQuery.trim() !== '') {
+                            const q = rosterSearchQuery.toLowerCase();
+                            const hay = `${ath.canonicalName} ${(ath.aliases || []).join(' ')}`.toLowerCase();
+                            if (!hay.includes(q)) return false;
+                          }
+                          return true;
+                        })
+                        .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName));
+
+                      return (
+                        <div className="space-y-3">
+                          {/* Roster Filter Bar */}
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                              <div className="relative flex-1 min-w-[180px] max-w-xs">
+                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                  type="text"
+                                  value={rosterSearchQuery}
+                                  onChange={(e) => setRosterSearchQuery(e.target.value)}
+                                  placeholder="Search name or alias..."
+                                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                />
+                              </div>
+
+                              {/* Gender Filter */}
+                              <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                                {[
+                                  { id: 'ALL', label: 'All Genders' },
+                                  { id: 'Women', label: 'Women' },
+                                  { id: 'Men', label: 'Men' },
+                                ].map((opt) => (
                                   <button
-                                    onClick={() =>
-                                      updateMasterRoster(
-                                        masterRoster.filter((item) => item.id !== ath.id),
-                                        null,
-                                        ath.id
-                                      )
-                                    }
-                                    className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                    key={opt.id}
+                                    onClick={() => setRosterFilterGender(opt.id)}
+                                    className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                                      rosterFilterGender === opt.id
+                                        ? 'bg-white text-slate-900 shadow-xs'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                    }`}
                                   >
-                                    <Trash2 className="w-3.5 h-3.5" />
+                                    {opt.label}
                                   </button>
-                                </td>
-                              </tr>
-                            ))}
-                        </tbody>
-                      </table>
-                    </div>
+                                ))}
+                              </div>
+
+                              {/* Active Status Filter */}
+                              <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                                {[
+                                  { id: 'ALL', label: 'All Status' },
+                                  { id: 'ACTIVE', label: 'Active' },
+                                  { id: 'INACTIVE', label: 'Inactive' },
+                                ].map((opt) => (
+                                  <button
+                                    key={opt.id}
+                                    onClick={() => setRosterFilterActive(opt.id)}
+                                    className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                                      rosterFilterActive === opt.id
+                                        ? 'bg-white text-slate-900 shadow-xs'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 text-xs text-slate-600 shrink-0">
+                              <span>
+                                Showing <strong>{filteredRoster.length}</strong> of{' '}
+                                <strong>{masterRoster.length}</strong>
+                              </span>
+                              {(rosterSearchQuery ||
+                                rosterFilterGender !== 'ALL' ||
+                                rosterFilterActive !== 'ALL') && (
+                                <button
+                                  onClick={() => {
+                                    setRosterSearchQuery('');
+                                    setRosterFilterGender('ALL');
+                                    setRosterFilterActive('ALL');
+                                  }}
+                                  className="font-bold text-cyan-700 hover:underline cursor-pointer"
+                                >
+                                  Reset
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {filteredRoster.length === 0 ? (
+                            <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                              No athletes match the selected roster filters.
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                              <table className="w-full text-left text-xs">
+                                <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                                  <tr>
+                                    <th className="py-2.5 px-4">Canonical Name</th>
+                                    <th className="py-2.5 px-4">Gender</th>
+                                    <th className="py-2.5 px-4 text-center">Active</th>
+                                    <th className="py-2.5 px-4">Saved Aliases</th>
+                                    <th className="py-2.5 px-4 text-center">Remove</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {filteredRoster.map((ath) => (
+                                    <tr key={ath.id} className="hover:bg-slate-50">
+                                      <td className="py-2.5 px-4 font-bold text-slate-900">
+                                        {ath.canonicalName}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-slate-600">{ath.gender}</td>
+                                      <td className="py-2.5 px-4 text-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(ath.isActive)}
+                                          onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            const updatedItem = { ...ath, isActive: checked };
+                                            updateMasterRoster(
+                                              masterRoster.map((item) =>
+                                                item.id === ath.id ? updatedItem : item
+                                              ),
+                                              [updatedItem]
+                                            );
+                                          }}
+                                          className="rounded text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                        />
+                                      </td>
+                                      <td className="py-2.5 px-4 text-slate-500">
+                                        {(ath.aliases || []).length > 0 ? (
+                                          <div className="flex flex-wrap gap-1">
+                                            {ath.aliases.map((al) => (
+                                              <span
+                                                key={al}
+                                                className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
+                                              >
+                                                {al}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <span className="text-slate-400 italic">None</span>
+                                        )}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-center">
+                                        <button
+                                          onClick={() =>
+                                            updateMasterRoster(
+                                              masterRoster.filter((item) => item.id !== ath.id),
+                                              null,
+                                              ath.id
+                                            )
+                                          }
+                                          className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
                   )}
                 </div>
               )}
