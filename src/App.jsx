@@ -912,6 +912,7 @@ export default function App() {
       normalizeCompKey(c.canonicalName) === key ||
       (c.aliases || []).some((al) => normalizeCompKey(al) === key);
 
+    // 1. Require BOTH Competition Name/Alias AND Date to match when a date is present
     if (dateKey) {
       const exactDated = masterCompetitions.find(
         (c) => normalizeDateIso(c.date) === dateKey && nameMatches(c)
@@ -919,13 +920,11 @@ export default function App() {
       if (exactDated) return exactDated;
     }
 
+    // 2. Fallback only to Master Competitions explicitly configured with blank ("Any Date")
     const undated = masterCompetitions.find(
       (c) => !normalizeDateIso(c.date) && nameMatches(c)
     );
     if (undated) return undated;
-
-    const allNameMatches = masterCompetitions.filter(nameMatches);
-    if (allNameMatches.length === 1) return allNameMatches[0];
 
     return null;
   };
@@ -1382,6 +1381,8 @@ export default function App() {
           if (c.id !== choice) return c;
           const updated = {
             ...c,
+            // Adopt the incoming date only if the target Master Competition had no date set
+            date: normalizeDateIso(c.date) || item.sampleDate,
             aliases: Array.from(new Set([...(c.aliases || []), item.rawName])),
           };
           changedComps.push(updated);
@@ -1428,11 +1429,11 @@ export default function App() {
         (c.aliases || []).some((al) => normalizeCompKey(al) === cKey);
 
       const comp =
-        nextComps.find((c) => normalizeDateIso(c.date) === dKey && compNameMatches(c)) ||
+        (dKey
+          ? nextComps.find((c) => normalizeDateIso(c.date) === dKey && compNameMatches(c))
+          : null) ||
         nextComps.find((c) => !normalizeDateIso(c.date) && compNameMatches(c)) ||
-        (nextComps.filter(compNameMatches).length === 1
-          ? nextComps.filter(compNameMatches)[0]
-          : null);
+        null;
 
       const rawEvStr = (row.rawEventInput || row.eventLabel || '').trim();
       const normEvKey = normalizeEventKey(rawEvStr, genderHint);
