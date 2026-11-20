@@ -3622,11 +3622,36 @@ export default function App() {
           <div className="bg-slate-950/70 border-t border-slate-800 overflow-x-auto">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center gap-1 py-1.5 text-xs font-semibold whitespace-nowrap">
               {[
-                { id: 'history', label: '1. Historical & Master Lists', icon: Database },
-                { id: 'records', label: '2. Records & Top-10', icon: Trophy },
-                { id: 'inmeet', label: '3. In-Meet Tools', icon: Sparkles },
-                { id: 'import', label: '4. Import Meet Results', icon: FolderUp },
-                { id: 'postmeet', label: '5. Post-Meet Tools', icon: Award },
+                {
+                  id: 'history',
+                  label: '1. Historical & Master Lists',
+                  icon: Database,
+                  activeClass: 'bg-cyan-600 text-white shadow-sm',
+                },
+                {
+                  id: 'records',
+                  label: '2. Records & Top-10',
+                  icon: Trophy,
+                  activeClass: 'bg-amber-500 text-slate-950 shadow-sm',
+                },
+                {
+                  id: 'inmeet',
+                  label: '3. In-Meet Tools',
+                  icon: Sparkles,
+                  activeClass: 'bg-indigo-600 text-white shadow-sm',
+                },
+                {
+                  id: 'import',
+                  label: '4. Import Meet Results',
+                  icon: FolderUp,
+                  activeClass: 'bg-blue-600 text-white shadow-sm',
+                },
+                {
+                  id: 'postmeet',
+                  label: '5. Post-Meet Tools',
+                  icon: Award,
+                  activeClass: 'bg-emerald-600 text-white shadow-sm',
+                },
               ].map((nav) => {
                 const Icon = nav.icon;
                 const active = activeSection === nav.id;
@@ -3636,7 +3661,7 @@ export default function App() {
                     onClick={() => setActiveSection(nav.id)}
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition cursor-pointer ${
                       active
-                        ? 'bg-cyan-600 text-white shadow-sm'
+                        ? nav.activeClass
                         : 'text-slate-400 hover:text-white hover:bg-slate-800'
                     }`}
                   >
