@@ -119,6 +119,11 @@ Delanie McKenzie\tJr.\t100 Back\t0\t58.15\t2026-02-20\tLancaster PA\tCentennial 
 Olivia Pyott\tSr.\t100 Breast\t1\t06.95\t2026-02-21\tLancaster PA\tCentennial Conference Championships\t1\t1:06.95\tWomen 100 Breaststroke\t66.95
 Charles Schundler\tJr.\t200 Free\t1\t53.40\t2026-10-24\tGettysburg PA\tGettysburg Invitational\t1\t1:53.40\tMen 200 Freestyle\t113.40`;
 
+const SAMPLE_RELAY_SHEET_CSV = `Names\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds
+Delanie McKenzie, Reilly Dolan, Morgan Puckett, Delaney Reck\t400 Medley Relay\t3\t59.68\t2026-11-07\tGettysburg PA\tGettysburg v Carnegie Mellon\t2\t3:59.68\tWomen 400 Medley Relay\t239.68
+Delaney Reck, Delanie McKenzie, Kathleen Miller, Maya Peitler\t200 Free Relay\t1\t38.76\t2026-11-07\tGettysburg PA\tGettysburg v Carnegie Mellon\t1\t1:38.76\tWomen 200 Freestyle Relay\t98.76
+Toby Winston, Ryan Burek, Edward Kim, Raphael Rudatsikira\t200 Free Relay\t1\t26.53\t2026-11-07\tGettysburg PA\tGettysburg v Carnegie Mellon\t1\t1:26.53\tMen 200 Freestyle Relay\t86.53`;
+
 // ============================================================================
 // PARSING & NORMALIZATION UTILITIES
 // ============================================================================
@@ -1087,7 +1092,131 @@ function parseGoogleSheetHistory(rawText, genderLookupMap = {}) {
   return rows;
 }
 
+// ============================================================================
+// GOOGLE SHEET 11-COLUMN HISTORICAL RELAY PARSER
+// Columns: Names | Event | Min | Sec | Date | Location | Competition | Place | Time | Event | Seconds
+// ============================================================================
+function parseGoogleSheetRelayHistory(rawText, genderLookupMap = {}) {
+  const lines = String(rawText || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return [];
 
+  const delimiter = lines[0].includes('\t') ? '\t' : ',';
+  const rows = [];
+
+  const parseCsvLine = (line) => {
+    if (delimiter === '\t') {
+      return line.split('\t').map((c) => c.trim().replace(/^"|"$/g, ''));
+    }
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        inQuotes = !inQuotes;
+      } else if (ch === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  };
+
+  lines.forEach((line, idx) => {
+    const cols = parseCsvLine(line);
+    if (idx === 0 && (cols[0] || '').toLowerCase() === 'names') return;
+
+    const rawNamesCol = cols[0] || '';
+    if (!rawNamesCol) return;
+
+    const legNames = rawNamesCol
+      .split(',')
+      .map((n) => n.replace(/\([^)]*\)/g, '').trim())
+      .filter(Boolean);
+    if (legNames.length === 0) return;
+
+    const shortEvent = cols[1] || '';
+    const minVal = parseFloat(cols[2]);
+    const secVal = parseFloat(cols[3]);
+    const dateStr = cols[4] || '';
+    const location = cols[5] || '';
+    const rawCompetition = cols[6] || '';
+    const placeRaw = (cols[7] || '').trim().toUpperCase();
+    const timeCol = cols[8] || '';
+    const longEvent = cols[9] || shortEvent;
+    const totalSecondsCol = parseFloat(cols[10]);
+
+    let round = 'Finals';
+    let competition = rawCompetition;
+    if (/\((sf|p|prelim|prelims|preliminary)\)/i.test(rawCompetition)) {
+      round = 'Prelims';
+      competition = rawCompetition
+        .replace(/\((sf|p|prelim|prelims|preliminary)\)/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    } else if (/\((tt|time\s*trial)\)/i.test(rawCompetition)) {
+      round = 'Time Trial';
+      competition = rawCompetition
+        .replace(/\((tt|time\s*trial)\)/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    let seconds = !Number.isNaN(totalSecondsCol) ? totalSecondsCol : timeToSeconds(timeCol);
+    if ((seconds === null || Number.isNaN(seconds)) && !Number.isNaN(secVal)) {
+      seconds = (!Number.isNaN(minVal) ? minVal * 60 : 0) + secVal;
+    }
+    if (seconds === null || Number.isNaN(seconds) || seconds <= 0) return;
+
+    let inferredGender = '';
+    for (const leg of legNames) {
+      const g = genderLookupMap[normalizeSwimmerKey(leg)];
+      if (g) {
+        inferredGender = g;
+        break;
+      }
+    }
+
+    const rawEventInput = longEvent || shortEvent;
+    let eventKey = normalizeEventKey(rawEventInput, inferredGender);
+    if (eventKey && !eventKey.endsWith('relay')) {
+      eventKey = `${eventKey} relay`;
+    }
+
+    const displayLineup = legNames.join(', ');
+
+    rows.push({
+      id: `hist-rel-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+      swimmerName: displayLineup,
+      swimmerKey: normalizeSwimmerKey(displayLineup),
+      relayLegs: legNames,
+      classYear: '',
+      rawEventInput,
+      eventKey,
+      eventLabel: eventKey ? toTitleEventLabel(eventKey) : rawEventInput,
+      time: timeCol || secondsToTime(seconds),
+      seconds,
+      date: normalizeDateIso(dateStr),
+      dateObj: parseFlexibleDate(dateStr),
+      location,
+      competition,
+      round,
+      place: placeRaw,
+      swimType: 'RELAY_TEAM',
+      isOfficial: true,
+      splitContext: '',
+      source: 'relay_sheet_import',
+    });
+  });
+
+  return rows;
+}
 
 // ============================================================================
 // MAIN APPLICATION COMPONENT
@@ -1153,6 +1282,7 @@ export default function App() {
   });
 
   // Staging & Importer State
+  const [sheetImportMode, setSheetImportMode] = useState('auto'); // 'auto' | 'individual' | 'relay'
   const [pasteSheetText, setPasteSheetText] = useState('');
   const [stagedHistoryRows, setStagedHistoryRows] = useState([]);
   const [reconcileSelections, setReconcileSelections] = useState({});
@@ -2112,11 +2242,30 @@ export default function App() {
   }, [masterRoster, parsedData]);
 
   // Stage Google Sheet rows for inspection & reconciliation before committing
-  const handleStageHistoryText = (rawText) => {
-    const parsed = parseGoogleSheetHistory(rawText, swimmerGenderLookup);
+  const handleStageHistoryText = (rawText, forcedMode = sheetImportMode) => {
+    const firstNonEmpty =
+      String(rawText || '')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .find(Boolean) || '';
+    const delim = firstNonEmpty.includes('\t') ? '\t' : ',';
+    const firstCols = firstNonEmpty.split(delim).map((c) => c.trim().replace(/^"|"$/g, ''));
+
+    const isRelaySheet =
+      forcedMode === 'relay' ||
+      (forcedMode === 'auto' &&
+        ((firstCols[0] || '').toLowerCase() === 'names' ||
+          (firstCols.length === 11 && (firstCols[0] || '').includes(','))));
+
+    const parsed = isRelaySheet
+      ? parseGoogleSheetRelayHistory(rawText, swimmerGenderLookup)
+      : parseGoogleSheetHistory(rawText, swimmerGenderLookup);
+
     if (parsed.length === 0) {
       setBenchmarkStatusMsg(
-        'No valid rows found. Ensure columns follow: Name, Class, Event, Min, Sec, Date, Location, Competition, Place, Time, Event, Seconds.'
+        isRelaySheet
+          ? 'No valid relay rows found. Ensure 11 columns follow: Names, Event, Min, Sec, Date, Location, Competition, Place, Time, Event, Seconds.'
+          : 'No valid rows found. Ensure 12 columns follow: Name, Class, Event, Min, Sec, Date, Location, Competition, Place, Time, Event, Seconds.'
       );
       return;
     }
@@ -2129,6 +2278,57 @@ export default function App() {
     );
 
     const staged = parsed.map((row) => {
+      if (row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs)) {
+        const resolvedLegs = row.relayLegs.map((legName) => {
+          const m = resolveMasterAthlete(legName);
+          return m ? m.canonicalName : legName;
+        });
+        const firstMatchedAth = row.relayLegs
+          .map((legName) => resolveMasterAthlete(legName))
+          .find(Boolean);
+        const inferredGender =
+          firstMatchedAth?.gender ||
+          row.relayLegs.map((n) => swimmerGenderLookup[normalizeSwimmerKey(n)]).find(Boolean) ||
+          '';
+
+        const matchedComp = resolveMasterCompetition(row.competition, row.date);
+        const resolvedComp = matchedComp ? matchedComp.canonicalName : row.competition;
+        const resolvedDate = matchedComp?.date ? normalizeDateIso(matchedComp.date) : row.date;
+        const resolvedLocation = matchedComp?.defaultLocation || row.location || '';
+
+        const matchedEv = resolveMasterEvent(row.rawEventInput, inferredGender);
+        let resolvedEventKey = matchedEv ? matchedEv.eventKey : row.eventKey;
+        if (resolvedEventKey && !resolvedEventKey.endsWith('relay')) {
+          resolvedEventKey = `${resolvedEventKey} relay`;
+        }
+        const resolvedEventLabel = matchedEv
+          ? matchedEv.canonicalName
+          : resolvedEventKey
+          ? toTitleEventLabel(resolvedEventKey)
+          : row.eventLabel;
+
+        const resolvedLineup = resolvedLegs.join(', ');
+        const resolvedKey = normalizeSwimmerKey(resolvedLineup);
+        const hash = `${resolvedKey}|${resolvedEventKey}|${row.seconds.toFixed(2)}|${resolvedDate}|${row.round || 'Finals'}|${row.place}`;
+        const isDuplicate = existingHashes.has(hash);
+
+        return {
+          ...row,
+          relayLegs: resolvedLegs,
+          swimmerName: resolvedLineup,
+          swimmerKey: resolvedKey,
+          competition: resolvedComp,
+          date: resolvedDate,
+          dateObj: parseFlexibleDate(resolvedDate),
+          location: resolvedLocation,
+          eventKey: resolvedEventKey,
+          eventLabel: resolvedEventLabel,
+          isEventMatched: Boolean(matchedEv),
+          isDuplicate,
+          selected: !isDuplicate,
+        };
+      }
+
       const matchedAth = resolveMasterAthlete(row.swimmerName);
       const resolvedName = matchedAth ? matchedAth.canonicalName : row.swimmerName;
       const inferredGender = matchedAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
@@ -2164,7 +2364,7 @@ export default function App() {
     setReconcileSelections({});
     const dupCount = staged.filter((r) => r.isDuplicate).length;
     setBenchmarkStatusMsg(
-      `Staged ${staged.length} rows (${staged.length - dupCount} new, ${dupCount} already in database). Review or reconcile below before committing.`
+      `Staged ${staged.length} ${isRelaySheet ? 'relay ' : ''}rows (${staged.length - dupCount} new, ${dupCount} already in database). Review or reconcile below before committing.`
     );
   };
 
@@ -2175,19 +2375,27 @@ export default function App() {
     const events = new Map();
 
     stagedHistoryRows.forEach((row) => {
-      const matchedAth = resolveMasterAthlete(row.swimmerName);
-      if (!matchedAth) {
-        const key = normalizeSwimmerKey(row.swimmerName);
-        if (!athletes.has(key)) {
-          athletes.set(key, {
-            rawName: row.swimmerName,
-            inferredGender: row.eventKey.startsWith('men') ? 'Men' : 'Women',
-            count: 1,
-          });
-        } else {
-          athletes.get(key).count += 1;
+      const namesToCheck =
+        row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs)
+          ? row.relayLegs
+          : [row.swimmerName];
+
+      namesToCheck.forEach((rawCandidate) => {
+        const matchedAth = resolveMasterAthlete(rawCandidate);
+        if (!matchedAth) {
+          const key = normalizeSwimmerKey(rawCandidate);
+          if (!athletes.has(key)) {
+            athletes.set(key, {
+              rawName: rawCandidate,
+              inferredGender: row.eventKey.startsWith('men') ? 'Men' : 'Women',
+              count: 1,
+            });
+          } else {
+            athletes.get(key).count += 1;
+          }
         }
-      }
+      });
+
       if (row.competition && !resolveMasterCompetition(row.competition, row.date)) {
         const cKey = `${normalizeCompKey(row.competition)}|${normalizeDateIso(row.date)}`;
         if (!competitions.has(cKey)) {
@@ -2201,7 +2409,11 @@ export default function App() {
           competitions.get(cKey).count += 1;
         }
       }
-      const genderHint = matchedAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
+      const firstLegAth =
+        row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs)
+          ? row.relayLegs.map((n) => resolveMasterAthlete(n)).find(Boolean)
+          : resolveMasterAthlete(row.swimmerName);
+      const genderHint = firstLegAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
       if (!resolveMasterEvent(row.rawEventInput || row.eventLabel, genderHint)) {
         const eKey = `${(row.rawEventInput || row.eventLabel).trim().toLowerCase()}|${genderHint}`;
         if (!events.has(eKey)) {
@@ -2307,13 +2519,32 @@ export default function App() {
     }
 
     const updatedStaged = stagedHistoryRows.map((row) => {
+      const resolveSingleAth = (name) => {
+        const k = normalizeSwimmerKey(name);
+        return nextRoster.find(
+          (a) =>
+            normalizeSwimmerKey(a.canonicalName) === k ||
+            (a.aliases || []).some((al) => normalizeSwimmerKey(al) === k)
+        );
+      };
+
+      const isRelayRow = row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs);
+      const resolvedLegs = isRelayRow
+        ? row.relayLegs.map((legName) => {
+            const m = resolveSingleAth(legName);
+            return m ? m.canonicalName : legName;
+          })
+        : null;
+
       const key = normalizeSwimmerKey(row.swimmerName);
-      const ath = nextRoster.find(
-        (a) =>
-          normalizeSwimmerKey(a.canonicalName) === key ||
-          (a.aliases || []).some((al) => normalizeSwimmerKey(al) === key)
-      );
-      const resolvedName = ath ? ath.canonicalName : row.swimmerName;
+      const ath = isRelayRow
+        ? row.relayLegs.map((n) => resolveSingleAth(n)).find(Boolean)
+        : resolveSingleAth(row.swimmerName);
+      const resolvedName = isRelayRow
+        ? resolvedLegs.join(', ')
+        : ath
+        ? ath.canonicalName
+        : row.swimmerName;
       const genderHint = ath?.gender || swimmerGenderLookup[key] || '';
 
       const cKey = normalizeCompKey(row.competition);
@@ -2344,33 +2575,75 @@ export default function App() {
       const resolvedComp = comp ? comp.canonicalName : row.competition;
       const resolvedDate = comp?.date ? normalizeDateIso(comp.date) : row.date;
       const resolvedLocation = comp?.defaultLocation || row.location || '';
+      const resolvedEventKey = evMatch ? evMatch.eventKey : normEvKey || row.eventKey;
+      const resolvedEventLabel = evMatch
+        ? evMatch.canonicalName
+        : resolvedEventKey
+        ? toTitleEventLabel(resolvedEventKey)
+        : row.eventLabel;
+
+      const isDuplicate = historicalRecords.some(
+        (hr) =>
+          hr.swimmerKey === normalizeSwimmerKey(resolvedName) &&
+          hr.eventKey === resolvedEventKey &&
+          hr.seconds.toFixed(2) === row.seconds.toFixed(2) &&
+          hr.date === resolvedDate &&
+          (hr.round || 'Finals') === (row.round || 'Finals') &&
+          hr.place === row.place
+      );
 
       return {
         ...row,
+        ...(isRelayRow ? { relayLegs: resolvedLegs } : {}),
         swimmerName: resolvedName,
         swimmerKey: normalizeSwimmerKey(resolvedName),
         competition: resolvedComp,
         date: resolvedDate,
         dateObj: parseFlexibleDate(resolvedDate),
         location: resolvedLocation,
-        eventKey: evMatch ? evMatch.eventKey : row.eventKey,
-        eventLabel: evMatch ? evMatch.canonicalName : row.eventLabel,
+        eventKey: resolvedEventKey,
+        eventLabel: resolvedEventLabel,
         isEventMatched: Boolean(evMatch),
+        isDuplicate,
+        selected: !isDuplicate,
       };
     });
 
     setStagedHistoryRows(updatedStaged);
     setReconcileSelections({});
-    setBenchmarkStatusMsg(
-      'Reconciled unmatched athletes, competitions, and events into Master Lists.'
-    );
+    setBenchmarkStatusMsg('Reconciled Master List matches and updated staged preview.');
   };
 
-  // Commit staged rows into database
+  // Commit staged rows into database (Relay rows also generate 4 individual RELAY_WIN records when Place === '1' in Finals)
   const handleCommitStagedRows = (mode = 'append') => {
-    const chosen = stagedHistoryRows
+    const chosen = [];
+
+    stagedHistoryRows
       .filter((r) => r.selected)
-      .map(({ isDuplicate, selected, isEventMatched, rawEventInput, ...cleanRow }) => cleanRow);
+      .forEach(({ isDuplicate, selected, isEventMatched, rawEventInput, ...cleanRow }) => {
+        chosen.push(cleanRow);
+
+        if (
+          cleanRow.swimType === 'RELAY_TEAM' &&
+          Array.isArray(cleanRow.relayLegs) &&
+          String(cleanRow.place || '').trim() === '1' &&
+          String(cleanRow.round || 'Finals').toLowerCase() === 'finals'
+        ) {
+          cleanRow.relayLegs.forEach((legName, legIdx) => {
+            const legKey = normalizeSwimmerKey(legName);
+            if (!legKey) return;
+            chosen.push({
+              ...cleanRow,
+              id: `${cleanRow.id}-win-leg${legIdx + 1}`,
+              swimmerName: legName,
+              swimmerKey: legKey,
+              swimType: 'RELAY_WIN',
+              isOfficial: false,
+              splitContext: `Leg ${legIdx + 1}`,
+            });
+          });
+        }
+      });
 
     if (chosen.length === 0) {
       setBenchmarkStatusMsg('No rows selected in staging table to commit.');
@@ -2380,7 +2653,7 @@ export default function App() {
     const next = mode === 'replace' ? chosen : [...historicalRecords, ...chosen];
     updateHistoricalRecords(next, chosen, mode === 'replace');
     setBenchmarkStatusMsg(
-      `Committed ${chosen.length} verified performances (${next.length} total in database).`
+      `Committed ${chosen.length} verified records (${next.length} total in database).`
     );
     setStagedHistoryRows([]);
     setPasteSheetText('');
@@ -3618,10 +3891,31 @@ export default function App() {
                 <div className="p-5 sm:p-6 space-y-6">
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                        Paste 12-Column Google Sheet Rows (TSV / CSV)
-                      </label>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                          Paste Google Sheet Rows (TSV / CSV)
+                        </label>
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg text-[11px] font-bold">
+                          {[
+                            { id: 'auto', label: 'Auto-Detect' },
+                            { id: 'individual', label: 'Individual (12-Col)' },
+                            { id: 'relay', label: 'Relays (11-Col)' },
+                          ].map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={() => setSheetImportMode(m.id)}
+                              className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                                sheetImportMode === m.id
+                                  ? 'bg-white text-slate-900 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              {m.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
                         <input
                           ref={historyCsvInputRef}
                           type="file"
@@ -3648,12 +3942,23 @@ export default function App() {
                         </button>
                         <button
                           onClick={() => {
+                            setSheetImportMode('individual');
                             setPasteSheetText(SAMPLE_GOOGLE_SHEET_CSV);
-                            handleStageHistoryText(SAMPLE_GOOGLE_SHEET_CSV);
+                            handleStageHistoryText(SAMPLE_GOOGLE_SHEET_CSV, 'individual');
                           }}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 cursor-pointer"
                         >
-                          Load Sample Sheet Rows
+                          Sample Individual
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSheetImportMode('relay');
+                            setPasteSheetText(SAMPLE_RELAY_SHEET_CSV);
+                            handleStageHistoryText(SAMPLE_RELAY_SHEET_CSV, 'relay');
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 cursor-pointer"
+                        >
+                          Sample Relays
                         </button>
                       </div>
                     </div>
@@ -3662,7 +3967,11 @@ export default function App() {
                       rows={5}
                       value={pasteSheetText}
                       onChange={(e) => setPasteSheetText(e.target.value)}
-                      placeholder={`Name\tClass\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nAva Berry\tFr.\t1000 Free\t10\t46.20\t2026-10-24\tGettysburg PA\tGettysburg Invitational\t1\t10:46.20\tWomen 1000 Freestyle\t646.20`}
+                      placeholder={
+                        sheetImportMode === 'relay'
+                          ? `Names\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nDelanie McKenzie, Reilly Dolan, Morgan Puckett, Delaney Reck\t400 Medley Relay\t3\t59.68\t2026-11-07\tGettysburg PA\tGettysburg v Carnegie Mellon\t2\t3:59.68\tWomen 400 Medley Relay\t239.68`
+                          : `Name\tClass\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nAva Berry\tFr.\t1000 Free\t10\t46.20\t2026-10-24\tGettysburg PA\tGettysburg Invitational\t1\t10:46.20\tWomen 1000 Freestyle\t646.20`
+                      }
                       className="w-full p-3 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     />
 
@@ -3910,59 +4219,75 @@ export default function App() {
                                     }
                                   />
                                 </td>
-                                <td className="py-2 px-3 font-bold text-slate-900">
-                                  {row.swimmerName}
+                                <td className="py-2 px-3 font-semibold text-slate-800">
+                                  <div>{row.swimmerName}</div>
+                                  {row.classYear && (
+                                    <span className="text-[10px] text-slate-500 font-normal">
+                                      Class: {row.classYear}
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="py-2 px-3">{row.eventLabel}</td>
-                                <td className="py-2 px-3 font-mono font-bold text-cyan-800">
+                                <td className="py-2 px-3 font-mono font-bold">
                                   {row.time}
+                                  {row.place && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">
+                                      #{row.place}
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="py-2 px-3">
                                   {row.competition || '—'}
                                   {row.round === 'Prelims' && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
                                       Prelims (SF)
                                     </span>
                                   )}
                                 </td>
-                                <td className="py-2 px-3 font-mono">{row.date || '—'}</td>
+                                <td className="py-2 px-3 font-mono text-[11px]">{row.date || '—'}</td>
                                 <td className="py-2 px-3">
-                                  <select
-                                    value={row.swimType}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setStagedHistoryRows((prev) =>
-                                        prev.map((item) =>
-                                          item.id === row.id
-                                            ? {
-                                                ...item,
-                                                swimType: val,
-                                                place:
-                                                  val === 'RELAY_LEADOFF'
-                                                    ? 'R'
-                                                    : val === 'INTERMEDIATE_SPLIT'
-                                                    ? 'S'
-                                                    : item.place === 'R' || item.place === 'S'
-                                                    ? ''
-                                                    : item.place,
-                                              }
-                                            : item
-                                        )
-                                      );
-                                    }}
-                                    className="px-2 py-1 bg-white border border-slate-200 rounded text-[11px]"
-                                  >
-                                    <option value="OFFICIAL">Official Individual</option>
-                                    <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
-                                    <option value="INTERMEDIATE_SPLIT">
-                                      Intermediate Split (S)
-                                    </option>
-                                  </select>
+                                  {row.swimType === 'RELAY_TEAM' ? (
+                                    <span className="px-2 py-1 rounded bg-purple-100 text-purple-800 text-[11px] font-bold">
+                                      Relay Lineup (4 Legs)
+                                    </span>
+                                  ) : (
+                                    <select
+                                      value={row.swimType}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setStagedHistoryRows((prev) =>
+                                          prev.map((item) =>
+                                            item.id === row.id
+                                              ? {
+                                                  ...item,
+                                                  swimType: val,
+                                                  place:
+                                                    val === 'RELAY_LEADOFF'
+                                                      ? 'R'
+                                                      : val === 'INTERMEDIATE_SPLIT'
+                                                      ? 'S'
+                                                      : item.place === 'R' || item.place === 'S'
+                                                      ? ''
+                                                      : item.place,
+                                                }
+                                              : item
+                                          )
+                                        );
+                                      }}
+                                      className="px-2 py-1 bg-white border border-slate-200 rounded text-[11px]"
+                                    >
+                                      <option value="OFFICIAL">Official Individual</option>
+                                      <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
+                                      <option value="INTERMEDIATE_SPLIT">
+                                        Intermediate Split (S)
+                                      </option>
+                                    </select>
+                                  )}
                                 </td>
                                 <td className="py-2 px-3">
                                   {row.isDuplicate ? (
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-600">
-                                      Duplicate
+                                      Already in DB
                                     </span>
                                   ) : (
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
