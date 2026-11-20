@@ -35,13 +35,8 @@ import {
   Cloud,
   CloudOff
 } from 'lucide-react';
-
-// ============================================================================
-// FIREBASE INITIALIZATION (Anonymous Auth + Firestore Sync)
-// ============================================================================
-
-// Import the functions you need from the SDKs you need
 import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
   getFirestore,
   collection,
@@ -49,27 +44,25 @@ import {
   onSnapshot,
   writeBatch,
   deleteDoc,
-  getDocs,
+  getDocs
 } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// ============================================================================
+// FIREBASE INITIALIZATION (Anonymous Auth + Firestore Sync)
+// ============================================================================
 const firebaseConfig = {
-  apiKey: "AIzaSyC9wvEBlxlufBiktja5vjaXH0rxceCuPyg",
-  authDomain: "swimming-records.firebaseapp.com",
-  projectId: "swimming-records",
-  storageBucket: "swimming-records.firebasestorage.app",
-  messagingSenderId: "645635780769",
-  appId: "1:645635780769:web:f9b5bb16397b3a0ec980e0",
-  measurementId: "G-TY22D1ZJWM"
+  apiKey: 'AIzaSyC9wvEBlxlufBiktja5vjaXH0rxceCuPyg',
+  authDomain: 'swimming-records.firebaseapp.com',
+  projectId: 'swimming-records',
+  storageBucket: 'swimming-records.firebasestorage.app',
+  messagingSenderId: '645635780769',
+  appId: '1:645635780769:web:f9b5bb16397b3a0ec980e0',
+  measurementId: 'G-TY22D1ZJWM',
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
-export const auth = getAuth(app);
-export { signInAnonymously, onAuthStateChanged };
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
 
 // ============================================================================
 // SAMPLE SDIF / CL2 DATA (Gettysburg v Carnegie Mellon - 07Nov2026)
@@ -631,6 +624,7 @@ export default function App() {
   // Anonymous Firebase Auth & Live Cloud Sync State
   const [cloudUser, setCloudUser] = useState(null);
   const [cloudSyncStatus, setCloudSyncStatus] = useState('connecting');
+  const [cloudErrorMsg, setCloudErrorMsg] = useState('');
 
   const fileInputRef = useRef(null);
   const historyCsvInputRef = useRef(null);
@@ -638,15 +632,35 @@ export default function App() {
   // 1. Silent Anonymous Authentication on Mount
   useEffect(() => {
     let isMounted = true;
-    signInAnonymously(auth).catch(() => {
-      if (isMounted) setCloudSyncStatus('offline');
-    });
+    try {
+      if (typeof signInAnonymously === 'function' && auth) {
+        signInAnonymously(auth).catch((err) => {
+          if (!isMounted) return;
+          setCloudSyncStatus('offline');
+          setCloudErrorMsg(err?.code || err?.message || 'Anonymous auth failed');
+        });
+      } else {
+        setCloudSyncStatus('offline');
+        setCloudErrorMsg('Firebase auth module unavailable');
+      }
+    } catch (err) {
+      if (isMounted) {
+        setCloudSyncStatus('offline');
+        setCloudErrorMsg(err?.message || 'Auth initialization error');
+      }
+    }
 
-    const unsubAuth = onAuthStateChanged(auth, (u) => {
-      if (!isMounted) return;
-      setCloudUser(u);
-      if (u) setCloudSyncStatus('synced');
-    });
+    const unsubAuth =
+      typeof onAuthStateChanged === 'function' && auth
+        ? onAuthStateChanged(auth, (u) => {
+            if (!isMounted) return;
+            setCloudUser(u);
+            if (u) {
+              setCloudSyncStatus('synced');
+              setCloudErrorMsg('');
+            }
+          })
+        : () => {};
 
     return () => {
       isMounted = false;
@@ -656,7 +670,7 @@ export default function App() {
 
   // 2. Real-time Firestore Listeners once Anonymous Auth is active
   useEffect(() => {
-    if (!cloudUser) return;
+    if (!cloudUser || typeof onSnapshot !== 'function' || !db) return;
 
     const unsubPerfs = onSnapshot(
       collection(db, 'performances'),
@@ -676,9 +690,11 @@ export default function App() {
           } catch {}
         }
         setCloudSyncStatus('synced');
+        setCloudErrorMsg('');
       },
-      () => {
+      (err) => {
         setCloudSyncStatus('offline');
+        setCloudErrorMsg(err?.code || err?.message || 'Firestore read blocked');
       }
     );
 
@@ -693,7 +709,10 @@ export default function App() {
           } catch {}
         }
       },
-      () => {}
+      (err) => {
+        setCloudSyncStatus('offline');
+        setCloudErrorMsg(err?.code || err?.message || 'Roster read blocked');
+      }
     );
 
     const unsubComps = onSnapshot(
@@ -707,7 +726,10 @@ export default function App() {
           } catch {}
         }
       },
-      () => {}
+      (err) => {
+        setCloudSyncStatus('offline');
+        setCloudErrorMsg(err?.code || err?.message || 'Competitions read blocked');
+      }
     );
 
     return () => {
@@ -744,8 +766,10 @@ export default function App() {
         await batch.commit();
       }
       setCloudSyncStatus('synced');
-    } catch {
+      setCloudErrorMsg('');
+    } catch (err) {
       setCloudSyncStatus('offline');
+      setCloudErrorMsg(err?.code || err?.message || 'Firestore write failed');
     }
   };
 
@@ -1729,21 +1753,35 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Silent Cloud Sync Status Indicator */}
-            <div
+            {/* Silent Cloud Sync Status Indicator (Visible on all screens + Clickable Diagnostics) */}
+            <button
+              onClick={() => {
+                if (cloudSyncStatus === 'synced') {
+                  if (masterRoster.length > 0) syncCollectionToCloud('master_roster', masterRoster, false);
+                  if (masterCompetitions.length > 0)
+                    syncCollectionToCloud('master_competitions', masterCompetitions, false);
+                  if (historicalRecords.length > 0)
+                    syncCollectionToCloud('performances', historicalRecords, false);
+                  setBenchmarkStatusMsg('Synced local Master Roster, Competitions, and Database to Firestore.');
+                } else {
+                  setBenchmarkStatusMsg(
+                    `Firebase status (${cloudSyncStatus}): ${
+                      cloudErrorMsg || 'Check Firebase Anonymous Auth & Firestore Rules.'
+                    }`
+                  );
+                }
+              }}
               title={
                 cloudSyncStatus === 'synced'
-                  ? 'Connected anonymously to swimming-records Firestore'
-                  : cloudSyncStatus === 'connecting'
-                  ? 'Connecting to Firebase...'
-                  : 'Using local browser storage (check Firestore rules)'
+                  ? 'Connected to swimming-records Firestore (Click to force push local data)'
+                  : `Firebase issue: ${cloudErrorMsg || 'Not connected'}`
               }
-              className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition ${
                 cloudSyncStatus === 'synced'
-                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
                   : cloudSyncStatus === 'connecting'
                   ? 'bg-slate-800 text-slate-300 border-slate-700'
-                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
               }`}
             >
               {cloudSyncStatus === 'synced' ? (
@@ -1759,10 +1797,13 @@ export default function App() {
               ) : (
                 <>
                   <CloudOff className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Local Cache</span>
+                  <span>
+                    Local Cache
+                    {cloudErrorMsg ? ` (${cloudErrorMsg.replace('auth/', '').replace('firestore/', '')})` : ''}
+                  </span>
                 </>
               )}
-            </div>
+            </button>
 
             {activeSection !== 'home' && (
               <button
