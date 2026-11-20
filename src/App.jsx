@@ -4,31 +4,24 @@ import {
   Trophy,
   Users,
   Timer,
-  FileText,
   Sparkles,
   ChevronDown,
   ChevronUp,
   Search,
-  Filter,
   CheckCircle2,
   AlertCircle,
   Download,
   Award,
-  Layers,
   ClipboardCopy,
   Check,
   Database,
-  TrendingUp,
   Star,
-  PlusCircle,
   Trash2,
   Home,
   Calendar,
-  Flag,
   FolderUp,
   SlidersHorizontal,
   ArrowRight,
-  UserCheck,
   Link2,
   Building2,
   UserPlus,
@@ -144,7 +137,66 @@ const CANONICAL_EVENTS = [
   'Men 200 Butterfly',
   'Men 200 Individual Medley',
   'Men 400 Individual Medley',
+  'Women 200 Freestyle Relay',
+  'Women 400 Freestyle Relay',
+  'Women 800 Freestyle Relay',
+  'Women 200 Medley Relay',
+  'Women 400 Medley Relay',
+  'Men 200 Freestyle Relay',
+  'Men 400 Freestyle Relay',
+  'Men 800 Freestyle Relay',
+  'Men 200 Medley Relay',
+  'Men 400 Medley Relay',
 ];
+
+const DEFAULT_MASTER_EVENTS = CANONICAL_EVENTS.map((evName, idx) => ({
+  id: `ev-default-${idx + 1}`,
+  canonicalName: evName,
+  eventKey: evName.toLowerCase(),
+  gender: evName.startsWith('Men') ? 'Men' : 'Women',
+  isRelay: evName.toLowerCase().includes('relay'),
+  aliases: [],
+}));
+
+// Sort athletes alphabetically by Last Name, then First Name
+function compareByLastName(aName, bName) {
+  const splitParts = (full) => {
+    const clean = String(full || '').trim();
+    if (!clean) return { last: '', first: '' };
+    if (clean.includes(',')) {
+      const [last, first] = clean.split(',').map((s) => s.trim());
+      return { last: last.toLowerCase(), first: (first || '').toLowerCase() };
+    }
+    const parts = clean.split(/\s+/);
+    const last = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+    const first = parts.length > 1 ? parts.slice(0, -1).join(' ') : '';
+    return { last: last.toLowerCase(), first: first.toLowerCase() };
+  };
+  const a = splitParts(aName);
+  const b = splitParts(bName);
+  const lastCmp = a.last.localeCompare(b.last);
+  return lastCmp !== 0 ? lastCmp : a.first.localeCompare(b.first);
+}
+
+// Normalize competition strings for resilient matching across slight punctuation/case differences
+function normalizeCompKey(raw) {
+  return String(raw || '')
+    .toLowerCase()
+    .replace(/['’.,-]/g, ' ')
+    .replace(/\b(the|at|vs\.?|versus)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Normalize date strings into YYYY-MM-DD when possible
+function normalizeDateIso(raw) {
+  const d = parseFlexibleDate(raw);
+  if (!d) return String(raw || '').trim();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 function sliceCol(line, start1Based, end1Based) {
   return (line || '').slice(start1Based - 1, end1Based).trim();
@@ -156,7 +208,6 @@ function formatSdifDate(raw) {
   const d = raw.slice(2, 4);
   const y = raw.slice(4, 8);
   if (/^\d{8}$/.test(raw)) {
-    // Detect YYYYMMDD vs MMDDYYYY
     if (raw.startsWith('20') || raw.startsWith('19')) {
       return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
     }
@@ -295,7 +346,7 @@ function formatSwimmerDisplayName(rawName, prefFirst) {
 function getCurrentSeasonStart() {
   const now = new Date();
   const yr = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
-  return new Date(yr, 7, 1); // Aug 1
+  return new Date(yr, 7, 1);
 }
 
 // ============================================================================
@@ -387,7 +438,6 @@ function parseSdifCl2(rawText) {
       lastIndividualEntry = entry;
       if (teams[teamCode]) teams[teamCode].points += points;
     } else if (rec === 'D3') {
-      // Optional D3 swimmer info line
       if (lastIndividualEntry) {
         const prefFirst = sliceCol(line, 17, 31);
         if (prefFirst) {
@@ -465,7 +515,6 @@ function parseSdifCl2(rawText) {
     }
   });
 
-  // Sort entries within each event by place / time
   const events = Object.values(eventsMap).map((ev) => {
     ev.entries.sort((a, b) => {
       const pa = parseInt(a.place, 10);
@@ -500,7 +549,7 @@ function parseGoogleSheetHistory(rawText, genderLookupMap = {}) {
   lines.forEach((line, idx) => {
     const cols = line.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ''));
     if (idx === 0 && (cols[0] || '').toLowerCase() === 'name') {
-      return; // Skip header row
+      return;
     }
     const swimmerName = cols[0] || '';
     if (!swimmerName) return;
@@ -525,26 +574,37 @@ function parseGoogleSheetHistory(rawText, genderLookupMap = {}) {
     if (seconds === null || Number.isNaN(seconds) || seconds <= 0) return;
 
     const fallbackGender = genderLookupMap[swimmerKey] || '';
-    const eventKey = normalizeEventKey(longEvent || shortEvent, fallbackGender);
-    if (!eventKey) return;
+    const rawEventInput = longEvent || shortEvent;
+    const eventKey = normalizeEventKey(rawEventInput, fallbackGender);
 
-    const isOfficial = placeRaw !== 'R' && placeRaw !== 'S';
+    // 'OFFICIAL' = standard individual swim (counts for Records, Top-10, & Full-Distance PB/SB)
+    // 'RELAY_LEADOFF' = R (flat-start 1st leg—counts as Official for Records, Top-10, & Full-Distance PB/SB)
+    // 'INTERMEDIATE_SPLIT' = S (flat-start intermediate split—counts as Official for Records/Top-10, noted with 'S', tracked separately for Split PB/SB)
+    let swimType = 'OFFICIAL';
+    if (placeRaw === 'R' || placeRaw === 'RS' || placeRaw === 'LR') {
+      swimType = 'RELAY_LEADOFF';
+    } else if (placeRaw === 'S' || placeRaw === 'SP') {
+      swimType = 'INTERMEDIATE_SPLIT';
+    }
 
     rows.push({
       id: `hist-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
       swimmerName,
       swimmerKey,
       classYear,
+      rawEventInput,
       eventKey,
-      eventLabel: toTitleEventLabel(eventKey),
+      eventLabel: eventKey ? toTitleEventLabel(eventKey) : rawEventInput,
       time: timeCol || secondsToTime(seconds),
       seconds,
-      date: dateStr,
+      date: normalizeDateIso(dateStr),
       dateObj: parseFlexibleDate(dateStr),
       location,
       competition,
-      place: placeRaw,
-      isOfficial,
+      place: placeRaw === 'LR' ? 'R' : placeRaw,
+      swimType,
+      isOfficial: true,
+      splitContext: swimType === 'INTERMEDIATE_SPLIT' ? 'Intermediate Distance Split' : '',
       source: 'sheet_import',
     });
   });
@@ -558,15 +618,16 @@ function parseGoogleSheetHistory(rawText, genderLookupMap = {}) {
 export default function App() {
   // Primary Navigation ('home' | 'history' | 'records' | 'inmeet' | 'import' | 'postmeet')
   const [activeSection, setActiveSection] = useState('home');
-  const [historySubTab, setHistorySubTab] = useState('import'); // 'import' | 'roster' | 'competitions' | 'database'
+  const [historySubTab, setHistorySubTab] = useState('import'); // 'import' | 'roster' | 'competitions' | 'events' | 'database'
+  const [includeSplitsOnCommit, setIncludeSplitsOnCommit] = useState(false);
 
   // Active Meet State
   const [parsedData, setParsedData] = useState(null);
   const [selectedTeam, setSelectedTeam] = useState(() => {
     try {
-      return localStorage.getItem('swimmeet_primary_team_v1') || 'AMGC';
+      return localStorage.getItem('swimmeet_primary_team_v1') || 'ALL';
     } catch {
-      return 'AMGC';
+      return 'ALL';
     }
   });
   const [genderFilter, setGenderFilter] = useState('ALL');
@@ -574,9 +635,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedSplits, setExpandedSplits] = useState({});
   const [copiedRecap, setCopiedRecap] = useState(false);
-  const [includeSplitsOnCommit, setIncludeSplitsOnCommit] = useState(false);
 
-  // Historical Database, Master Roster, & Master Competitions State
+  // Historical Database, Master Roster, Master Competitions, & Master Events State
   const [historicalRecords, setHistoricalRecords] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('swimmeet_historical_records_v1') || '[]');
@@ -602,6 +662,15 @@ export default function App() {
     }
   });
 
+  const [masterEvents, setMasterEvents] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('swimmeet_master_events_v1') || 'null');
+      return Array.isArray(saved) && saved.length > 0 ? saved : DEFAULT_MASTER_EVENTS;
+    } catch {
+      return DEFAULT_MASTER_EVENTS;
+    }
+  });
+
   // Staging & Importer State
   const [pasteSheetText, setPasteSheetText] = useState('');
   const [stagedHistoryRows, setStagedHistoryRows] = useState([]);
@@ -616,6 +685,8 @@ export default function App() {
   const [newCompDate, setNewCompDate] = useState('');
   const [newCompLocation, setNewCompLocation] = useState('');
   const [bulkCompText, setBulkCompText] = useState('');
+  const [newEventName, setNewEventName] = useState('');
+  const [newEventAlias, setNewEventAlias] = useState('');
   const [reconcileSelections, setReconcileSelections] = useState({});
 
   // Record Book Viewer State
@@ -733,10 +804,28 @@ export default function App() {
       }
     );
 
+    const unsubEvents = onSnapshot(
+      collection(db, 'master_events'),
+      (snap) => {
+        if (!snap.empty) {
+          const rows = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+          setMasterEvents(rows);
+          try {
+            localStorage.setItem('swimmeet_master_events_v1', JSON.stringify(rows));
+          } catch {}
+        }
+      },
+      (err) => {
+        setCloudSyncStatus('offline');
+        setCloudErrorMsg(err?.code || err?.message || 'Events read blocked');
+      }
+    );
+
     return () => {
       unsubPerfs();
       unsubRoster();
       unsubComps();
+      unsubEvents();
     };
   }, [cloudUser]);
 
@@ -786,30 +875,65 @@ export default function App() {
   };
 
   const resolveMasterCompetition = (rawComp, rawDate = '') => {
-    const key = String(rawComp || '').trim().toLowerCase();
-    const dateKey = String(rawDate || '').trim();
+    const key = normalizeCompKey(rawComp);
+    const dateKey = normalizeDateIso(rawDate);
     if (!key) return null;
 
-    // 1. Exact match on Name/Alias + Date
+    const nameMatches = (c) =>
+      normalizeCompKey(c.canonicalName) === key ||
+      (c.aliases || []).some((al) => normalizeCompKey(al) === key);
+
     if (dateKey) {
       const exactDated = masterCompetitions.find(
-        (c) =>
-          (c.date || '').trim() === dateKey &&
-          (c.canonicalName.trim().toLowerCase() === key ||
-            (c.aliases || []).some((al) => al.trim().toLowerCase() === key))
+        (c) => normalizeDateIso(c.date) === dateKey && nameMatches(c)
       );
       if (exactDated) return exactDated;
     }
 
-    // 2. Fallback match on undated competition entry (or when no date is supplied)
-    return (
-      masterCompetitions.find(
-        (c) =>
-          (!dateKey || !(c.date || '').trim()) &&
-          (c.canonicalName.trim().toLowerCase() === key ||
-            (c.aliases || []).some((al) => al.trim().toLowerCase() === key))
-      ) || null
+    const undated = masterCompetitions.find(
+      (c) => !normalizeDateIso(c.date) && nameMatches(c)
     );
+    if (undated) return undated;
+
+    const allNameMatches = masterCompetitions.filter(nameMatches);
+    if (allNameMatches.length === 1) return allNameMatches[0];
+
+    return null;
+  };
+
+  const resolveMasterEvent = (rawEvent, fallbackGender = '') => {
+    const rawTrim = String(rawEvent || '').trim();
+    if (!rawTrim) return null;
+    const rawLower = rawTrim.toLowerCase();
+    const normKey = normalizeEventKey(rawTrim, fallbackGender);
+
+    const explicitMatch = masterEvents.find(
+      (ev) =>
+        ev.canonicalName.toLowerCase() === rawLower ||
+        (ev.aliases || []).some((al) => al.trim().toLowerCase() === rawLower)
+    );
+    if (explicitMatch) return explicitMatch;
+
+    if (normKey && (normKey.startsWith('women ') || normKey.startsWith('men '))) {
+      const keyMatch = masterEvents.find((ev) => ev.eventKey === normKey);
+      if (keyMatch) return keyMatch;
+    }
+
+    return null;
+  };
+
+  const updateHistoricalRecords = (next, changedItems = null, replaceAll = false) => {
+    setHistoricalRecords(next);
+    try {
+      localStorage.setItem('swimmeet_historical_records_v1', JSON.stringify(next));
+    } catch {}
+    if (cloudUser) {
+      if (replaceAll) {
+        syncCollectionToCloud('performances', next, true);
+      } else if (changedItems && changedItems.length > 0) {
+        syncCollectionToCloud('performances', changedItems, false);
+      }
+    }
   };
 
   const updateMasterRoster = (next, changedItems = null, deletedId = null) => {
@@ -844,7 +968,23 @@ export default function App() {
     }
   };
 
-  // Bulk Roster Importer: accepts pasted lines or TSV/CSV ("Name, Gender, Active, Aliases")
+  const updateMasterEvents = (next, changedItems = null, deletedId = null) => {
+    setMasterEvents(next);
+    try {
+      localStorage.setItem('swimmeet_master_events_v1', JSON.stringify(next));
+    } catch {}
+    if (cloudUser) {
+      if (deletedId) {
+        deleteDoc(doc(db, 'master_events', deletedId)).catch(() => {});
+      } else if (changedItems && changedItems.length > 0) {
+        syncCollectionToCloud('master_events', changedItems, false);
+      } else {
+        syncCollectionToCloud('master_events', next, false);
+      }
+    }
+  };
+
+  // Bulk Roster Importer
   const handleBulkImportRoster = () => {
     const lines = bulkRosterText
       .split(/\r?\n/)
@@ -853,91 +993,62 @@ export default function App() {
     if (lines.length === 0) return;
 
     const delimiter = lines[0].includes('\t') ? '\t' : ',';
-    const nextRoster = [...masterRoster];
-    const addedOrUpdated = [];
+    let nextRoster = [...masterRoster];
+    const changed = [];
     let addedCount = 0;
-    let updatedCount = 0;
 
     lines.forEach((line, idx) => {
       const cols = line.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ''));
-      const firstColLower = (cols[0] || '').toLowerCase();
-      if (idx === 0 && (firstColLower === 'name' || firstColLower === 'athlete' || firstColLower === 'swimmer')) {
-        return;
-      }
-
+      if (idx === 0 && (cols[0] || '').toLowerCase() === 'name') return;
       const rawName = cols[0] || '';
       if (!rawName) return;
 
-      const formattedName = rawName.includes(',')
-        ? rawName
-            .split(',')
-            .reverse()
-            .map((p) => p.trim())
-            .join(' ')
-        : rawName;
-
+      const canonicalName = formatSwimmerDisplayName(rawName);
       const genderRaw = (cols[1] || '').toLowerCase();
-      const gender = genderRaw.startsWith('m') || genderRaw === 'boys' ? 'Men' : 'Women';
-
-      const activeRaw = (cols[2] || '').toLowerCase();
-      const isActive =
-        activeRaw === ''
-          ? true
-          : !['no', 'false', '0', 'alumni', 'inactive', 'n'].includes(activeRaw);
-
-      const extraAliases = cols
-        .slice(3)
-        .flatMap((c) => c.split(/[;|]/))
-        .map((a) => a.trim())
-        .filter(Boolean);
+      const gender = genderRaw.startsWith('m') ? 'Men' : 'Women';
+      const activeRaw = (cols[2] || 'yes').toLowerCase();
+      const isActive = !['no', 'false', '0', 'alumni', 'inactive'].includes(activeRaw);
+      const aliases = cols[3]
+        ? cols[3]
+            .split(/[;|]/)
+            .map((a) => a.trim())
+            .filter(Boolean)
+        : [];
 
       const existingIdx = nextRoster.findIndex(
-        (ath) =>
-          normalizeSwimmerKey(ath.canonicalName) === normalizeSwimmerKey(formattedName) ||
-          (ath.aliases || []).some(
-            (al) => normalizeSwimmerKey(al) === normalizeSwimmerKey(formattedName)
-          )
+        (a) => normalizeSwimmerKey(a.canonicalName) === normalizeSwimmerKey(canonicalName)
       );
-
       if (existingIdx >= 0) {
-        const existing = nextRoster[existingIdx];
-        const mergedAliases = Array.from(
-          new Set([
-            ...(existing.aliases || []),
-            ...(formattedName !== existing.canonicalName ? [formattedName] : []),
-            ...extraAliases,
-          ])
-        );
-        const updatedItem = {
-          ...existing,
-          isActive,
-          aliases: mergedAliases,
-        };
-        nextRoster[existingIdx] = updatedItem;
-        addedOrUpdated.push(updatedItem);
-        updatedCount++;
-      } else {
-        const createdItem = {
-          id: `ath-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
-          canonicalName: formattedName,
+        const updated = {
+          ...nextRoster[existingIdx],
           gender,
           isActive,
-          aliases: extraAliases,
+          aliases: Array.from(new Set([...(nextRoster[existingIdx].aliases || []), ...aliases])),
         };
-        nextRoster.push(createdItem);
-        addedOrUpdated.push(createdItem);
+        nextRoster[existingIdx] = updated;
+        changed.push(updated);
+      } else {
+        const created = {
+          id: `ath-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+          canonicalName,
+          gender,
+          isActive,
+          aliases,
+        };
+        nextRoster.push(created);
+        changed.push(created);
         addedCount++;
       }
     });
 
-    updateMasterRoster(nextRoster, addedOrUpdated);
+    updateMasterRoster(nextRoster, changed);
     setBulkRosterText('');
     setBenchmarkStatusMsg(
-      `Mass Roster Import complete: ${addedCount} added, ${updatedCount} updated (${nextRoster.length} total athletes).`
+      `Imported ${addedCount} new athletes (${changed.length} total processed) into Master Roster.`
     );
   };
 
-  // Bulk Competitions Importer: accepts pasted lines or TSV/CSV ("Competition Name, Date, Location, Aliases")
+  // Bulk Competitions Importer
   const handleBulkImportCompetitions = () => {
     const lines = bulkCompText
       .split(/\r?\n/)
@@ -946,144 +1057,112 @@ export default function App() {
     if (lines.length === 0) return;
 
     const delimiter = lines[0].includes('\t') ? '\t' : ',';
-    const nextComps = [...masterCompetitions];
-    const addedOrUpdated = [];
+    let nextComps = [...masterCompetitions];
+    const changed = [];
     let addedCount = 0;
-    let updatedCount = 0;
 
     lines.forEach((line, idx) => {
       const cols = line.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ''));
-      const firstColLower = (cols[0] || '').toLowerCase();
-      if (
-        idx === 0 &&
-        (firstColLower === 'competition' || firstColLower === 'meet' || firstColLower === 'name')
-      ) {
-        return;
-      }
+      if (idx === 0 && (cols[0] || '').toLowerCase().includes('competition')) return;
+      const canonicalName = cols[0] || '';
+      if (!canonicalName) return;
 
-      const rawComp = cols[0] || '';
-      if (!rawComp) return;
-      const compDate = cols[1] || '';
+      const date = normalizeDateIso(cols[1] || '');
       const defaultLocation = cols[2] || '';
-      const extraAliases = cols
-        .slice(3)
-        .flatMap((c) => c.split(/[;|]/))
-        .map((a) => a.trim())
-        .filter(Boolean);
+      const aliases = cols[3]
+        ? cols[3]
+            .split(/[;|]/)
+            .map((a) => a.trim())
+            .filter(Boolean)
+        : [];
 
       const existingIdx = nextComps.findIndex(
         (c) =>
-          (c.date || '').trim() === compDate.trim() &&
-          (c.canonicalName.trim().toLowerCase() === rawComp.toLowerCase() ||
-            (c.aliases || []).some((al) => al.trim().toLowerCase() === rawComp.toLowerCase()))
+          normalizeCompKey(c.canonicalName) === normalizeCompKey(canonicalName) &&
+          normalizeDateIso(c.date) === date
       );
-
       if (existingIdx >= 0) {
-        const existing = nextComps[existingIdx];
-        const mergedAliases = Array.from(
-          new Set([
-            ...(existing.aliases || []),
-            ...(rawComp !== existing.canonicalName ? [rawComp] : []),
-            ...extraAliases,
-          ])
-        );
-        const updatedItem = {
-          ...existing,
-          date: compDate || existing.date || '',
-          defaultLocation: defaultLocation || existing.defaultLocation,
-          aliases: mergedAliases,
+        const updated = {
+          ...nextComps[existingIdx],
+          defaultLocation: defaultLocation || nextComps[existingIdx].defaultLocation,
+          aliases: Array.from(new Set([...(nextComps[existingIdx].aliases || []), ...aliases])),
         };
-        nextComps[existingIdx] = updatedItem;
-        addedOrUpdated.push(updatedItem);
-        updatedCount++;
+        nextComps[existingIdx] = updated;
+        changed.push(updated);
       } else {
-        const createdItem = {
-          id: `comp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
-          canonicalName: rawComp,
-          date: compDate,
+        const created = {
+          id: `comp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+          canonicalName,
+          date,
           defaultLocation,
-          aliases: extraAliases,
+          aliases,
         };
-        nextComps.push(createdItem);
-        addedOrUpdated.push(createdItem);
+        nextComps.push(created);
+        changed.push(created);
         addedCount++;
       }
     });
 
-    updateMasterCompetitions(nextComps, addedOrUpdated);
+    updateMasterCompetitions(nextComps, changed);
     setBulkCompText('');
     setBenchmarkStatusMsg(
-      `Mass Competitions Import complete: ${addedCount} added, ${updatedCount} updated (${nextComps.length} total meets).`
+      `Imported ${addedCount} new competitions (${changed.length} total processed) into Master Competitions.`
     );
   };
 
-  // Sync missing Master Roster & Competitions from existing database rows
+  // Sync missing athletes & competitions from already-committed database rows
   const handleSyncMasterListsFromDatabase = () => {
-    const nextRoster = [...masterRoster];
-    const nextComps = [...masterCompetitions];
-    const newAthletes = [];
-    const newComps = [];
+    let nextRoster = [...masterRoster];
+    let nextComps = [...masterCompetitions];
+    const changedRoster = [];
+    const changedComps = [];
 
     historicalRecords.forEach((r) => {
-      if (r.swimmerName && !resolveMasterAthlete(r.swimmerName)) {
-        const alreadyAdded = newAthletes.some(
-          (a) => normalizeSwimmerKey(a.canonicalName) === normalizeSwimmerKey(r.swimmerName)
-        );
-        if (!alreadyAdded) {
-          const gender = r.eventKey.startsWith('men') ? 'Men' : 'Women';
-          const created = {
-            id: `ath-${Date.now()}-${nextRoster.length + newAthletes.length}`,
-            canonicalName: r.swimmerName,
-            gender,
-            isActive: true,
-            aliases: [],
-          };
-          nextRoster.push(created);
-          newAthletes.push(created);
-        }
+      const athExists = nextRoster.some(
+        (a) =>
+          normalizeSwimmerKey(a.canonicalName) === r.swimmerKey ||
+          (a.aliases || []).some((al) => normalizeSwimmerKey(al) === r.swimmerKey)
+      );
+      if (!athExists && r.swimmerName) {
+        const created = {
+          id: `ath-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          canonicalName: r.swimmerName,
+          gender: r.eventKey?.startsWith('men') ? 'Men' : 'Women',
+          isActive: true,
+          aliases: [],
+        };
+        nextRoster.push(created);
+        changedRoster.push(created);
       }
-      if (r.competition && !resolveMasterCompetition(r.competition, r.date)) {
-        const alreadyAdded = newComps.some(
+
+      if (r.competition) {
+        const cKey = normalizeCompKey(r.competition);
+        const dKey = normalizeDateIso(r.date);
+        const compExists = nextComps.some(
           (c) =>
-            c.canonicalName.toLowerCase() === r.competition.trim().toLowerCase() &&
-            (c.date || '').trim() === (r.date || '').trim()
+            normalizeDateIso(c.date) === dKey &&
+            (normalizeCompKey(c.canonicalName) === cKey ||
+              (c.aliases || []).some((al) => normalizeCompKey(al) === cKey))
         );
-        if (!alreadyAdded) {
+        if (!compExists) {
           const created = {
-            id: `comp-${Date.now()}-${nextComps.length + newComps.length}`,
-            canonicalName: r.competition.trim(),
-            date: (r.date || '').trim(),
+            id: `comp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            canonicalName: r.competition,
+            date: dKey,
             defaultLocation: r.location || '',
             aliases: [],
           };
           nextComps.push(created);
-          newComps.push(created);
+          changedComps.push(created);
         }
       }
     });
 
-    updateMasterRoster(nextRoster, newAthletes);
-    updateMasterCompetitions(nextComps, newComps);
+    if (changedRoster.length > 0) updateMasterRoster(nextRoster, changedRoster);
+    if (changedComps.length > 0) updateMasterCompetitions(nextComps, changedComps);
     setBenchmarkStatusMsg(
-      `Synced Master Lists: +${newAthletes.length} athletes, +${newComps.length} competitions.`
+      `Synced ${changedRoster.length} new athletes and ${changedComps.length} new competitions from Committed DB.`
     );
-  };
-
-  // Save historical benchmarks helper
-  const updateHistoricalRecords = (records, newlyAddedItems = null, replaceAll = false) => {
-    setHistoricalRecords(records);
-    try {
-      localStorage.setItem('swimmeet_historical_records_v1', JSON.stringify(records));
-    } catch {}
-    if (cloudUser) {
-      if (replaceAll) {
-        syncCollectionToCloud('performances', records, true);
-      } else if (newlyAddedItems && newlyAddedItems.length > 0) {
-        syncCollectionToCloud('performances', newlyAddedItems, false);
-      } else {
-        syncCollectionToCloud('performances', records, false);
-      }
-    }
   };
 
   // Gender lookup map built from Master Roster + Active Meet
@@ -1130,11 +1209,19 @@ export default function App() {
 
     const staged = parsed.map((row) => {
       const matchedAth = resolveMasterAthlete(row.swimmerName);
-      const matchedComp = resolveMasterCompetition(row.competition, row.date);
       const resolvedName = matchedAth ? matchedAth.canonicalName : row.swimmerName;
+      const inferredGender = matchedAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
+
+      const matchedComp = resolveMasterCompetition(row.competition, row.date);
       const resolvedComp = matchedComp ? matchedComp.canonicalName : row.competition;
-      const resolvedDate = row.date || matchedComp?.date || '';
-      const hash = `${normalizeSwimmerKey(resolvedName)}|${row.eventKey}|${row.seconds.toFixed(2)}|${resolvedDate}|${row.place}`;
+      const resolvedDate = matchedComp?.date ? normalizeDateIso(matchedComp.date) : row.date;
+      const resolvedLocation = matchedComp?.defaultLocation || row.location || '';
+
+      const matchedEv = resolveMasterEvent(row.rawEventInput, inferredGender);
+      const resolvedEventKey = matchedEv ? matchedEv.eventKey : row.eventKey;
+      const resolvedEventLabel = matchedEv ? matchedEv.canonicalName : row.eventLabel;
+
+      const hash = `${normalizeSwimmerKey(resolvedName)}|${resolvedEventKey}|${row.seconds.toFixed(2)}|${resolvedDate}|${row.place}`;
       const isDuplicate = existingHashes.has(hash);
       return {
         ...row,
@@ -1143,7 +1230,10 @@ export default function App() {
         competition: resolvedComp,
         date: resolvedDate,
         dateObj: parseFlexibleDate(resolvedDate),
-        location: row.location || matchedComp?.defaultLocation || '',
+        location: resolvedLocation,
+        eventKey: resolvedEventKey,
+        eventLabel: resolvedEventLabel,
+        isEventMatched: Boolean(matchedEv),
         isDuplicate,
         selected: !isDuplicate,
       };
@@ -1157,12 +1247,15 @@ export default function App() {
     );
   };
 
-  // Unmatched athletes and competitions in current staging table
+  // Unmatched athletes, competitions, and events in current staging table
   const stagingUnmatched = useMemo(() => {
     const athletes = new Map();
     const competitions = new Map();
+    const events = new Map();
+
     stagedHistoryRows.forEach((row) => {
-      if (!resolveMasterAthlete(row.swimmerName)) {
+      const matchedAth = resolveMasterAthlete(row.swimmerName);
+      if (!matchedAth) {
         const key = normalizeSwimmerKey(row.swimmerName);
         if (!athletes.has(key)) {
           athletes.set(key, {
@@ -1175,11 +1268,11 @@ export default function App() {
         }
       }
       if (row.competition && !resolveMasterCompetition(row.competition, row.date)) {
-        const cKey = `${row.competition.trim().toLowerCase()}|${(row.date || '').trim()}`;
+        const cKey = `${normalizeCompKey(row.competition)}|${normalizeDateIso(row.date)}`;
         if (!competitions.has(cKey)) {
           competitions.set(cKey, {
             rawName: row.competition.trim(),
-            sampleDate: (row.date || '').trim(),
+            sampleDate: normalizeDateIso(row.date),
             sampleLocation: row.location || '',
             count: 1,
           });
@@ -1187,19 +1280,35 @@ export default function App() {
           competitions.get(cKey).count += 1;
         }
       }
+      const genderHint = matchedAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
+      if (!resolveMasterEvent(row.rawEventInput || row.eventLabel, genderHint)) {
+        const eKey = `${(row.rawEventInput || row.eventLabel).trim().toLowerCase()}|${genderHint}`;
+        if (!events.has(eKey)) {
+          events.set(eKey, {
+            rawEvent: (row.rawEventInput || row.eventLabel).trim(),
+            genderHint,
+            count: 1,
+          });
+        } else {
+          events.get(eKey).count += 1;
+        }
+      }
     });
     return {
       athletes: Array.from(athletes.values()),
       competitions: Array.from(competitions.values()),
+      events: Array.from(events.values()),
     };
-  }, [stagedHistoryRows, masterRoster, masterCompetitions]);
+  }, [stagedHistoryRows, masterRoster, masterCompetitions, masterEvents, swimmerGenderLookup]);
 
-  // Apply all pending athlete & competition reconciliations
+  // Apply all pending athlete, competition, & event reconciliations
   const handleApplyReconciliations = () => {
     let nextRoster = [...masterRoster];
     let nextComps = [...masterCompetitions];
+    let nextEvents = [...masterEvents];
     const changedRoster = [];
     const changedComps = [];
+    const changedEvents = [];
 
     stagingUnmatched.athletes.forEach((item) => {
       const selKey = `ath:${normalizeSwimmerKey(item.rawName)}`;
@@ -1228,7 +1337,7 @@ export default function App() {
     });
 
     stagingUnmatched.competitions.forEach((item) => {
-      const selKey = `comp:${item.rawName.toLowerCase()}|${item.sampleDate}`;
+      const selKey = `comp:${normalizeCompKey(item.rawName)}|${item.sampleDate}`;
       const choice = reconcileSelections[selKey] || '__NEW__';
       if (choice === '__NEW__') {
         const created = {
@@ -1253,10 +1362,27 @@ export default function App() {
       }
     });
 
+    stagingUnmatched.events.forEach((item) => {
+      const selKey = `ev:${item.rawEvent.toLowerCase()}|${item.genderHint}`;
+      const choice = reconcileSelections[selKey];
+      if (!choice) return;
+      nextEvents = nextEvents.map((ev) => {
+        if (ev.id !== choice) return ev;
+        const updated = {
+          ...ev,
+          aliases: Array.from(new Set([...(ev.aliases || []), item.rawEvent])),
+        };
+        changedEvents.push(updated);
+        return updated;
+      });
+    });
+
     updateMasterRoster(nextRoster, changedRoster);
     updateMasterCompetitions(nextComps, changedComps);
+    if (changedEvents.length > 0) {
+      updateMasterEvents(nextEvents, changedEvents);
+    }
 
-    // Re-resolve staged rows using updated Master Lists
     const updatedStaged = stagedHistoryRows.map((row) => {
       const key = normalizeSwimmerKey(row.swimmerName);
       const ath = nextRoster.find(
@@ -1264,41 +1390,64 @@ export default function App() {
           normalizeSwimmerKey(a.canonicalName) === key ||
           (a.aliases || []).some((al) => normalizeSwimmerKey(al) === key)
       );
-      const cKey = row.competition.trim().toLowerCase();
-      const dKey = (row.date || '').trim();
+      const resolvedName = ath ? ath.canonicalName : row.swimmerName;
+      const genderHint = ath?.gender || swimmerGenderLookup[key] || '';
+
+      const cKey = normalizeCompKey(row.competition);
+      const dKey = normalizeDateIso(row.date);
+      const compNameMatches = (c) =>
+        normalizeCompKey(c.canonicalName) === cKey ||
+        (c.aliases || []).some((al) => normalizeCompKey(al) === cKey);
+
       const comp =
-        nextComps.find(
-          (c) =>
-            (c.date || '').trim() === dKey &&
-            (c.canonicalName.trim().toLowerCase() === cKey ||
-              (c.aliases || []).some((al) => al.trim().toLowerCase() === cKey))
+        nextComps.find((c) => normalizeDateIso(c.date) === dKey && compNameMatches(c)) ||
+        nextComps.find((c) => !normalizeDateIso(c.date) && compNameMatches(c)) ||
+        (nextComps.filter(compNameMatches).length === 1
+          ? nextComps.filter(compNameMatches)[0]
+          : null);
+
+      const rawEvStr = (row.rawEventInput || row.eventLabel || '').trim();
+      const normEvKey = normalizeEventKey(rawEvStr, genderHint);
+      const evMatch =
+        nextEvents.find(
+          (ev) =>
+            ev.canonicalName.toLowerCase() === rawEvStr.toLowerCase() ||
+            (ev.aliases || []).some((al) => al.trim().toLowerCase() === rawEvStr.toLowerCase())
         ) ||
-        nextComps.find(
-          (c) =>
-            !(c.date || '').trim() &&
-            (c.canonicalName.trim().toLowerCase() === cKey ||
-              (c.aliases || []).some((al) => al.trim().toLowerCase() === cKey))
-        );
+        (normEvKey && (normEvKey.startsWith('women ') || normEvKey.startsWith('men '))
+          ? nextEvents.find((ev) => ev.eventKey === normEvKey)
+          : null);
+
+      const resolvedComp = comp ? comp.canonicalName : row.competition;
+      const resolvedDate = comp?.date ? normalizeDateIso(comp.date) : row.date;
+      const resolvedLocation = comp?.defaultLocation || row.location || '';
+
       return {
         ...row,
-        swimmerName: ath ? ath.canonicalName : row.swimmerName,
-        swimmerKey: ath ? normalizeSwimmerKey(ath.canonicalName) : row.swimmerKey,
-        competition: comp ? comp.canonicalName : row.competition,
-        date: row.date || comp?.date || '',
-        location: row.location || comp?.defaultLocation || '',
+        swimmerName: resolvedName,
+        swimmerKey: normalizeSwimmerKey(resolvedName),
+        competition: resolvedComp,
+        date: resolvedDate,
+        dateObj: parseFlexibleDate(resolvedDate),
+        location: resolvedLocation,
+        eventKey: evMatch ? evMatch.eventKey : row.eventKey,
+        eventLabel: evMatch ? evMatch.canonicalName : row.eventLabel,
+        isEventMatched: Boolean(evMatch),
       };
     });
 
     setStagedHistoryRows(updatedStaged);
     setReconcileSelections({});
-    setBenchmarkStatusMsg('Reconciled unmatched athletes and competitions into Master Lists.');
+    setBenchmarkStatusMsg(
+      'Reconciled unmatched athletes, competitions, and events into Master Lists.'
+    );
   };
 
   // Commit staged rows into database
   const handleCommitStagedRows = (mode = 'append') => {
     const chosen = stagedHistoryRows
       .filter((r) => r.selected)
-      .map(({ isDuplicate, selected, ...cleanRow }) => cleanRow);
+      .map(({ isDuplicate, selected, isEventMatched, rawEventInput, ...cleanRow }) => cleanRow);
 
     if (chosen.length === 0) {
       setBenchmarkStatusMsg('No rows selected in staging table to commit.');
@@ -1353,10 +1502,15 @@ export default function App() {
 
           const resolvedAth = resolveMasterAthlete(entry.swimmerName);
           const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
+          const resolvedEv = resolveMasterEvent(ev.eventLabel, ev.gender);
           const finalName = resolvedAth ? resolvedAth.canonicalName : entry.swimmerName;
           const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
+          const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
+          const finalLoc = resolvedComp?.defaultLocation || meetLoc;
+          const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
+          const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : ev.eventLabel;
 
-          const hash = `${normalizeSwimmerKey(finalName)}|${evKey}|${sec.toFixed(2)}|${meetDate}|${entry.place || ''}`;
+          const hash = `${normalizeSwimmerKey(finalName)}|${finalEvKey}|${sec.toFixed(2)}|${finalDate}|${entry.place || ''}`;
           if (!existingHashes.has(hash)) {
             existingHashes.add(hash);
             newEntries.push({
@@ -1364,15 +1518,16 @@ export default function App() {
               swimmerName: finalName,
               swimmerKey: normalizeSwimmerKey(finalName),
               classYear: normalizeClass(entry.classYear),
-              eventKey: evKey,
-              eventLabel: ev.eventLabel,
+              eventKey: finalEvKey,
+              eventLabel: finalEvLabel,
               time: entry.finalsTime,
               seconds: sec,
-              date: meetDate,
-              dateObj: parseFlexibleDate(meetDate),
-              location: meetLoc,
+              date: finalDate,
+              dateObj: parseFlexibleDate(finalDate),
+              location: finalLoc,
               competition: finalComp,
               place: entry.place || '',
+              swimType: 'OFFICIAL',
               isOfficial: true,
               source: 'cl2_meet',
             });
@@ -1383,7 +1538,7 @@ export default function App() {
             const splitSec = timeToSeconds(split1000?.cumulative);
             const splitEvKey = normalizeEventKey(`${ev.gender} 1000 Freestyle`);
             if (splitSec !== null && splitEvKey) {
-              const sHash = `${normalizeSwimmerKey(finalName)}|${splitEvKey}|${splitSec.toFixed(2)}|${meetDate}|S`;
+              const sHash = `${normalizeSwimmerKey(finalName)}|${splitEvKey}|${splitSec.toFixed(2)}|${finalDate}|S`;
               if (!existingHashes.has(sHash)) {
                 existingHashes.add(sHash);
                 newEntries.push({
@@ -1395,12 +1550,14 @@ export default function App() {
                   eventLabel: `${ev.gender} 1000 Freestyle`,
                   time: split1000.cumulative,
                   seconds: splitSec,
-                  date: meetDate,
-                  dateObj: parseFlexibleDate(meetDate),
-                  location: meetLoc,
+                  date: finalDate,
+                  dateObj: parseFlexibleDate(finalDate),
+                  location: finalLoc,
                   competition: finalComp,
                   place: 'S',
-                  isOfficial: false,
+                  swimType: 'INTERMEDIATE_SPLIT',
+                  isOfficial: true,
+                  splitContext: `1000 Split in ${ev.eventLabel}`,
                   source: 'cl2_split',
                 });
               }
@@ -1417,42 +1574,43 @@ export default function App() {
           if (entry.teamCode !== targetCode) return;
           if (!entry.legs || entry.legs.length === 0) return;
 
-          entry.legs.forEach((leg) => {
-            if (!leg.name || !leg.split) return;
-            const isLeadOff = leg.leg === 1;
-            if (!isLeadOff && !includeSplitsOnCommit) return;
+          // Only flat-start Relay Lead-Off (Leg 1) is recorded with Place = "R"
+          const leadOffLeg = entry.legs.find((l) => l.leg === 1);
+          if (!leadOffLeg || !leadOffLeg.name || !leadOffLeg.split) return;
 
-            const splitSec = timeToSeconds(leg.split);
-            if (splitSec === null || !legEvKey) return;
+          const splitSec = timeToSeconds(leadOffLeg.split);
+          if (splitSec === null || !legEvKey) return;
 
-            const resolvedAth = resolveMasterAthlete(leg.name);
-            const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
-            const finalName = resolvedAth ? resolvedAth.canonicalName : leg.name;
-            const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
-            const placeTag = isLeadOff ? '1' : 'R';
+          const resolvedAth = resolveMasterAthlete(leadOffLeg.name);
+          const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
+          const finalName = resolvedAth ? resolvedAth.canonicalName : leadOffLeg.name;
+          const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
+          const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
+          const finalLoc = resolvedComp?.defaultLocation || meetLoc;
 
-            const hash = `${normalizeSwimmerKey(finalName)}|${legEvKey}|${splitSec.toFixed(2)}|${meetDate}|${placeTag}`;
-            if (!existingHashes.has(hash)) {
-              existingHashes.add(hash);
-              newEntries.push({
-                id: `meet-relay-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
-                swimmerName: finalName,
-                swimmerKey: normalizeSwimmerKey(finalName),
-                classYear: normalizeClass(leg.classYear),
-                eventKey: legEvKey,
-                eventLabel: legEvLabel,
-                time: leg.split,
-                seconds: splitSec,
-                date: meetDate,
-                dateObj: parseFlexibleDate(meetDate),
-                location: meetLoc,
-                competition: finalComp,
-                place: placeTag,
-                isOfficial: isLeadOff,
-                source: isLeadOff ? 'cl2_leadoff' : 'cl2_relay_split',
-              });
-            }
-          });
+          const hash = `${normalizeSwimmerKey(finalName)}|${legEvKey}|${splitSec.toFixed(2)}|${finalDate}|R`;
+          if (!existingHashes.has(hash)) {
+            existingHashes.add(hash);
+            newEntries.push({
+              id: `meet-relay-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
+              swimmerName: finalName,
+              swimmerKey: normalizeSwimmerKey(finalName),
+              classYear: normalizeClass(leadOffLeg.classYear),
+              eventKey: legEvKey,
+              eventLabel: legEvLabel,
+              time: leadOffLeg.split,
+              seconds: splitSec,
+              date: finalDate,
+              dateObj: parseFlexibleDate(finalDate),
+              location: finalLoc,
+              competition: finalComp,
+              place: 'R',
+              swimType: 'RELAY_LEADOFF',
+              isOfficial: true,
+              splitContext: `Lead-Off (${ev.eventLabel})`,
+              source: 'cl2_leadoff',
+            });
+          }
         });
       }
     });
@@ -1533,7 +1691,6 @@ export default function App() {
         localStorage.setItem('swimmeet_primary_team_v1', chosen);
       } catch {}
     }
-    setActiveSection('import');
   };
 
   const handleFileUpload = (e) => {
@@ -1546,9 +1703,9 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // Benchmark Evaluation Engine (PB, SB, All-Time Top-10, Freshman Record)
+  // Benchmark Evaluation Engine (Dual Full-Distance vs Split PB/SB, All-Time Top-10, Freshman Record)
   const benchmarkIndex = useMemo(() => {
-    const officialRows = historicalRecords.filter((r) => r.isOfficial);
+    const officialRows = historicalRecords.filter((r) => r.isOfficial !== false);
     const seasonStart = getCurrentSeasonStart();
 
     const byEvent = {};
@@ -1567,7 +1724,16 @@ export default function App() {
       byEvent[k].sort((a, b) => a.seconds - b.seconds);
     });
 
-    const evaluateSwim = (swimmerName, eventLabel, timeStr, classYear = '') => {
+    const isSplitRow = (r) =>
+      r.swimType === 'INTERMEDIATE_SPLIT' || String(r.place || '').toUpperCase() === 'S';
+
+    const evaluateSwim = (
+      swimmerName,
+      eventLabel,
+      timeStr,
+      classYear = '',
+      asIntermediateSplit = false
+    ) => {
       const sec = timeToSeconds(timeStr);
       const evKey = normalizeEventKey(eventLabel);
       const resolvedAth = resolveMasterAthlete(swimmerName);
@@ -1579,24 +1745,28 @@ export default function App() {
       const eventPool = byEvent[evKey] || [];
       const swimmerPool = bySwimmerEvent[`${swKey}|${evKey}`] || [];
 
-      // Personal Best (PB)
-      if (swimmerPool.length > 0) {
-        const bestPast = Math.min(...swimmerPool.map((r) => r.seconds));
+      const fullDistPool = swimmerPool.filter((r) => !isSplitRow(r));
+      const splitPool = swimmerPool.filter((r) => isSplitRow(r));
+
+      const targetPool = asIntermediateSplit ? splitPool : fullDistPool;
+      const prefix = asIntermediateSplit ? 'Split ' : '';
+
+      if (targetPool.length > 0) {
+        const bestPast = Math.min(...targetPool.map((r) => r.seconds));
         if (sec < bestPast - 0.005) {
-          tags.push({ type: 'PB', label: `PB (-${(bestPast - sec).toFixed(2)}s)` });
+          tags.push({ type: 'PB', label: `${prefix}PB (-${(bestPast - sec).toFixed(2)}s)` });
         } else {
-          // Season Best (SB)
-          const seasonPast = swimmerPool.filter((r) => r.dateObj && r.dateObj >= seasonStart);
+          const seasonPast = targetPool.filter((r) => r.dateObj && r.dateObj >= seasonStart);
           if (seasonPast.length > 0) {
             const bestSeason = Math.min(...seasonPast.map((r) => r.seconds));
             if (sec < bestSeason - 0.005) {
-              tags.push({ type: 'SB', label: `SB (-${(bestSeason - sec).toFixed(2)}s)` });
+              tags.push({ type: 'SB', label: `${prefix}SB (-${(bestSeason - sec).toFixed(2)}s)` });
             }
           }
         }
       }
 
-      // All-Time Top 10
+      // All-Time Top 10 (includes full-distance, R lead-offs, and S intermediate splits)
       const athleteBestMap = new Map();
       eventPool.forEach((r) => {
         if (!athleteBestMap.has(r.swimmerKey) || r.seconds < athleteBestMap.get(r.swimmerKey)) {
@@ -1633,7 +1803,7 @@ export default function App() {
   // Program Record Book & All-Time Top-10 Data
   const recordBookData = useMemo(() => {
     const officialRows = historicalRecords.filter(
-      (r) => r.isOfficial && r.eventKey === recordBookEventKey
+      (r) => r.isOfficial !== false && r.eventKey === recordBookEventKey
     );
 
     const bestPerSwimmer = new Map();
@@ -1789,16 +1959,18 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Silent Cloud Sync Status Indicator (Visible on all screens + Clickable Diagnostics) */}
+            {/* Silent Cloud Sync Status Indicator */}
             <button
               onClick={() => {
                 if (cloudSyncStatus === 'synced') {
                   if (masterRoster.length > 0) syncCollectionToCloud('master_roster', masterRoster, false);
                   if (masterCompetitions.length > 0)
                     syncCollectionToCloud('master_competitions', masterCompetitions, false);
+                  if (masterEvents.length > 0)
+                    syncCollectionToCloud('master_events', masterEvents, false);
                   if (historicalRecords.length > 0)
                     syncCollectionToCloud('performances', historicalRecords, false);
-                  setBenchmarkStatusMsg('Synced local Master Roster, Competitions, and Database to Firestore.');
+                  setBenchmarkStatusMsg('Synced local Master Lists and Database to Firestore.');
                 } else {
                   setBenchmarkStatusMsg(
                     `Firebase status (${cloudSyncStatus}): ${
@@ -1909,7 +2081,6 @@ export default function App() {
         {/* ==================================================================== */}
         {activeSection === 'home' && (
           <div className="space-y-8">
-            {/* Hero Status Bar */}
             <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950 text-white rounded-2xl p-6 sm:p-8 shadow-xl border border-slate-800">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                 <div className="space-y-2 max-w-2xl">
@@ -1926,7 +2097,6 @@ export default function App() {
                   </p>
                 </div>
 
-                {/* Live Counters */}
                 <div className="grid grid-cols-3 gap-3 sm:gap-4 shrink-0">
                   <div className="bg-white/5 border border-white/10 rounded-xl p-3.5 text-center">
                     <div className="text-xl sm:text-2xl font-extrabold text-cyan-400">
@@ -1974,8 +2144,8 @@ export default function App() {
                     Import / Review Historical Data
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                    Mass-import your Master Roster & Competitions, stage Google Sheet rows, reconcile
-                    athlete aliases, and sync directly to Firestore.
+                    Mass-import your Master Roster, Competitions & Events, stage Google Sheet rows,
+                    reconcile aliases, and sync directly to Firestore.
                   </p>
                 </div>
                 <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-cyan-700">
@@ -2024,8 +2194,8 @@ export default function App() {
                   </div>
                   <h3 className="text-lg font-extrabold text-slate-900">In-Meet Tools</h3>
                   <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                    Quick-reference broadcaster lookup for active swimmers, seed times, personal
-                    bests, and Top-10 threshold targets on deck.
+                    Quick-reference broadcaster lookup for active swimmers, full-distance bests,
+                    intermediate split bests, and Top-10 targets on deck.
                   </p>
                 </div>
                 <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-indigo-700">
@@ -2097,8 +2267,8 @@ export default function App() {
                     Master Historical Database & Reference Lists
                   </h2>
                   <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                    Maintain canonical athlete names (with Active flags) and competitions so every
-                    historical Sheet row and `.cl2` meet matches cleanly.
+                    Maintain canonical athlete names (with Active flags), dated competitions, and
+                    canonical events so every Sheet row and `.cl2` meet matches cleanly.
                   </p>
                 </div>
 
@@ -2111,6 +2281,7 @@ export default function App() {
                       id: 'competitions',
                       label: `Master Competitions (${masterCompetitions.length})`,
                     },
+                    { id: 'events', label: `Master Events (${masterEvents.length})` },
                     { id: 'database', label: `Committed DB (${historicalRecords.length})` },
                   ].map((tab) => (
                     <button
@@ -2174,9 +2345,9 @@ export default function App() {
                       <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-700">
                         Name | Class | Event | Min | Sec | Date | Location | Competition | Place | Time | Event | Seconds
                       </code>
-                      . Rows with <code className="font-bold">Place = R</code> (relay split) or{' '}
-                      <code className="font-bold">S</code> (distance split) are automatically marked
-                      non-official.
+                      . Split codes: <code className="font-bold">R</code> = Relay Lead-Off
+                      (Official), <code className="font-bold">S</code> = Intermediate Distance
+                      Split (Official + Noted).
                     </p>
 
                     <textarea
@@ -2199,16 +2370,18 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Reconciliation Prompt when Unmatched Athletes/Competitions appear */}
+                  {/* Reconciliation Prompt when Unmatched Athletes/Competitions/Events appear */}
                   {(stagingUnmatched.athletes.length > 0 ||
-                    stagingUnmatched.competitions.length > 0) && (
+                    stagingUnmatched.competitions.length > 0 ||
+                    stagingUnmatched.events.length > 0) && (
                     <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-4 sm:p-5 space-y-4">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
                           <h3 className="text-sm font-extrabold text-amber-950 flex items-center gap-1.5">
                             <AlertCircle className="w-4 h-4 text-amber-600" />
                             Master List Reconciliation Needed ({stagingUnmatched.athletes.length}{' '}
-                            Athletes, {stagingUnmatched.competitions.length} Competitions)
+                            Athletes, {stagingUnmatched.competitions.length} Competitions,{' '}
+                            {stagingUnmatched.events.length} Events)
                           </h3>
                           <p className="text-xs text-amber-800 mt-0.5">
                             Map spelling/nickname variants as an Alias to an existing Master entry
@@ -2256,11 +2429,14 @@ export default function App() {
                                     className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 max-w-[200px]"
                                   >
                                     <option value="__NEW__">+ Create New Master Athlete</option>
-                                    {masterRoster.map((ath) => (
-                                      <option key={ath.id} value={ath.id}>
-                                        Alias → {ath.canonicalName}
-                                      </option>
-                                    ))}
+                                    {masterRoster
+                                      .slice()
+                                      .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
+                                      .map((ath) => (
+                                        <option key={ath.id} value={ath.id}>
+                                          Alias → {ath.canonicalName}
+                                        </option>
+                                      ))}
                                   </select>
                                 </div>
                               );
@@ -2276,7 +2452,7 @@ export default function App() {
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                             {stagingUnmatched.competitions.map((item) => {
-                              const selKey = `comp:${item.rawName.toLowerCase()}|${item.sampleDate}`;
+                              const selKey = `comp:${normalizeCompKey(item.rawName)}|${item.sampleDate}`;
                               return (
                                 <div
                                   key={selKey}
@@ -2306,6 +2482,51 @@ export default function App() {
                                       <option key={c.id} value={c.id}>
                                         Alias → {c.canonicalName}
                                         {c.date ? ` (${c.date})` : ''}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {stagingUnmatched.events.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[11px] font-bold uppercase tracking-wider text-amber-900">
+                            Unmatched Events (Map to Canonical Master Event)
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                            {stagingUnmatched.events.map((item) => {
+                              const selKey = `ev:${item.rawEvent.toLowerCase()}|${item.genderHint}`;
+                              return (
+                                <div
+                                  key={selKey}
+                                  className="bg-white p-3 rounded-lg border border-amber-200 flex items-center justify-between gap-2"
+                                >
+                                  <div>
+                                    <div className="text-xs font-bold text-slate-900">
+                                      {item.rawEvent}
+                                    </div>
+                                    <div className="text-[11px] text-slate-500">
+                                      {item.genderHint || 'Gender unknown'} • {item.count} row(s)
+                                    </div>
+                                  </div>
+                                  <select
+                                    value={reconcileSelections[selKey] || ''}
+                                    onChange={(e) =>
+                                      setReconcileSelections((prev) => ({
+                                        ...prev,
+                                        [selKey]: e.target.value,
+                                      }))
+                                    }
+                                    className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 max-w-[220px]"
+                                  >
+                                    <option value="">-- Select Master Event --</option>
+                                    {masterEvents.map((ev) => (
+                                      <option key={ev.id} value={ev.id}>
+                                        Alias → {ev.canonicalName}
                                       </option>
                                     ))}
                                   </select>
@@ -2350,11 +2571,11 @@ export default function App() {
                               <th className="py-2.5 px-3">Keep</th>
                               <th className="py-2.5 px-3">Athlete</th>
                               <th className="py-2.5 px-3">Class</th>
-                              <th className="py-2.5 px-3">Canonical Event</th>
+                              <th className="py-2.5 px-3">Master Event</th>
                               <th className="py-2.5 px-3">Time</th>
-                              <th className="py-2.5 px-3">Competition</th>
+                              <th className="py-2.5 px-3">Master Competition</th>
                               <th className="py-2.5 px-3">Date</th>
-                              <th className="py-2.5 px-3">Status</th>
+                              <th className="py-2.5 px-3">Swim Classification</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -2382,26 +2603,102 @@ export default function App() {
                                   {row.swimmerName}
                                 </td>
                                 <td className="py-2 px-3">{row.classYear || '—'}</td>
-                                <td className="py-2 px-3">{row.eventLabel}</td>
+                                <td className="py-2 px-3">
+                                  <select
+                                    value={row.eventKey}
+                                    onChange={(e) => {
+                                      const chosenEv = masterEvents.find(
+                                        (ev) => ev.eventKey === e.target.value
+                                      );
+                                      setStagedHistoryRows((prev) =>
+                                        prev.map((item, i) =>
+                                          i === idx
+                                            ? {
+                                                ...item,
+                                                eventKey: e.target.value,
+                                                eventLabel: chosenEv
+                                                  ? chosenEv.canonicalName
+                                                  : toTitleEventLabel(e.target.value),
+                                                isEventMatched: Boolean(chosenEv),
+                                              }
+                                            : item
+                                        )
+                                      );
+                                    }}
+                                    className={`text-xs border rounded px-2 py-1 ${
+                                      row.isEventMatched
+                                        ? 'bg-white border-slate-200 text-slate-800'
+                                        : 'bg-amber-50 border-amber-300 text-amber-900 font-semibold'
+                                    }`}
+                                  >
+                                    {!masterEvents.some((ev) => ev.eventKey === row.eventKey) && (
+                                      <option value={row.eventKey}>{row.eventLabel} (Unmatched)</option>
+                                    )}
+                                    {masterEvents.map((ev) => (
+                                      <option key={ev.id} value={ev.eventKey}>
+                                        {ev.canonicalName}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
                                 <td className="py-2 px-3 font-mono font-semibold">{row.time}</td>
-                                <td className="py-2 px-3 text-slate-600">
+                                <td className="py-2 px-3 text-slate-700 font-medium">
                                   {row.competition || '—'}
                                 </td>
                                 <td className="py-2 px-3 text-slate-500">{row.date || '—'}</td>
                                 <td className="py-2 px-3">
-                                  {row.isDuplicate ? (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                                      Duplicate
-                                    </span>
-                                  ) : !row.isOfficial ? (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
-                                      Split ({row.place})
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                                      Official
-                                    </span>
-                                  )}
+                                  <div className="flex items-center gap-1.5">
+                                    <select
+                                      value={row.swimType || 'OFFICIAL'}
+                                      onChange={(e) => {
+                                        const nextType = e.target.value;
+                                        const nextPlace =
+                                          nextType === 'RELAY_LEADOFF'
+                                            ? 'R'
+                                            : nextType === 'INTERMEDIATE_SPLIT'
+                                            ? 'S'
+                                            : row.place === 'R' ||
+                                              row.place === 'S' ||
+                                              row.place === 'LR'
+                                            ? ''
+                                            : row.place;
+                                        setStagedHistoryRows((prev) =>
+                                          prev.map((item, i) =>
+                                            i === idx
+                                              ? {
+                                                  ...item,
+                                                  swimType: nextType,
+                                                  isOfficial: true,
+                                                  place: nextPlace,
+                                                  splitContext:
+                                                    nextType === 'INTERMEDIATE_SPLIT'
+                                                      ? 'Intermediate Distance Split'
+                                                      : '',
+                                                }
+                                              : item
+                                          )
+                                        );
+                                      }}
+                                      className={`text-[11px] font-bold border rounded px-2 py-1 ${
+                                        row.swimType === 'INTERMEDIATE_SPLIT'
+                                          ? 'bg-amber-50 border-amber-200 text-amber-900'
+                                          : row.swimType === 'RELAY_LEADOFF'
+                                          ? 'bg-cyan-50 border-cyan-200 text-cyan-800'
+                                          : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                      }`}
+                                    >
+                                      <option value="OFFICIAL">Official Individual</option>
+                                      <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
+                                      <option value="INTERMEDIATE_SPLIT">
+                                        Intermediate Split (S)
+                                      </option>
+                                    </select>
+                                    {row.isDuplicate && (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                                        Dup
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -2416,7 +2713,6 @@ export default function App() {
               {/* SUB-TAB B: MASTER ATHLETE ROSTER */}
               {historySubTab === 'roster' && (
                 <div className="p-5 sm:p-6 space-y-5">
-                  {/* Mass / Bulk Roster Paste Importer */}
                   <div className="bg-cyan-50/50 p-4 rounded-xl border border-cyan-200/80 space-y-2.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label className="text-xs font-bold uppercase tracking-wider text-cyan-900 flex items-center gap-1.5">
@@ -2524,7 +2820,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Master Roster Table */}
+                  {/* Master Roster Table (Sorted by Last Name) */}
                   {masterRoster.length === 0 ? (
                     <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
                       No athletes in the Master Roster yet. Use the Mass Roster Importer above or
@@ -2545,7 +2841,7 @@ export default function App() {
                         <tbody className="divide-y divide-slate-100">
                           {masterRoster
                             .slice()
-                            .sort((a, b) => a.canonicalName.localeCompare(b.canonicalName))
+                            .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
                             .map((ath) => (
                               <tr key={ath.id} className="hover:bg-slate-50">
                                 <td className="py-2.5 px-4 font-bold text-slate-900">
@@ -2611,14 +2907,13 @@ export default function App() {
               {/* SUB-TAB C: MASTER COMPETITIONS */}
               {historySubTab === 'competitions' && (
                 <div className="p-5 sm:p-6 space-y-5">
-                  {/* Mass / Bulk Competitions Paste Importer */}
-                  <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-200/80 space-y-2.5">
+                  <div className="bg-cyan-50/50 p-4 rounded-xl border border-cyan-200/80 space-y-2.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-indigo-950 flex items-center gap-1.5">
-                        <Building2 className="w-4 h-4 text-indigo-700" />
-                        Mass Competitions Importer (Paste from Google Sheets or CSV)
+                      <label className="text-xs font-bold uppercase tracking-wider text-cyan-900 flex items-center gap-1.5">
+                        <Building2 className="w-4 h-4 text-cyan-700" />
+                        Mass Competitions Importer (Each Competition + Date is a Unique Meet)
                       </label>
-                      <span className="text-[11px] text-indigo-800 font-medium">
+                      <span className="text-[11px] text-cyan-800 font-medium">
                         Columns:{' '}
                         <code className="bg-white px-1 rounded">
                           Competition Name, Date (YYYY-MM-DD), Location, Aliases
@@ -2629,114 +2924,77 @@ export default function App() {
                       rows={4}
                       value={bulkCompText}
                       onChange={(e) => setBulkCompText(e.target.value)}
-                      placeholder={`Competition, Date, Location, Aliases\nCentennial Conference Championships, 2026-02-20, Lancaster PA, CC Championships; Centennial Conf. Champs\nGettysburg Invitational, 2026-10-24, Gettysburg PA, Gettysburg Invite\nGettysburg vs Dickinson, 2026-11-14, Gettysburg PA, Dickinson Dual`}
-                      className="w-full p-3 text-xs font-mono bg-white border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder={`Competition Name, Date, Location, Aliases\nGettysburg Invitational, 2026-10-24, Gettysburg PA, Gettysburg Invite\nCentennial Conference Championships, 2026-02-20, Lancaster PA, CC Championships`}
+                      className="w-full p-3 text-xs font-mono bg-white border border-cyan-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     />
-                    <div className="flex flex-wrap items-center justify-between gap-2">
+                    <button
+                      onClick={handleBulkImportCompetitions}
+                      disabled={!bulkCompText.trim()}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white transition cursor-pointer"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      Mass Import Competitions
+                    </button>
+                  </div>
+
+                  {/* Single Competition Quick-Add */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200 items-end">
+                    <div className="md:col-span-2">
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Competition Name
+                      </label>
+                      <input
+                        type="text"
+                        value={newCompName}
+                        onChange={(e) => setNewCompName(e.target.value)}
+                        placeholder="e.g., Centennial Conference Championships"
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Meet Date
+                      </label>
+                      <input
+                        type="date"
+                        value={newCompDate}
+                        onChange={(e) => setNewCompDate(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newCompLocation}
+                        onChange={(e) => setNewCompLocation(e.target.value)}
+                        placeholder="Location (e.g., Lancaster PA)"
+                        className="flex-1 px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg"
+                      />
                       <button
-                        onClick={handleBulkImportCompetitions}
-                        disabled={!bulkCompText.trim()}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition cursor-pointer"
+                        onClick={() => {
+                          if (!newCompName.trim()) return;
+                          const created = {
+                            id: `comp-${Date.now()}`,
+                            canonicalName: newCompName.trim(),
+                            date: normalizeDateIso(newCompDate),
+                            defaultLocation: newCompLocation.trim(),
+                            aliases: [],
+                          };
+                          updateMasterCompetitions([...masterCompetitions, created], [created]);
+                          setNewCompName('');
+                          setNewCompDate('');
+                          setNewCompLocation('');
+                        }}
+                        className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
                       >
-                        <PlusCircle className="w-3.5 h-3.5" />
-                        Mass Import Competitions
+                        Add
                       </button>
-
-                      {historicalRecords.length > 0 && (
-                        <button
-                          onClick={handleSyncMasterListsFromDatabase}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                          Sync Missing from DB
-                        </button>
-                      )}
                     </div>
                   </div>
 
-                  {/* Single Competition Quick-Add Bar */}
-                  <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 flex-1">
-                      <div>
-                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                          Competition Name
-                        </label>
-                        <input
-                          type="text"
-                          value={newCompName}
-                          onChange={(e) => setNewCompName(e.target.value)}
-                          placeholder="e.g., Centennial Conference Championships"
-                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                          Meet Date
-                        </label>
-                        <input
-                          type="date"
-                          value={newCompDate}
-                          onChange={(e) => setNewCompDate(e.target.value)}
-                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                          Location
-                        </label>
-                        <input
-                          type="text"
-                          value={newCompLocation}
-                          onChange={(e) => setNewCompLocation(e.target.value)}
-                          placeholder="e.g., Lancaster PA"
-                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                        />
-                      </div>
-                      <div className="flex items-end">
-                        <button
-                          onClick={() => {
-                            if (!newCompName.trim()) return;
-                            const existsSameDate = masterCompetitions.some(
-                              (c) =>
-                                (c.date || '').trim() === newCompDate.trim() &&
-                                (c.canonicalName.trim().toLowerCase() ===
-                                  newCompName.trim().toLowerCase() ||
-                                  (c.aliases || []).some(
-                                    (al) =>
-                                      al.trim().toLowerCase() === newCompName.trim().toLowerCase()
-                                  ))
-                            );
-                            if (existsSameDate) {
-                              setBenchmarkStatusMsg(
-                                `"${newCompName.trim()}" on ${newCompDate || 'this date'} already exists in Master Competitions.`
-                              );
-                              return;
-                            }
-                            const created = {
-                              id: `comp-${Date.now()}`,
-                              canonicalName: newCompName.trim(),
-                              date: newCompDate.trim(),
-                              defaultLocation: newCompLocation.trim(),
-                              aliases: [],
-                            };
-                            updateMasterCompetitions([...masterCompetitions, created], [created]);
-                            setNewCompName('');
-                            setNewCompDate('');
-                            setNewCompLocation('');
-                          }}
-                          className="w-full px-4 py-2 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white transition cursor-pointer"
-                        >
-                          Add Competition
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Master Competitions Table */}
                   {masterCompetitions.length === 0 ? (
                     <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                      No competitions in Master Competitions yet. Paste your meet schedule/history
-                      above to populate.
+                      No competitions in Master Competitions yet.
                     </div>
                   ) : (
                     <div className="overflow-x-auto border border-slate-200 rounded-xl">
@@ -2745,7 +3003,7 @@ export default function App() {
                           <tr>
                             <th className="py-2.5 px-4">Canonical Competition</th>
                             <th className="py-2.5 px-4">Date</th>
-                            <th className="py-2.5 px-4">Location</th>
+                            <th className="py-2.5 px-4">Default Location</th>
                             <th className="py-2.5 px-4">Saved Aliases</th>
                             <th className="py-2.5 px-4 text-center">Remove</th>
                           </tr>
@@ -2753,19 +3011,14 @@ export default function App() {
                         <tbody className="divide-y divide-slate-100">
                           {masterCompetitions
                             .slice()
-                            .sort((a, b) => {
-                              const dateCmp = (b.date || '').localeCompare(a.date || '');
-                              return dateCmp !== 0
-                                ? dateCmp
-                                : a.canonicalName.localeCompare(b.canonicalName);
-                            })
+                            .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
                             .map((comp) => (
                               <tr key={comp.id} className="hover:bg-slate-50">
                                 <td className="py-2.5 px-4 font-bold text-slate-900">
                                   {comp.canonicalName}
                                 </td>
-                                <td className="py-2.5 px-4 font-mono text-slate-700">
-                                  {comp.date || '—'}
+                                <td className="py-2.5 px-4 font-mono text-slate-600">
+                                  {comp.date || 'Any Date'}
                                 </td>
                                 <td className="py-2.5 px-4 text-slate-600">
                                   {comp.defaultLocation || '—'}
@@ -2806,6 +3059,134 @@ export default function App() {
                       </table>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* SUB-TAB C2: MASTER EVENTS */}
+              {historySubTab === 'events' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row md:items-end gap-3">
+                    <div className="flex-1">
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Canonical Event Name
+                      </label>
+                      <input
+                        type="text"
+                        value={newEventName}
+                        onChange={(e) => setNewEventName(e.target.value)}
+                        placeholder="e.g., Women 100 Freestyle"
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Optional Alias (e.g., W 100 Free)
+                      </label>
+                      <input
+                        type="text"
+                        value={newEventAlias}
+                        onChange={(e) => setNewEventAlias(e.target.value)}
+                        placeholder="e.g., W 100 Free"
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        const cleanName = newEventName.trim();
+                        if (!cleanName) return;
+                        const evKey = normalizeEventKey(cleanName) || cleanName.toLowerCase();
+                        const existing = masterEvents.find(
+                          (ev) => ev.canonicalName.toLowerCase() === cleanName.toLowerCase()
+                        );
+                        if (existing) {
+                          if (newEventAlias.trim()) {
+                            const updated = {
+                              ...existing,
+                              aliases: Array.from(
+                                new Set([...(existing.aliases || []), newEventAlias.trim()])
+                              ),
+                            };
+                            updateMasterEvents(
+                              masterEvents.map((e) => (e.id === existing.id ? updated : e)),
+                              [updated]
+                            );
+                          }
+                        } else {
+                          const created = {
+                            id: `ev-${Date.now()}`,
+                            canonicalName: cleanName,
+                            eventKey: evKey,
+                            gender: cleanName.toLowerCase().startsWith('men') ? 'Men' : 'Women',
+                            isRelay: cleanName.toLowerCase().includes('relay'),
+                            aliases: newEventAlias.trim() ? [newEventAlias.trim()] : [],
+                          };
+                          updateMasterEvents([...masterEvents, created], [created]);
+                        }
+                        setNewEventName('');
+                        setNewEventAlias('');
+                      }}
+                      className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+                    >
+                      Save Event / Alias
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="py-2.5 px-4">Canonical Event</th>
+                          <th className="py-2.5 px-4">Gender</th>
+                          <th className="py-2.5 px-4">Type</th>
+                          <th className="py-2.5 px-4">Saved Aliases</th>
+                          <th className="py-2.5 px-4 text-center">Remove</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {masterEvents.map((ev) => (
+                          <tr key={ev.id} className="hover:bg-slate-50">
+                            <td className="py-2.5 px-4 font-bold text-slate-900">
+                              {ev.canonicalName}
+                            </td>
+                            <td className="py-2.5 px-4 text-slate-600">{ev.gender}</td>
+                            <td className="py-2.5 px-4 text-slate-600">
+                              {ev.isRelay ? 'Relay' : 'Individual'}
+                            </td>
+                            <td className="py-2.5 px-4 text-slate-500">
+                              {(ev.aliases || []).length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {ev.aliases.map((al) => (
+                                    <span
+                                      key={al}
+                                      className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
+                                    >
+                                      {al}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 italic">Auto-normalized</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-4 text-center">
+                              <button
+                                onClick={() =>
+                                  updateMasterEvents(
+                                    masterEvents.filter((item) => item.id !== ev.id),
+                                    null,
+                                    ev.id
+                                  )
+                                }
+                                className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
@@ -2875,13 +3256,22 @@ export default function App() {
                               <td className="py-2 px-3 text-slate-600">{r.competition || '—'}</td>
                               <td className="py-2 px-3 text-slate-500">{r.date || '—'}</td>
                               <td className="py-2 px-3">
-                                {r.isOfficial ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                                    Official
+                                {r.swimType === 'RELAY_LEADOFF' ||
+                                r.place === 'R' ||
+                                r.place === 'LR' ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800">
+                                    Relay Lead-Off (R)
+                                  </span>
+                                ) : r.swimType === 'INTERMEDIATE_SPLIT' || r.place === 'S' ? (
+                                  <span
+                                    title={r.splitContext || 'Intermediate Distance Split'}
+                                    className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900"
+                                  >
+                                    Split (S){r.splitContext ? ` • ${r.splitContext}` : ''}
                                   </span>
                                 ) : (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
-                                    Split ({r.place})
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                    Official
                                   </span>
                                 )}
                               </td>
@@ -2910,8 +3300,9 @@ export default function App() {
                     Program All-Time Top-10 & Freshman Record Book
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Ranked exclusively from official individual swims & flat-start relay lead-offs
-                    ({recordBookData.totalMatchedCount} official marks matched for this event).
+                    Ranked exclusively from official individual swims, relay lead-offs (R), &
+                    intermediate splits (S) ({recordBookData.totalMatchedCount} official marks
+                    matched for this event).
                   </p>
                 </div>
 
@@ -2990,10 +3381,10 @@ export default function App() {
               ) : (
                 <div className="overflow-x-auto border border-slate-200 rounded-xl">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-900 text-slate-200 font-bold uppercase text-[10px]">
+                    <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
                       <tr>
                         <th className="py-3 px-4 w-16">Rank</th>
-                        <th className="py-3 px-4">Swimmer</th>
+                        <th className="py-3 px-4">Athlete</th>
                         <th className="py-3 px-4">Class</th>
                         <th className="py-3 px-4">Time</th>
                         <th className="py-3 px-4">Competition</th>
@@ -3002,14 +3393,28 @@ export default function App() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {recordBookData.top10.map((row, idx) => (
-                        <tr
-                          key={row.id}
-                          className={idx === 0 ? 'bg-amber-50/40 font-semibold' : 'hover:bg-slate-50'}
-                        >
-                          <td className="py-3 px-4 font-extrabold text-slate-900">
-                            {idx === 0 ? '🏆 #1' : `#${idx + 1}`}
+                        <tr key={row.id} className={idx === 0 ? 'bg-amber-50/40' : 'hover:bg-slate-50'}>
+                          <td className="py-3 px-4 font-black text-slate-900">#{idx + 1}</td>
+                          <td className="py-3 px-4 font-bold text-slate-900">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span>{row.swimmerName}</span>
+                              {(row.swimType === 'RELAY_LEADOFF' ||
+                                row.place === 'R' ||
+                                row.place === 'LR') && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-100 text-cyan-800">
+                                  R
+                                </span>
+                              )}
+                              {(row.swimType === 'INTERMEDIATE_SPLIT' || row.place === 'S') && (
+                                <span
+                                  title={row.splitContext || 'Intermediate Distance Split'}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
+                                >
+                                  S{row.splitContext ? ` (${row.splitContext})` : ''}
+                                </span>
+                              )}
+                            </div>
                           </td>
-                          <td className="py-3 px-4 font-bold text-slate-900">{row.swimmerName}</td>
                           <td className="py-3 px-4 text-slate-600">{row.classYear || '—'}</td>
                           <td className="py-3 px-4 font-mono font-extrabold text-cyan-800">
                             {row.time}
@@ -3037,7 +3442,7 @@ export default function App() {
                   In-Meet Deck & Broadcaster Reference
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                  Active roster swimmers and their current Career Bests & #10 All-Time targets.
+                  Active roster swimmers and their current Full-Distance Bests & Split Bests.
                 </p>
               </div>
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
@@ -3054,18 +3459,28 @@ export default function App() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {masterRoster
                   .filter((a) => a.isActive)
-                  .sort((a, b) => a.canonicalName.localeCompare(b.canonicalName))
+                  .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
                   .map((ath) => {
                     const swKey = normalizeSwimmerKey(ath.canonicalName);
-                    const swBestMap = new Map();
+                    const swFullBestMap = new Map();
+                    const swSplitBestMap = new Map();
                     historicalRecords
-                      .filter((r) => r.isOfficial && r.swimmerKey === swKey)
+                      .filter((r) => r.isOfficial !== false && r.swimmerKey === swKey)
                       .forEach((r) => {
-                        if (!swBestMap.has(r.eventKey) || r.seconds < swBestMap.get(r.eventKey).seconds) {
-                          swBestMap.set(r.eventKey, r);
+                        const isSplit =
+                          r.swimType === 'INTERMEDIATE_SPLIT' ||
+                          String(r.place || '').toUpperCase() === 'S';
+                        const targetMap = isSplit ? swSplitBestMap : swFullBestMap;
+                        if (
+                          !targetMap.has(r.eventKey) ||
+                          r.seconds < targetMap.get(r.eventKey).seconds
+                        ) {
+                          targetMap.set(r.eventKey, r);
                         }
                       });
-                    const bests = Array.from(swBestMap.values()).slice(0, 4);
+                    const eventKeys = Array.from(
+                      new Set([...swFullBestMap.keys(), ...swSplitBestMap.keys()])
+                    ).slice(0, 4);
 
                     return (
                       <div
@@ -3080,23 +3495,43 @@ export default function App() {
                             {ath.gender}
                           </span>
                         </div>
-                        {bests.length === 0 ? (
+                        {eventKeys.length === 0 ? (
                           <div className="text-xs text-slate-400 italic">
                             No career marks recorded yet
                           </div>
                         ) : (
                           <div className="space-y-1">
-                            {bests.map((b) => (
-                              <div
-                                key={b.id}
-                                className="flex items-center justify-between text-xs bg-white px-2.5 py-1.5 rounded-lg border border-slate-100"
-                              >
-                                <span className="text-slate-600 truncate pr-2">
-                                  {b.eventLabel.replace(/^(Women|Men)\s+/i, '')}
-                                </span>
-                                <span className="font-mono font-bold text-slate-900">{b.time}</span>
-                              </div>
-                            ))}
+                            {eventKeys.map((evKey) => {
+                              const fullBest = swFullBestMap.get(evKey);
+                              const splitBest = swSplitBestMap.get(evKey);
+                              const label = (fullBest || splitBest).eventLabel.replace(
+                                /^(Women|Men)\s+/i,
+                                ''
+                              );
+                              return (
+                                <div
+                                  key={evKey}
+                                  className="flex items-center justify-between text-xs bg-white px-2.5 py-1.5 rounded-lg border border-slate-100 gap-2"
+                                >
+                                  <span className="text-slate-600 truncate">{label}</span>
+                                  <div className="flex items-center gap-1.5 font-mono font-bold shrink-0">
+                                    {fullBest && (
+                                      <span className="text-slate-900">{fullBest.time}</span>
+                                    )}
+                                    {splitBest && (
+                                      <span
+                                        title={
+                                          splitBest.splitContext || 'Best Intermediate Split (S)'
+                                        }
+                                        className="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
+                                      >
+                                        {splitBest.time} (S)
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -3112,7 +3547,6 @@ export default function App() {
         {/* ==================================================================== */}
         {activeSection === 'import' && (
           <div className="space-y-6">
-            {/* Uploader & Sample Bar */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg sm:text-xl font-extrabold text-slate-900">
@@ -3152,7 +3586,6 @@ export default function App() {
 
             {parsedData && (
               <>
-                {/* Team Scoreboard & Primary Program Focus Selector */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {Object.values(parsedData.teams).map((team) => (
                     <div
@@ -3399,7 +3832,6 @@ export default function App() {
               </div>
             ) : (
               <>
-                {/* One-Click Commit Meet to Database Card */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                   <div className="space-y-1">
                     <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
@@ -3408,7 +3840,8 @@ export default function App() {
                     <p className="text-xs text-slate-500">
                       Imports only{' '}
                       <strong>{parsedData.teams[selectedTeam]?.name || selectedTeam}</strong>{' '}
-                      swims and resolves athlete & competition names against your Master Lists.
+                      swims and resolves athlete, competition & event names against your Master
+                      Lists.
                     </p>
                     <label className="inline-flex items-center gap-2 text-xs text-slate-700 pt-1 cursor-pointer">
                       <input
@@ -3417,7 +3850,7 @@ export default function App() {
                         onChange={(e) => setIncludeSplitsOnCommit(e.target.checked)}
                         className="rounded text-cyan-600"
                       />
-                      Also save flying relay splits (Place = R) & 1000 splits inside 1650 (Place = S)
+                      Also save 1000 splits inside 1650 (Place = S; Relay Lead-Offs "R" are always saved)
                     </label>
                   </div>
 
