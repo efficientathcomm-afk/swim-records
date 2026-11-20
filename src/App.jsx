@@ -36,6 +36,10 @@ import {
   CloudOff
 } from 'lucide-react';
 
+// ============================================================================
+// FIREBASE INITIALIZATION (Anonymous Auth + Firestore Sync)
+// ============================================================================
+
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
@@ -57,23 +61,6 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const analytics = getAnalytics(app);
-
-// ============================================================================
-// FIREBASE INITIALIZATION (Anonymous Auth + Firestore Sync)
-// ============================================================================
-const firebaseConfig = {
-  apiKey: 'AIzaSyC9wvEBlxlufBiktja5vjaXH0rxceCuPyg',
-  authDomain: 'swimming-records.firebaseapp.com',
-  projectId: 'swimming-records',
-  storageBucket: 'swimming-records.firebasestorage.app',
-  messagingSenderId: '645635780769',
-  appId: '1:645635780769:web:f9b5bb16397b3a0ec980e0',
-  measurementId: 'G-TY22D1ZJWM',
-};
-
-const firebaseApp = initializeApp(firebaseConfig);
-const auth = getAuth(firebaseApp);
-const db = getFirestore(firebaseApp);
 
 // ============================================================================
 // SAMPLE SDIF / CL2 DATA (Gettysburg v Carnegie Mellon - 07Nov2026)
