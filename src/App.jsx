@@ -1087,131 +1087,6 @@ function parseGoogleSheetHistory(rawText, genderLookupMap = {}) {
   return rows;
 }
 
-// ============================================================================
-// GOOGLE SHEET 11-COLUMN HISTORICAL RELAY PARSER
-// Columns: Names | Event | Min | Sec | Date | Location | Competition | Place | Time | Event | Seconds
-// ============================================================================
-function parseGoogleSheetRelayHistory(rawText, genderLookupMap = {}) {
-  const lines = String(rawText || '')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (lines.length === 0) return [];
-
-  const delimiter = lines[0].includes('\t') ? '\t' : ',';
-  const rows = [];
-
-  const parseCsvLine = (line) => {
-    if (delimiter === '\t') {
-      return line.split('\t').map((c) => c.trim().replace(/^"|"$/g, ''));
-    }
-    const result = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        inQuotes = !inQuotes;
-      } else if (ch === ',' && !inQuotes) {
-        result.push(current.trim());
-        current = '';
-      } else {
-        current += ch;
-      }
-    }
-    result.push(current.trim());
-    return result;
-  };
-
-  lines.forEach((line, idx) => {
-    const cols = parseCsvLine(line);
-    if (idx === 0 && (cols[0] || '').toLowerCase() === 'names') return;
-
-    const rawNamesCol = cols[0] || '';
-    if (!rawNamesCol) return;
-
-    const legNames = rawNamesCol
-      .split(',')
-      .map((n) => n.replace(/\([^)]*\)/g, '').trim())
-      .filter(Boolean);
-    if (legNames.length === 0) return;
-
-    const shortEvent = cols[1] || '';
-    const minVal = parseFloat(cols[2]);
-    const secVal = parseFloat(cols[3]);
-    const dateStr = cols[4] || '';
-    const location = cols[5] || '';
-    const rawCompetition = cols[6] || '';
-    const placeRaw = (cols[7] || '').trim().toUpperCase();
-    const timeCol = cols[8] || '';
-    const longEvent = cols[9] || shortEvent;
-    const totalSecondsCol = parseFloat(cols[10]);
-
-    let round = 'Finals';
-    let competition = rawCompetition;
-    if (/\((sf|p|prelim|prelims|preliminary)\)/i.test(rawCompetition)) {
-      round = 'Prelims';
-      competition = rawCompetition
-        .replace(/\((sf|p|prelim|prelims|preliminary)\)/gi, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    } else if (/\((tt|time\s*trial)\)/i.test(rawCompetition)) {
-      round = 'Time Trial';
-      competition = rawCompetition
-        .replace(/\((tt|time\s*trial)\)/gi, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    }
-
-    let seconds = !Number.isNaN(totalSecondsCol) ? totalSecondsCol : timeToSeconds(timeCol);
-    if ((seconds === null || Number.isNaN(seconds)) && !Number.isNaN(secVal)) {
-      seconds = (!Number.isNaN(minVal) ? minVal * 60 : 0) + secVal;
-    }
-    if (seconds === null || Number.isNaN(seconds) || seconds <= 0) return;
-
-    let inferredGender = '';
-    for (const leg of legNames) {
-      const g = genderLookupMap[normalizeSwimmerKey(leg)];
-      if (g) {
-        inferredGender = g;
-        break;
-      }
-    }
-
-    const rawEventInput = longEvent || shortEvent;
-    let eventKey = normalizeEventKey(rawEventInput, inferredGender);
-    if (eventKey && !eventKey.endsWith('relay')) {
-      eventKey = `${eventKey} relay`;
-    }
-
-    const displayLineup = legNames.join(', ');
-
-    rows.push({
-      id: `hist-rel-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-      swimmerName: displayLineup,
-      swimmerKey: normalizeSwimmerKey(displayLineup),
-      relayLegs: legNames,
-      classYear: '',
-      rawEventInput,
-      eventKey,
-      eventLabel: eventKey ? toTitleEventLabel(eventKey) : rawEventInput,
-      time: timeCol || secondsToTime(seconds),
-      seconds,
-      date: normalizeDateIso(dateStr),
-      dateObj: parseFlexibleDate(dateStr),
-      location,
-      competition,
-      round,
-      place: placeRaw,
-      swimType: 'RELAY_TEAM',
-      isOfficial: true,
-      splitContext: '',
-      source: 'relay_sheet_import',
-    });
-  });
-
-  return rows;
-}
 
 
 // ============================================================================
@@ -1278,7 +1153,6 @@ export default function App() {
   });
 
   // Staging & Importer State
-  const [sheetImportMode, setSheetImportMode] = useState('auto'); // 'auto' | 'individual' | 'relay'
   const [pasteSheetText, setPasteSheetText] = useState('');
   const [stagedHistoryRows, setStagedHistoryRows] = useState([]);
   const [reconcileSelections, setReconcileSelections] = useState({});
@@ -2238,30 +2112,11 @@ export default function App() {
   }, [masterRoster, parsedData]);
 
   // Stage Google Sheet rows for inspection & reconciliation before committing
-  const handleStageHistoryText = (rawText, forcedMode = sheetImportMode) => {
-    const firstNonEmpty =
-      String(rawText || '')
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .find(Boolean) || '';
-    const delim = firstNonEmpty.includes('\t') ? '\t' : ',';
-    const firstCols = firstNonEmpty.split(delim).map((c) => c.trim().replace(/^"|"$/g, ''));
-
-    const isRelaySheet =
-      forcedMode === 'relay' ||
-      (forcedMode === 'auto' &&
-        ((firstCols[0] || '').toLowerCase() === 'names' ||
-          (firstCols.length === 11 && (firstCols[0] || '').includes(','))));
-
-    const parsed = isRelaySheet
-      ? parseGoogleSheetRelayHistory(rawText, swimmerGenderLookup)
-      : parseGoogleSheetHistory(rawText, swimmerGenderLookup);
-
+  const handleStageHistoryText = (rawText) => {
+    const parsed = parseGoogleSheetHistory(rawText, swimmerGenderLookup);
     if (parsed.length === 0) {
       setBenchmarkStatusMsg(
-        isRelaySheet
-          ? 'No valid relay rows found. Ensure 11 columns follow: Names, Event, Min, Sec, Date, Location, Competition, Place, Time, Event, Seconds.'
-          : 'No valid rows found. Ensure 12 columns follow: Name, Class, Event, Min, Sec, Date, Location, Competition, Place, Time, Event, Seconds.'
+        'No valid rows found. Ensure columns follow: Name, Class, Event, Min, Sec, Date, Location, Competition, Place, Time, Event, Seconds.'
       );
       return;
     }
@@ -2274,57 +2129,6 @@ export default function App() {
     );
 
     const staged = parsed.map((row) => {
-      if (row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs)) {
-        const resolvedLegs = row.relayLegs.map((legName) => {
-          const m = resolveMasterAthlete(legName);
-          return m ? m.canonicalName : legName;
-        });
-        const firstMatchedAth = row.relayLegs
-          .map((legName) => resolveMasterAthlete(legName))
-          .find(Boolean);
-        const inferredGender =
-          firstMatchedAth?.gender ||
-          row.relayLegs.map((n) => swimmerGenderLookup[normalizeSwimmerKey(n)]).find(Boolean) ||
-          '';
-
-        const matchedComp = resolveMasterCompetition(row.competition, row.date);
-        const resolvedComp = matchedComp ? matchedComp.canonicalName : row.competition;
-        const resolvedDate = matchedComp?.date ? normalizeDateIso(matchedComp.date) : row.date;
-        const resolvedLocation = matchedComp?.defaultLocation || row.location || '';
-
-        const matchedEv = resolveMasterEvent(row.rawEventInput, inferredGender);
-        let resolvedEventKey = matchedEv ? matchedEv.eventKey : row.eventKey;
-        if (resolvedEventKey && !resolvedEventKey.endsWith('relay')) {
-          resolvedEventKey = `${resolvedEventKey} relay`;
-        }
-        const resolvedEventLabel = matchedEv
-          ? matchedEv.canonicalName
-          : resolvedEventKey
-          ? toTitleEventLabel(resolvedEventKey)
-          : row.eventLabel;
-
-        const resolvedLineup = resolvedLegs.join(', ');
-        const resolvedKey = normalizeSwimmerKey(resolvedLineup);
-        const hash = `${resolvedKey}|${resolvedEventKey}|${row.seconds.toFixed(2)}|${resolvedDate}|${row.round || 'Finals'}|${row.place}`;
-        const isDuplicate = existingHashes.has(hash);
-
-        return {
-          ...row,
-          relayLegs: resolvedLegs,
-          swimmerName: resolvedLineup,
-          swimmerKey: resolvedKey,
-          competition: resolvedComp,
-          date: resolvedDate,
-          dateObj: parseFlexibleDate(resolvedDate),
-          location: resolvedLocation,
-          eventKey: resolvedEventKey,
-          eventLabel: resolvedEventLabel,
-          isEventMatched: Boolean(matchedEv),
-          isDuplicate,
-          selected: !isDuplicate,
-        };
-      }
-
       const matchedAth = resolveMasterAthlete(row.swimmerName);
       const resolvedName = matchedAth ? matchedAth.canonicalName : row.swimmerName;
       const inferredGender = matchedAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
@@ -2360,7 +2164,7 @@ export default function App() {
     setReconcileSelections({});
     const dupCount = staged.filter((r) => r.isDuplicate).length;
     setBenchmarkStatusMsg(
-      `Staged ${staged.length} ${isRelaySheet ? 'relay ' : ''}rows (${staged.length - dupCount} new, ${dupCount} already in database). Review or reconcile below before committing.`
+      `Staged ${staged.length} rows (${staged.length - dupCount} new, ${dupCount} already in database). Review or reconcile below before committing.`
     );
   };
 
@@ -2371,27 +2175,19 @@ export default function App() {
     const events = new Map();
 
     stagedHistoryRows.forEach((row) => {
-      const namesToCheck =
-        row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs)
-          ? row.relayLegs
-          : [row.swimmerName];
-
-      namesToCheck.forEach((rawCandidate) => {
-        const matchedAth = resolveMasterAthlete(rawCandidate);
-        if (!matchedAth) {
-          const key = normalizeSwimmerKey(rawCandidate);
-          if (!athletes.has(key)) {
-            athletes.set(key, {
-              rawName: rawCandidate,
-              inferredGender: row.eventKey.startsWith('men') ? 'Men' : 'Women',
-              count: 1,
-            });
-          } else {
-            athletes.get(key).count += 1;
-          }
+      const matchedAth = resolveMasterAthlete(row.swimmerName);
+      if (!matchedAth) {
+        const key = normalizeSwimmerKey(row.swimmerName);
+        if (!athletes.has(key)) {
+          athletes.set(key, {
+            rawName: row.swimmerName,
+            inferredGender: row.eventKey.startsWith('men') ? 'Men' : 'Women',
+            count: 1,
+          });
+        } else {
+          athletes.get(key).count += 1;
         }
-      });
-
+      }
       if (row.competition && !resolveMasterCompetition(row.competition, row.date)) {
         const cKey = `${normalizeCompKey(row.competition)}|${normalizeDateIso(row.date)}`;
         if (!competitions.has(cKey)) {
@@ -2405,11 +2201,7 @@ export default function App() {
           competitions.get(cKey).count += 1;
         }
       }
-      const firstLegAth =
-        row.swimType === 'RELAY_TEAM' && Array.isArray(row.relayLegs)
-          ? row.relayLegs.map((n) => resolveMasterAthlete(n)).find(Boolean)
-          : resolveMasterAthlete(row.swimmerName);
-      const genderHint = firstLegAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
+      const genderHint = matchedAth?.gender || swimmerGenderLookup[row.swimmerKey] || '';
       if (!resolveMasterEvent(row.rawEventInput || row.eventLabel, genderHint)) {
         const eKey = `${(row.rawEventInput || row.eventLabel).trim().toLowerCase()}|${genderHint}`;
         if (!events.has(eKey)) {
@@ -3827,28 +3619,8 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                          Paste Google Sheet Rows (TSV / CSV)
+                        Paste 12-Column Google Sheet Rows (TSV / CSV)
                       </label>
-                        <div className="flex bg-slate-100 p-0.5 rounded-lg text-[11px] font-bold">
-                          {[
-                            { id: 'auto', label: 'Auto-Detect' },
-                            { id: 'individual', label: 'Individual (12-Col)' },
-                            { id: 'relay', label: 'Relays (11-Col)' },
-                          ].map((m) => (
-                            <button
-                              key={m.id}
-                              onClick={() => setSheetImportMode(m.id)}
-                              className={`px-2 py-1 rounded-md transition cursor-pointer ${
-                                sheetImportMode === m.id
-                                  ? 'bg-white text-slate-900 shadow-xs'
-                                  : 'text-slate-600 hover:text-slate-900'
-                              }`}
-                            >
-                              {m.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
                       <div className="flex items-center gap-2">
                         <input
                           ref={historyCsvInputRef}
@@ -3876,23 +3648,12 @@ export default function App() {
                         </button>
                         <button
                           onClick={() => {
-                            setSheetImportMode('individual');
                             setPasteSheetText(SAMPLE_GOOGLE_SHEET_CSV);
-                            handleStageHistoryText(SAMPLE_GOOGLE_SHEET_CSV, 'individual');
+                            handleStageHistoryText(SAMPLE_GOOGLE_SHEET_CSV);
                           }}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 cursor-pointer"
                         >
-                          Sample Individual
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSheetImportMode('relay');
-                            setPasteSheetText(SAMPLE_RELAY_SHEET_CSV);
-                            handleStageHistoryText(SAMPLE_RELAY_SHEET_CSV, 'relay');
-                          }}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 cursor-pointer"
-                        >
-                          Sample Relays
+                          Load Sample Sheet Rows
                         </button>
                       </div>
                     </div>
@@ -3901,11 +3662,7 @@ export default function App() {
                       rows={5}
                       value={pasteSheetText}
                       onChange={(e) => setPasteSheetText(e.target.value)}
-                      placeholder={
-                        sheetImportMode === 'relay'
-                          ? `Names\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nDelanie McKenzie, Reilly Dolan, Morgan Puckett, Delaney Reck\t400 Medley Relay\t3\t59.68\t2026-11-07\tGettysburg PA\tGettysburg v Carnegie Mellon\t2\t3:59.68\tWomen 400 Medley Relay\t239.68`
-                          : `Name\tClass\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nAva Berry\tFr.\t1000 Free\t10\t46.20\t2026-10-24\tGettysburg PA\tGettysburg Invitational\t1\t10:46.20\tWomen 1000 Freestyle\t646.20`
-                      }
+                      placeholder={`Name\tClass\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nAva Berry\tFr.\t1000 Free\t10\t46.20\t2026-10-24\tGettysburg PA\tGettysburg Invitational\t1\t10:46.20\tWomen 1000 Freestyle\t646.20`}
                       className="w-full p-3 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     />
 
@@ -3928,7 +3685,6 @@ export default function App() {
                       )}
                     </div>
                   </div>
-          )}
 
                   {/* Unmatched Master List Reconciliation Panel */}
                   {(stagingUnmatched.athletes.length > 0 ||
