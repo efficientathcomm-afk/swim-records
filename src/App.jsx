@@ -712,6 +712,8 @@ export default function App() {
   const [recordBookEventKey, setRecordBookEventKey] = useState('women 1000 freestyle');
   const [recordBookSubTab, setRecordBookSubTab] = useState('top10'); // 'top10' | 'wins'
   const [winsActiveOnly, setWinsActiveOnly] = useState(false);
+  const [winsCompetitionFilter, setWinsCompetitionFilter] = useState('ALL');
+  const [eventWinsActiveOnly, setEventWinsActiveOnly] = useState(false);
   const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
 
   // Anonymous Firebase Auth & Live Cloud Sync State
@@ -1889,20 +1891,87 @@ export default function App() {
       .filter((r) => normalizeClass(r.classYear) === 'FR')
       .sort((a, b) => a.seconds - b.seconds);
 
+    // Event-Specific Career Wins Leaders (1st place in Finals for this event)
+    const activeSet = new Set(
+      masterRoster
+        .filter((a) => a.isActive)
+        .map((a) => normalizeSwimmerKey(a.canonicalName))
+    );
+    const eventWinnersMap = new Map();
+    historicalRecords.forEach((r) => {
+      if (r.eventKey !== recordBookEventKey) return;
+      if (String(r.place || '').trim() !== '1') return;
+      const roundClean = String(r.round || 'Finals').toLowerCase();
+      if (roundClean === 'prelims' || roundClean === 'time trial') return;
+
+      const athRecord = resolveMasterAthlete(r.swimmerName);
+      const canonicalName = athRecord ? athRecord.canonicalName : r.swimmerName;
+      const swKey = normalizeSwimmerKey(canonicalName);
+      if (eventWinsActiveOnly && !activeSet.has(swKey)) return;
+
+      if (!eventWinnersMap.has(swKey)) {
+        eventWinnersMap.set(swKey, {
+          swimmerKey: swKey,
+          swimmerName: canonicalName,
+          isActive: activeSet.has(swKey),
+          wins: 0,
+          bestTime: r.time,
+          bestSeconds: r.seconds,
+          meets: [],
+        });
+      }
+      const item = eventWinnersMap.get(swKey);
+      item.wins += 1;
+      if (r.seconds < item.bestSeconds) {
+        item.bestSeconds = r.seconds;
+        item.bestTime = r.time;
+      }
+      item.meets.push(
+        `${r.competition || 'Meet'}${r.date ? ` (${r.date.slice(0, 4)})` : ''}`
+      );
+    });
+
+    const eventWinLeaders = Array.from(eventWinnersMap.values())
+      .sort(
+        (a, b) =>
+          b.wins - a.wins ||
+          a.bestSeconds - b.bestSeconds ||
+          compareByLastName(a.swimmerName, b.swimmerName)
+      )
+      .slice(0, 10);
+
     return {
       top10,
       freshmanRecord: freshmanRows[0] || null,
       totalMatchedCount: officialRows.length,
+      eventWinLeaders,
     };
-  }, [historicalRecords, recordBookEventKey]);
+  }, [historicalRecords, recordBookEventKey, masterRoster, eventWinsActiveOnly]);
 
-  // All-Time Career Wins Leaderboard (Individual + Relay Finals Wins)
+  // Distinct recurring competition names for the All-Time Wins dropdown
+  const recurringCompetitionsList = useMemo(() => {
+    const names = new Set();
+    masterCompetitions.forEach((c) => {
+      if (c.canonicalName) names.add(c.canonicalName.trim());
+    });
+    historicalRecords.forEach((r) => {
+      if (r.competition && String(r.place || '').trim() === '1') {
+        names.add(r.competition.trim());
+      }
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [masterCompetitions, historicalRecords]);
+
+  // All-Time Career Wins Leaderboard (Individual + Relay Finals Wins, optional Competition filter)
   const allTimeWinsLeaderboard = useMemo(() => {
     const activeSet = new Set(
       masterRoster
         .filter((a) => a.isActive)
         .map((a) => normalizeSwimmerKey(a.canonicalName))
     );
+
+    const targetCompKey =
+      winsCompetitionFilter !== 'ALL' ? normalizeCompKey(winsCompetitionFilter) : '';
 
     const athleteMap = new Map();
 
@@ -1912,6 +1981,12 @@ export default function App() {
       const roundClean = String(r.round || 'Finals').toLowerCase();
       if (placeClean !== '1') return;
       if (roundClean === 'prelims' || roundClean === 'time trial') return;
+
+      // Filter by specific recurring competition/meet if chosen
+      if (targetCompKey) {
+        const rowCompKey = normalizeCompKey(r.competition);
+        if (rowCompKey !== targetCompKey) return;
+      }
 
       // Filter by selected gender
       const evLower = String(r.eventKey || r.eventLabel || '').toLowerCase();
@@ -1969,7 +2044,13 @@ export default function App() {
           b.indWins - a.indWins ||
           compareByLastName(a.swimmerName, b.swimmerName)
       );
-  }, [historicalRecords, masterRoster, recordBookGender, winsActiveOnly]);
+  }, [
+    historicalRecords,
+    masterRoster,
+    recordBookGender,
+    winsActiveOnly,
+    winsCompetitionFilter,
+  ]);
 
   // Post-Meet Win Summary & Multi-Win Athletes
   const winSummary = useMemo(() => {
@@ -3531,15 +3612,29 @@ export default function App() {
                       ))}
                     </select>
                   ) : (
-                    <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={winsActiveOnly}
-                        onChange={(e) => setWinsActiveOnly(e.target.checked)}
-                        className="rounded text-cyan-600"
-                      />
-                      Active Roster Only
-                    </label>
+                    <>
+                      <select
+                        value={winsCompetitionFilter}
+                        onChange={(e) => setWinsCompetitionFilter(e.target.value)}
+                        className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500 max-w-[240px]"
+                      >
+                        <option value="ALL">All Competitions (Career Total)</option>
+                        {recurringCompetitionsList.map((compName) => (
+                          <option key={compName} value={compName}>
+                            {compName}
+                          </option>
+                        ))}
+                      </select>
+                      <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={winsActiveOnly}
+                          onChange={(e) => setWinsActiveOnly(e.target.checked)}
+                          className="rounded text-cyan-600"
+                        />
+                        Active Roster Only
+                      </label>
+                    </>
                   )}
                 </div>
               </div>
@@ -3641,6 +3736,81 @@ export default function App() {
                       </table>
                     </div>
                   )}
+
+                  {/* Event-Specific Career Wins Leaders (Top 10 below the All-Time Top-10 Times) */}
+                  <div className="pt-4 border-t border-slate-200 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-1.5">
+                          <Award className="w-4 h-4 text-cyan-600" />
+                          Most Career Wins — {toTitleEventLabel(recordBookEventKey)}
+                        </h3>
+                        <p className="text-[11px] text-slate-500">
+                          Top 10 swimmers with the most 1st-place Finals victories in this event.
+                        </p>
+                      </div>
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 cursor-pointer self-start sm:self-auto">
+                        <input
+                          type="checkbox"
+                          checked={eventWinsActiveOnly}
+                          onChange={(e) => setEventWinsActiveOnly(e.target.checked)}
+                          className="rounded text-cyan-600"
+                        />
+                        Active Roster Only
+                      </label>
+                    </div>
+
+                    {recordBookData.eventWinLeaders.length === 0 ? (
+                      <div className="text-center py-6 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                        No 1st-place Finals victories recorded for{' '}
+                        {toTitleEventLabel(recordBookEventKey)}
+                        {eventWinsActiveOnly ? ' among active swimmers' : ''} yet.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px]">
+                            <tr>
+                              <th className="py-2.5 px-4 w-16">Rank</th>
+                              <th className="py-2.5 px-4">Athlete</th>
+                              <th className="py-2.5 px-4 text-center">Event Wins</th>
+                              <th className="py-2.5 px-4">Best Winning Time</th>
+                              <th className="py-2.5 px-4">Victories</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {recordBookData.eventWinLeaders.map((ath, idx) => (
+                              <tr key={ath.swimmerKey} className="hover:bg-slate-50">
+                                <td className="py-2.5 px-4 font-black text-slate-900">
+                                  #{idx + 1}
+                                </td>
+                                <td className="py-2.5 px-4 font-bold text-slate-900">
+                                  <div className="flex items-center gap-1.5">
+                                    <span>{ath.swimmerName}</span>
+                                    {ath.isActive && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                        Active
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-4 text-center font-black text-cyan-800">
+                                  {ath.wins}
+                                </td>
+                                <td className="py-2.5 px-4 font-mono font-bold text-slate-700">
+                                  {ath.bestTime}
+                                </td>
+                                <td className="py-2.5 px-4 text-slate-500">
+                                  {ath.meets.slice(0, 4).join(', ')}
+                                  {ath.meets.length > 4 ? ` +${ath.meets.length - 4} more` : ''}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 </>
               ) : (
                 /* ALL-TIME CAREER WINS LEADERBOARD */
