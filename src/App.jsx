@@ -3027,19 +3027,29 @@ const rRowId = `cl2-lo-${entry.id}`;
       // All-Time Top 10 (includes full-distance, R lead-offs, and S intermediate splits)
       const athleteBestMap = new Map();
       eventPool.forEach((r) => {
-        if (!athleteBestMap.has(r.swimmerKey) || r.seconds < athleteBestMap.get(r.swimmerKey)) {
-          athleteBestMap.set(r.swimmerKey, r.seconds);
+        const currentBest = athleteBestMap.get(r.swimmerKey);
+        if (currentBest === undefined || Number(r.seconds) < currentBest) {
+          athleteBestMap.set(r.swimmerKey, Number(r.seconds));
         }
       });
-      if (!athleteBestMap.has(swKey) || sec < athleteBestMap.get(swKey)) {
-        athleteBestMap.set(swKey, sec);
-      }
-      const sortedTop10 = Array.from(athleteBestMap.entries()).sort((a, b) => a[1] - b[1]);
+
+      const existingBestForSwimmer = athleteBestMap.get(swKey);
+      const effectiveBestForSwimmer =
+        existingBestForSwimmer === undefined ? sec : Math.min(existingBestForSwimmer, sec);
+      athleteBestMap.set(swKey, effectiveBestForSwimmer);
+
+      const sortedTop10 = Array.from(athleteBestMap.entries())
+        .filter(([, bestSec]) => Number.isFinite(bestSec) && bestSec > 0)
+        .sort((a, b) => a[1] - b[1]);
+
       const rankIdx = sortedTop10.findIndex(([k]) => k === swKey);
       if (rankIdx >= 0 && rankIdx < 10) {
+        const isRecordHolder =
+          rankIdx === 0 ||
+          (sortedTop10[0] && sec <= sortedTop10[0][1] + 0.005);
         tags.push({
           type: 'TOP10',
-          label: rankIdx === 0 ? 'School Record (#1)' : `All-Time #${rankIdx + 1}`,
+          label: isRecordHolder ? 'School Record (#1)' : `All-Time #${rankIdx + 1}`,
         });
       }
 
