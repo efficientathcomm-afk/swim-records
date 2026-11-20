@@ -3033,23 +3033,34 @@ const rRowId = `cl2-lo-${entry.id}`;
         }
       });
 
-      const existingBestForSwimmer = athleteBestMap.get(swKey);
+      const previousBestForSwimmer = athleteBestMap.get(swKey);
+      const sortedBefore = Array.from(athleteBestMap.entries())
+        .filter(([, bestSec]) => Number.isFinite(bestSec) && bestSec > 0)
+        .sort((a, b) => a[1] - b[1]);
+      const prevRankIdx = sortedBefore.findIndex(([k]) => k === swKey);
+      const prevRank = prevRankIdx >= 0 && prevRankIdx < 10 ? prevRankIdx + 1 : null;
+
       const effectiveBestForSwimmer =
-        existingBestForSwimmer === undefined ? sec : Math.min(existingBestForSwimmer, sec);
+        previousBestForSwimmer === undefined ? sec : Math.min(previousBestForSwimmer, sec);
       athleteBestMap.set(swKey, effectiveBestForSwimmer);
 
-      const sortedTop10 = Array.from(athleteBestMap.entries())
+      const sortedAfter = Array.from(athleteBestMap.entries())
         .filter(([, bestSec]) => Number.isFinite(bestSec) && bestSec > 0)
         .sort((a, b) => a[1] - b[1]);
 
-      const rankIdx = sortedTop10.findIndex(([k]) => k === swKey);
-      if (rankIdx >= 0 && rankIdx < 10) {
+      const rankIdx = sortedAfter.findIndex(([k]) => k === swKey);
+      const currentRank = rankIdx >= 0 && rankIdx < 10 ? rankIdx + 1 : null;
+      const isNewTop10Rank =
+        currentRank !== null &&
+        (previousBestForSwimmer === undefined || sec < previousBestForSwimmer - 0.005) &&
+        (prevRank === null || currentRank < prevRank || currentRank === 1);
+
+      if (isNewTop10Rank) {
         const isRecordHolder =
-          rankIdx === 0 ||
-          (sortedTop10[0] && sec <= sortedTop10[0][1] + 0.005);
+          currentRank === 1 || (sortedAfter[0] && sec <= sortedAfter[0][1] + 0.005);
         tags.push({
           type: 'TOP10',
-          label: isRecordHolder ? 'School Record (#1)' : `All-Time #${rankIdx + 1}`,
+          label: isRecordHolder ? 'School Record (#1)' : `All-Time #${currentRank}`,
         });
       }
 
@@ -7504,17 +7515,36 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       row.swimmerName,
                                       row.preferredFirst
                                     );
-                                    const tags = benchmarkIndex.evaluateSwim(
-                                      displaySwimmer,
-                                      row.eventLabel,
-                                      row.finalsTime,
-                                      row.classYear
-                                    );
-                                    const hitStds = evaluateStandardsForSwim(
-                                      row.eventLabel,
-                                      row.finalsTime
-                                    );
+                                    const isPrimaryProgramSwim =
+                                      selectedTeam === 'ALL'
+                                        ? String(row.teamName || '')
+                                            .toLowerCase()
+                                            .includes('gettysburg')
+                                        : row.teamCode === selectedTeam;
+                                    const tags = isPrimaryProgramSwim
+                                      ? benchmarkIndex.evaluateSwim(
+                                          displaySwimmer,
+                                          row.eventLabel,
+                                          row.finalsTime,
+                                          row.classYear
+                                        )
+                                      : [];
+                                    const hitStds = isPrimaryProgramSwim
+                                      ? evaluateStandardsForSwim(row.eventLabel, row.finalsTime)
+                                      : [];
                                     const teamHex = getTeamHexColor(row.teamCode, row.teamName);
+                                    const rankNum = allTimeRankBySwimmer.get(swKey);
+                                    const seasonQualStandards = sbSwims.reduce((acc, sRow) => {
+                                      evaluateStandardsForSwim(
+                                        entry.eventLabel,
+                                        sRow.time
+                                      ).forEach((std) => {
+                                        if (!acc.some((existing) => existing.id === std.id)) {
+                                          acc.push(std);
+                                        }
+                                      });
+                                      return acc;
+                                    }, []);
 
                                     return (
                                       <React.Fragment key={row.id}>
@@ -7597,568 +7627,28 @@ const rRowId = `cl2-lo-${entry.id}`;
                                             </div>
                                           </td>
                                           <td className="py-3 px-3">
-                                            <div className="text-slate-700 font-medium">
-                                              {row.teamName}
-                                            </div>
-                                          </td>
-                                          <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
-                                            {row.finalsTime}
-                                          </td>
-                                          <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
-                                            {isFinite(behindSec) ? (
-                                              behindSec < 0.005 ? (
-                                                <span className="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/80">
-                                                  Leader
-                                                </span>
-                                              ) : (
-                                                <span className="text-slate-500">
-                                                  +{behindSec.toFixed(2)}s
-                                                </span>
-                                              )
-                                            ) : (
-                                              <span className="text-slate-400">—</span>
-                                            )}
-                                          </td>
-                                          <td className="py-3 px-3 text-center font-mono text-xs tabular-nums">
-                                            {row.points > 0 ? (
-                                              <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
-                                                {row.points}
-                                              </span>
-                                            ) : (
-                                              <span className="text-slate-300">—</span>
-                                            )}
-                                          </td>
-                                          <td className="py-3 pl-3 pr-5 text-right">
-                                            {hasSplits ? (
-                                              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200/80">
-                                                {row.splits.length} splits
-                                              </span>
-                                            ) : (
-                                              <span className="text-xs text-slate-400">
-                                                No splits
+                                          <div className="flex flex-wrap gap-1">
+                                            {rankNum && (
+                                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">
+                                                {rankNum === 1 ? '#1 Rec' : `#${rankNum} All-Time`}
                                               </span>
                                             )}
-                                          </td>
-                                        </tr>
-
-                                        {/* Expanded Individual Split Breakdown Drawer */}
-                                        {isExpanded && hasSplits && splitAnalysis && (
-                                          <tr className="bg-slate-50/95 border-b border-slate-200">
-                                            <td colSpan={8} className="px-4 sm:px-6 py-4">
-                                              <div className="bg-white rounded-xl border border-cyan-200/90 p-4 sm:p-5 shadow-xs space-y-4">
-                                                <div className="flex flex-wrap items-center justify-between gap-3">
-                                                  <div className="text-xs font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
-                                                    <Timer className="w-4 h-4 text-cyan-600" />
-                                                    <span>
-                                                      Split Breakdown (
-                                                      {splitAnalysis.stats?.interval || 50}y
-                                                      Intervals) — {displaySwimmer}
-                                                    </span>
-                                                  </div>
-
-                                                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                                                    {splitAnalysis.stats && (
-                                                      <>
-                                                        <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-mono">
-                                                          Avg Lap:{' '}
-                                                          <strong>
-                                                            {splitAnalysis.stats.avgLap}
-                                                          </strong>
-                                                        </span>
-                                                        {splitAnalysis.stats.halfDiff !== null && (
-                                                          <span
-                                                            className={`px-2.5 py-1 rounded-md font-mono font-semibold ${
-                                                              splitAnalysis.stats.halfDiff < 0
-                                                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                                                : 'bg-amber-50 text-amber-800 border border-amber-200'
-                                                            }`}
-                                                          >
-                                                            {splitAnalysis.stats.halfDiff < 0
-                                                              ? `Negative Split (${splitAnalysis.stats.halfDiff.toFixed(
-                                                                  2
-                                                                )}s)`
-                                                              : `2nd Half +${splitAnalysis.stats.halfDiff.toFixed(
-                                                                  2
-                                                                )}s`}
-                                                          </span>
-                                                        )}
-                                                      </>
-                                                    )}
-                                                    {(row.heat || row.lane) && (
-                                                      <span className="text-slate-500 font-mono">
-                                                        {row.heat ? `Heat ${row.heat}` : ''}{' '}
-                                                        {row.lane ? `• Lane ${row.lane}` : ''}
-                                                      </span>
-                                                    )}
-                                                  </div>
-                                                </div>
-
-                                                {/* Pacing Bar Visualization */}
-                                                {splitAnalysis.stats &&
-                                                  splitAnalysis.rows.length > 1 && (
-                                                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-200/70">
-                                                      <div className="text-[11px] font-semibold text-slate-500 mb-2 flex items-center justify-between">
-                                                        <span className="flex items-center gap-1">
-                                                          <TrendingUp className="w-3.5 h-3.5 text-cyan-600" />
-                                                          Lap Pacing Comparison (Shorter bar =
-                                                          faster lap)
-                                                        </span>
-                                                        <span className="flex items-center gap-3">
-                                                          <span className="inline-flex items-center gap-1 text-emerald-700">
-                                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                                                            Fastest
-                                                          </span>
-                                                          <span className="inline-flex items-center gap-1 text-amber-700">
-                                                            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                                                            Slowest
-                                                          </span>
-                                                        </span>
-                                                      </div>
-                                                      <div className="flex items-end gap-1.5 h-16 pt-2">
-                                                        {splitAnalysis.rows.map((s) => {
-                                                          const { minLap, maxLap } =
-                                                            splitAnalysis.stats;
-                                                          const range = Math.max(
-                                                            maxLap - minLap,
-                                                            0.5
-                                                          );
-                                                          const norm = isFinite(s.lapSec)
-                                                            ? 35 +
-                                                              ((s.lapSec - minLap) / range) * 65
-                                                            : 50;
-                                                          return (
-                                                            <div
-                                                              key={s.index}
-                                                              className="flex-1 flex flex-col items-center gap-1 min-w-[20px]"
-                                                              title={`${s.distanceLabel}: Lap ${s.lap} (Cum ${s.cumulative})`}
-                                                            >
-                                                              <div className="w-full flex items-end justify-center h-11">
-                                                                <div
-                                                                  style={{
-                                                                    height: `${Math.round(norm)}%`,
-                                                                  }}
-                                                                  className={`w-full max-w-[28px] rounded-t transition-all ${
-                                                                    s.isFastest
-                                                                      ? 'bg-emerald-500'
-                                                                      : s.isSlowest
-                                                                      ? 'bg-amber-400'
-                                                                      : 'bg-cyan-500/80'
-                                                                  }`}
-                                                                />
-                                                              </div>
-                                                              <span className="text-[9px] font-mono text-slate-500">
-                                                                {s.distance}
-                                                              </span>
-                                                            </div>
-                                                          );
-                                                        })}
-                                                      </div>
-                                                    </div>
-                                                  )}
-
-                                                {/* Structured Split Table */}
-                                                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                                                  <table className="w-full text-left border-collapse text-xs">
-                                                    <thead>
-                                                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
-                                                        <th className="py-2 px-3">Distance</th>
-                                                        <th className="py-2 px-3 text-right">
-                                                          Cumulative Time
-                                                        </th>
-                                                        <th className="py-2 px-3 text-right">
-                                                          {splitAnalysis.stats?.interval || 50}y Lap
-                                                          Split
-                                                        </th>
-                                                        <th className="py-2 px-3 text-right">
-                                                          Pace Note
-                                                        </th>
-                                                      </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-100 font-mono tabular-nums">
-                                                      {splitAnalysis.rows.map((s) => (
-                                                        <tr
-                                                          key={s.index}
-                                                          className={
-                                                            s.isFastest
-                                                              ? 'bg-emerald-50/40'
-                                                              : s.isSlowest
-                                                              ? 'bg-amber-50/30'
-                                                              : 'hover:bg-slate-50/80'
-                                                          }
-                                                        >
-                                                          <td className="py-2 px-3 font-sans font-semibold text-slate-700">
-                                                            {s.distanceLabel}
-                                                          </td>
-                                                          <td className="py-2 px-3 text-right font-bold text-slate-900">
-                                                            {s.cumulative}
-                                                          </td>
-                                                          <td className="py-2 px-3 text-right font-bold text-cyan-700">
-                                                            {s.lap}
-                                                          </td>
-                                                          <td className="py-2 px-3 text-right font-sans">
-                                                            {s.isFastest ? (
-                                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
-                                                                <Zap className="w-3 h-3" />
-                                                                Fastest Lap
-                                                              </span>
-                                                            ) : s.isSlowest ? (
-                                                              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800">
-                                                                Slowest Lap
-                                                              </span>
-                                                            ) : splitAnalysis.stats &&
-                                                              isFinite(s.lapSec) ? (
-                                                              <span className="text-[11px] text-slate-400">
-                                                                {s.lapSec -
-                                                                  splitAnalysis.stats.avgLapSec >=
-                                                                0
-                                                                  ? `+${(
-                                                                      s.lapSec -
-                                                                      splitAnalysis.stats.avgLapSec
-                                                                    ).toFixed(2)}s vs avg`
-                                                                  : `${(
-                                                                      s.lapSec -
-                                                                      splitAnalysis.stats.avgLapSec
-                                                                    ).toFixed(2)}s vs avg`}
-                                                              </span>
-                                                            ) : (
-                                                              '—'
-                                                            )}
-                                                          </td>
-                                                        </tr>
-                                                      ))}
-                                                    </tbody>
-                                                  </table>
-                                                </div>
-                                              </div>
-                                            </td>
-                                          </tr>
-                                        )}
-                                      </React.Fragment>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-
-                {/* TAB 2: RELAY RESULTS (GROUPED BY EVENT CARDS) */}
-                {meetSubTab === 'relays' && (
-                  <div className="space-y-6">
-                    {groupedRelayEvents.length === 0 ? (
-                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm py-12 text-center text-slate-500 text-sm">
-                        No relay results match the current filter criteria.
-                      </div>
-                    ) : (
-                      groupedRelayEvents.map((eventGroup) => {
-                        const expandableRelays = eventGroup.relays.filter(
-                          (r) => r.legs.length > 0 || r.splits.length > 0
-                        );
-                        const allExpanded =
-                          expandableRelays.length > 0 &&
-                          expandableRelays.every((r) => expandedRows.has(r.id));
-
-                        return (
-                          <div
-                            key={eventGroup.key}
-                            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-                          >
-                            <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
-                                  Event #{eventGroup.eventNumber}
-                                </span>
-                                <div>
-                                  <h3 className="text-base font-bold tracking-tight">
-                                    {eventGroup.eventLabel}
-                                  </h3>
-                                  <p className="text-xs text-slate-400">
-                                    {eventGroup.relays.length}{' '}
-                                    {eventGroup.relays.length === 1
-                                      ? 'Relay Entry'
-                                      : 'Relay Entries'}{' '}
-                                    • {eventGroup.course}
-                                  </p>
-                                </div>
-                              </div>
-
-                              {expandableRelays.length > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => toggleAllRelaysInEvent(eventGroup.relays)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition cursor-pointer"
-                                >
-                                  {allExpanded ? (
-                                    <>
-                                      <ChevronDown className="w-3.5 h-3.5" />
-                                      <span>Collapse All Splits</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <ChevronRight className="w-3.5 h-3.5" />
-                                      <span>Expand All Splits</span>
-                                    </>
-                                  )}
-                                </button>
-                              )}
-                            </div>
-
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-left border-collapse">
-                                <thead>
-                                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600 uppercase tracking-wider">
-                                    <th className="py-3 pl-4 pr-2 w-10"></th>
-                                    <th
-                                      onClick={() => handleSort('place')}
-                                      className="py-3 px-3 w-20 text-center cursor-pointer hover:text-slate-900 select-none"
-                                    >
-                                      <div className="flex items-center justify-center gap-1">
-                                        <span>Place</span>
-                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                      </div>
-                                    </th>
-                                    <th
-                                      onClick={() => handleSort('swimmerName')}
-                                      className="py-3 px-3 cursor-pointer hover:text-slate-900 select-none"
-                                    >
-                                      <div className="flex items-center gap-1">
-                                        <span>Relay Squad</span>
-                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                      </div>
-                                    </th>
-                                    <th className="py-3 px-3">Swimmers (Legs 1–4)</th>
-                                    <th
-                                      onClick={() => handleSort('time')}
-                                      className="py-3 px-3 text-right cursor-pointer hover:text-slate-900 select-none"
-                                    >
-                                      <div className="flex items-center justify-end gap-1">
-                                        <span>Finals Time</span>
-                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                      </div>
-                                    </th>
-                                    <th className="py-3 px-3 text-right w-28">Behind</th>
-                                    <th className="py-3 pl-3 pr-5 text-center w-16">Pts</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 text-sm">
-                                  {eventGroup.relays.map((relay) => {
-                                    const hasDetails =
-                                      relay.legs.length > 0 || relay.splits.length > 0;
-                                    const isExpanded = expandedRows.has(relay.id);
-                                    const legBreakdown = isExpanded
-                                      ? calculateRelayLegBreakdown(relay)
-                                      : [];
-                                    const behindSec =
-                                      isFinite(relay.timeSeconds) &&
-                                      isFinite(eventGroup.fastestTimeSec)
-                                        ? relay.timeSeconds - eventGroup.fastestTimeSec
-                                        : Infinity;
-
-                                    return (
-                                      <React.Fragment key={relay.id}>
-                                        <tr
-                                          onClick={() => hasDetails && toggleRow(relay.id)}
-                                          className={`transition ${
-                                            hasDetails
-                                              ? 'cursor-pointer hover:bg-cyan-50/40'
-                                              : 'hover:bg-slate-50/70'
-                                          } ${isExpanded ? 'bg-cyan-50/50' : ''}`}
-                                        >
-                                          <td className="py-3 pl-4 pr-2 text-slate-400">
-                                            {hasDetails && (
-                                              <button
-                                                type="button"
-                                                aria-label="Toggle relay legs"
-                                                className="p-1 rounded hover:bg-slate-200/60 text-cyan-600"
-                                              >
-                                                {isExpanded ? (
-                                                  <ChevronDown className="w-4 h-4" />
-                                                ) : (
-                                                  <ChevronRight className="w-4 h-4" />
-                                                )}
-                                              </button>
-                                            )}
-                                          </td>
-                                          <td className="py-3 px-3 text-center">
-                                            {relay.place ? (
+                                            {seasonQualStandards.map((std) => (
                                               <span
-                                                className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
-                                                  relay.place === 1
-                                                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                                                    : relay.place === 2
-                                                    ? 'bg-slate-200 text-slate-800 border border-slate-300'
-                                                    : relay.place === 3
-                                                    ? 'bg-orange-100 text-orange-800 border border-orange-300'
-                                                    : 'bg-slate-100 text-slate-600'
-                                                }`}
+                                                key={std.id}
+                                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${getStandardBadgeStyle(
+                                                  std.label
+                                                )}`}
                                               >
-                                                {relay.place}
+                                                {std.label} (SB)
                                               </span>
-                                            ) : (
-                                              <span className="text-slate-400 text-xs">—</span>
+                                            ))}
+                                            {!rankNum && seasonQualStandards.length === 0 && (
+                                              <span className="text-slate-400 text-[11px]">—</span>
                                             )}
-                                          </td>
-                                          <td className="py-3 px-3">
-                                            <div className="font-semibold text-slate-900">
-                                              {relay.relayTitle}
-                                            </div>
-                                            {(relay.heat || relay.lane) && (
-                                              <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                                                {relay.heat ? `Heat ${relay.heat}` : ''}
-                                                {relay.heat && relay.lane ? ' • ' : ''}
-                                                {relay.lane ? `Lane ${relay.lane}` : ''}
-                                              </div>
-                                            )}
-                                          </td>
-                                          <td className="py-3 px-3">
-                                            <div className="text-xs text-slate-600 line-clamp-2">
-                                              {relay.legs.length > 0
-                                                ? relay.legs
-                                                    .map(
-                                                      (l) =>
-                                                        `${l.legOrder}) ${formatSwimmerDisplay(
-                                                          l.swimmerName,
-                                                          l.preferredFirst
-                                                        )}`
-                                                    )
-                                                    .join(' • ')
-                                                : 'No leg roster recorded'}
-                                            </div>
-                                          </td>
-                                          <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
-                                            {relay.finalsTime}
-                                          </td>
-                                          <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
-                                            {isFinite(behindSec) ? (
-                                              behindSec < 0.005 ? (
-                                                <span className="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/80">
-                                                  Leader
-                                                </span>
-                                              ) : (
-                                                <span className="text-slate-500">
-                                                  +{behindSec.toFixed(2)}s
-                                                </span>
-                                              )
-                                            ) : (
-                                              <span className="text-slate-400">—</span>
-                                            )}
-                                          </td>
-                                          <td className="py-3 pl-3 pr-5 text-center font-mono text-xs tabular-nums">
-                                            {relay.points > 0 ? (
-                                              <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
-                                                {relay.points}
-                                              </span>
-                                            ) : (
-                                              <span className="text-slate-300">—</span>
-                                            )}
-                                          </td>
-                                        </tr>
-
-                                        {/* Expanded Relay Legs & Splits */}
-                                        {isExpanded && hasDetails && (
-                                          <tr className="bg-slate-50/95 border-b border-slate-200">
-                                            <td colSpan={7} className="px-4 sm:px-6 py-4">
-                                              <div className="bg-white rounded-xl border border-cyan-200/90 p-4 sm:p-5 shadow-xs space-y-3">
-                                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                                  <div className="text-xs font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
-                                                    <Users className="w-4 h-4 text-cyan-600" />
-                                                    <span>
-                                                      Relay Leg Order & Splits — {relay.relayTitle}
-                                                    </span>
-                                                  </div>
-                                                  {(relay.heat || relay.lane) && (
-                                                    <div className="text-xs text-slate-500 font-mono">
-                                                      {relay.heat ? `Heat ${relay.heat}` : ''}{' '}
-                                                      {relay.lane ? `• Lane ${relay.lane}` : ''}
-                                                    </div>
-                                                  )}
-                                                </div>
-
-                                                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                                                  <table className="w-full text-left border-collapse text-xs">
-                                                    <thead>
-                                                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
-                                                        <th className="py-2.5 px-3 w-16">Leg</th>
-                                                        <th className="py-2.5 px-3">Swimmer</th>
-                                                        <th className="py-2.5 px-3 w-20">Class</th>
-                                                        <th className="py-2.5 px-3">
-                                                          Individual {relay.splitInterval || 50}y
-                                                          Sub-Splits
-                                                        </th>
-                                                        <th className="py-2.5 px-3 text-right">
-                                                          Leg Time
-                                                        </th>
-                                                        <th className="py-2.5 px-3 text-right">
-                                                          Cumulative Relay
-                                                        </th>
-                                                      </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-100">
-                                                      {legBreakdown.map((leg) => (
-                                                        <tr
-                                                          key={`${relay.id}-leg-${leg.legOrder}`}
-                                                          className="hover:bg-slate-50/80"
-                                                        >
-                                                          <td className="py-2.5 px-3">
-                                                            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded bg-cyan-50 text-cyan-800 border border-cyan-200 font-bold">
-                                                              Leg {leg.legOrder}
-                                                            </span>
-                                                          </td>
-                                                          <td className="py-2.5 px-3 font-semibold text-slate-900">
-                                                            {formatSwimmerDisplay(
-                                                              leg.swimmerName,
-                                                              leg.preferredFirst
-                                                            )}
-                                                          </td>
-                                                          <td className="py-2.5 px-3 text-slate-600">
-                                                            {leg.classYear ? (
-                                                              <span className="px-1.5 py-0.5 rounded bg-slate-100 font-medium">
-                                                                {leg.classYear}
-                                                              </span>
-                                                            ) : (
-                                                              '—'
-                                                            )}
-                                                          </td>
-                                                          <td className="py-2.5 px-3 font-mono tabular-nums">
-                                                            {leg.subSplits.length > 0 ? (
-                                                              <div className="flex flex-wrap items-center gap-1.5">
-                                                                {leg.subSplits.map((sub) => (
-                                                                  <span
-                                                                    key={sub.subIndex}
-                                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-700"
-                                                                  >
-                                                                    <span className="text-[10px] text-slate-400">
-                                                                      {sub.subDistance}:
-                                                                    </span>
-                                                                    <span className="font-semibold">
-                                                                      {sub.lap}
-                                                                    </span>
-                                                                  </span>
-                                                                ))}
-                                                              </div>
-                                                            ) : (
-                                                              <span className="text-slate-400">—</span>
-                                                            )}
-                                                          </td>
-                                                          <td className="py-2.5 px-3 text-right font-mono font-bold text-cyan-700 tabular-nums">
-                                                            {leg.legTotalTime}
-                                                          </td>
-                                                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
-                                                            {leg.endCumulativeTime}
-                                                          </td>
-                                                        </tr>
-                                                      ))}
-                                                    </tbody>
-                                                  </table>
-                                                </div>
-                                              </div>
-                                            </td>
-                                          </tr>
-                                        )}
+                                          </div>
+                                        </td>
+                                      </tr>
                                       </React.Fragment>
                                     );
                                   })}
