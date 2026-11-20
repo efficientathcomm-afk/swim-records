@@ -1803,10 +1803,10 @@ export default function App() {
             meetClassOverrides[swKey] !== undefined
               ? meetClassOverrides[swKey]
               : normalizeClass(leadOffLeg.classYear);
-          const rRowId = `cl2-lo-${entry.id}`;
+const rRowId = `cl2-lo-${entry.id}`;
           const rDate = resolveRowDate(rRowId, entry.eventNumber, defaultMeetDate);
           const hash = `${swKey}|${finalEvKey}|${splitSec.toFixed(2)}|${rDate}|Finals|R`;
-          const isDup = existingHashes.has(hash);
+          const isDuplicate = existingHashes.has(hash);
           rows.push({
             id: rRowId,
             eventNumber: entry.eventNumber,
@@ -1827,7 +1827,7 @@ export default function App() {
             isOfficial: true,
             splitContext: `Lead-Off (${entry.eventLabel})`,
             source: 'cl2_leadoff',
-            isDuplicate: isDup,
+            isDuplicate,
             selected: !isDuplicate && !excludedMeetCommitIds.has(rRowId),
           });
         }
