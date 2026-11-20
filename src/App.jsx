@@ -26,7 +26,16 @@ import {
   Building2,
   UserPlus,
   Cloud,
-  CloudOff
+  CloudOff,
+  FileText,
+  MapPin,
+  X,
+  Play,
+  Layers,
+  TrendingUp,
+  Zap,
+  ArrowUpDown,
+  ChevronRight
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -60,33 +69,48 @@ const db = getFirestore(firebaseApp);
 // ============================================================================
 // SAMPLE SDIF / CL2 DATA (Gettysburg v Carnegie Mellon - 07Nov2026)
 // ============================================================================
-const SAMPLE_CL2_DATA = `A01V3      01                                       HY-TEK, Ltd    MM8 8.0Gq   20261108     1104431400
-B11Gettysburg v Carnegie Mellon                    Gettysburg PA                      2026110720261107     10410Y     25107105514
-C11AMGC   Gettysburg College                        Gettysburg                          Gettysburg          PA17325     USA                                   UN57
-C11AMCMU  Carnegie Mellon University                Carnegie Mellon                     Pittsburgh          PA15213     USA                                   UN54
-D01AMGC   Berry, Ava                   5334901598438FAva            0815200719F 1F  100010536368 10:49.00Y  10:43.55Y  10:43.55Y   1  1   9.00                      12        N
-G01AMGC   Berry, Ava                  101F1 10001   30.40C   1:02.93C   1:35.75C   2:08.53C   2:41.22C   3:13.86C   3:46.34C   4:18.88C   4:51.23C   5:23.41C   16
-G01AMGC   Berry, Ava                  101F1 10001 5:55.58C   6:27.71C   6:59.89C   7:32.04C   8:04.22C   8:36.43C   9:08.45C   9:40.42C  10:12.28C  10:43.55C   84
-D01AMCMU  Mrosko, Maria                4887022192214BMaria          0210200620F 1F  100010536368 10:45.20Y  10:46.12Y  10:46.12Y   2  1   4.00                      14        N
-D01AMGC   Miller, Kathleen             5112098433124AKate           0422200818F 1F  100010536368 10:55.10Y  10:51.80Y  10:51.80Y   3  1   3.00                      16        N
-D01AMGC   McKenzie, Delanie            5123409811234CLanie          0614200620F 1F   10040536368    59.80Y     58.42Y     58.42Y   1  1   9.00                      22        N
-G01AMGC   McKenzie, Delanie           104F1  1004   28.15C     58.42C                                                                                                  28
-D01AMCMU  Chen, Sarah                  51109283110B49Sarah          0901200719F 1F   10040536368    59.10Y     58.95Y     58.95Y   2  1   4.00                      30
-D01AMCMU  Chen, Zoe                    5199018299124DZoe            1119200620F 1F   10030536368  1:07.80Y   1:07.34Y   1:07.34Y   1  1   9.00                      42
-D01AMGC   Pyott, Olivia                5188234188124EOlivia         0303200521F 1F   10030536368  1:08.10Y   1:07.91Y   1:07.91Y   2  1   4.00                      44
-D01AMGC   Schundler, Charles           5177341277124FJackson        0725200620M 1M   20020536368  1:54.20Y   1:52.14Y   1:52.14Y   1  1   9.00                      52
-D01AMCMU  Morford, Brayden             51664523833B48Brayden        0112200521M 1M   20020536368  1:53.10Y   1:52.88Y   1:52.88Y   2  1   4.00                      54
-E01AMCMU  A 4001F  40050536368  3:59.00Y   3:57.64Y   3:57.64Y   1  1  11.00                                                                                           60
-F01AMCMU  AChen, Sarah                 51109283110B49Sarah          0901200719F  1             51109283110B49Sarah                                                       62
-F01AMCMU  AChen, Zoe                   5199018299124DZoe            1119200620F  2             5199018299124DZoe                                                         64
-F01AMCMU  AGil, Audrey                 515512340DA44FAudrey         0820200719F  3             515512340DA44FAudrey                                                      66
-F01AMCMU  AZaniolo, Anna               51813519EEBF40Anna           0506200521F  4             51813519EEBF40Anna                                                        68
-E01AMGC   A 4001F  40050536368  4:00.50Y   3:59.10Y   3:59.10Y   2  1   4.00                                                                                           70
-F01AMGC   AMcKenzie, Delanie           5123409811234CLanie          0614200620F  1             5123409811234CLanie                                                       72
-F01AMGC   APyott, Olivia               5188234188124EOlivia         0303200521F  2             5188234188124EOlivia                                                      74
-F01AMGC   ABerry, Ava                  5334901598438FAva            0815200719F  3             5334901598438FAva                                                         76
-F01AMGC   AMiller, Kathleen            5112098433124AKate           0422200818F  4             5112098433124AKate                                                        78
-Z01                                                                                                                                                                   99`;
+const SAMPLE_CL2_DATA = `A03V3      02Meet Results                  Hy-Tek, Ltd         WMM 8.0Gh Hy-Tek, Ltd         866-456-511111072026                                    MM40    N52
+B13        Gettysburg v Carnegie Mellon                                              Gettysburg          PA17325     USA 1107202611072026   0        Y 000   N05
+C13AM      AMCMU Carnegie Mellon University                    5000 Forbes Ave                                                 PA          USA               N03
+D03AM  SO  Chen, Andrew                CA5865516725A   1030200620MM  501 14 UNOV11072026                              22.44Y     1 8     7       7  01      NN09
+D3CA58655167254EAndrew                                                                                                                                       N61
+D03AM  SO  Chen, Andrew                CA5865516725A   1030200620MM 1001 16 UNOV11072026                              48.76Y     1 2     4  2.   4  0100    NN49
+G03AM          Chen, Andrew                CA58655167251 2  50C   23.70   48.76                                                                F             N05
+D03AM  FR  Chen, Sarah Y               CA09F5D4110BA   1226200718FF 1002  7 UNOV11072026                              58.53Y     1 4     1  9.   1  0200    NN39
+D3CA09F5D4110B49Sarah                                                                                                                                        N21
+G03AM          Chen, Sarah Y               CA09F5D4110B1 2  50C   28.81   58.53                                                                F             N05
+D03AM  FR  Chen, Sarah Y               CA09F5D4110BA   1226200718FF 2002 17 UNOV11072026                            2:08.77Y     1 4     1  9.   1  0200    NN69
+G03AM          Chen, Sarah Y               CA09F5D4110B1 4  50C   30.37 1:03.16 1:35.86 2:08.77                                                F             N76
+E03AM      AAMCMU   F 4007  1 UNOV  011072026                            3:57.64Y     1 4     1 11.                                            1N   0500X    N64
+F03AM  FR      AMCMU AChen, Sarah Y               CA09F5D4110B   1226200718F  1             CA09F5D4110B49Sarah                                              N99
+G03AM          Chen, Sarah Y               CA09F5D4110B1 8  50C   28.53   58.96                                                                F             N15
+F03AM  FR      AMCMU AChen, Ziyu                  E9C81A13B32C   0718200818F  2             E9C81A13B32C49Zoe                                                N88
+G03AM          Chen, Ziyu                  E9C81A13B32C1 8  50C 1:30.15 2:05.95                                                                F             N05
+F03AM  SO      AMCMU AGil, Audrey L               6055FC4F0DA4   0911200719F  3             6055FC4F0DA44FAudrey                                             N60
+G03AM          Gil, Audrey L               6055FC4F0DA41 8  50C 2:31.92 3:03.11                                                                F             N55
+F03AM  SR      AMCMU AZaniolo, Anna G             51813519EEBF   0506200521F  4             51813519EEBF40Anna                                               N20
+G03AM          Zaniolo, Anna G             51813519EEBF1 8  50C 3:28.78 3:57.64                                                                F             N46
+C13MA      MAGETTGettysburg College            Gettysburg      Greg Brown            300 N Washington St   Gettysburg          PA17325     USA               N93
+D03MA  SR  Berry, Ava                              A   1230200418FF10001  3 UNOV11072026                           10:43.55Y     1 5     1  9.   1  0100    NN57
+D3                                                                                                                                                           N67
+G03MA          Berry, Ava                              120  50C   28.93 1:00.36 1:32.36 2:04.44 2:36.83 3:09.20 3:41.73 4:14.28 4:46.73 5:19.09F             N98
+G03MA          Berry, Ava                              220  50C 5:51.62 6:24.32 6:57.17 7:30.00 8:02.61 8:35.36 9:07.89 9:40.4610:12.4610:43.55F             N49
+D03MA  SR  McKenzie, Delanie                       A   0304200518FF 1002  7 UNOV11072026                              58.90Y     1 5     2  4.   2  0200    NN59
+D3              Lanie                                                                                                                                        N39
+G03MA          McKenzie, Delanie                       1 2  50C   28.89   58.90                                                                F             N35
+D03MA  SO  Winston, Toby                           A   0615200718MM 1001 16 UNOV11072026                              46.57Y     1 5     1  9.   1  0100    NN88
+D3                                                                                                                                                           N67
+G03MA          Winston, Toby                           1 2  50C   22.55   46.57                                                                F             N34
+E03MA      AMAGETT  F 4007  1 UNOV  011072026                            3:59.68Y     1 5     2  4.                                            2N   0500X    N84
+F03MA  SR      MAGETTAMcKenzie, Delanie                          0304200518F  1                           Lanie                                              N58
+G03MA          McKenzie, Delanie                       1 8  50C   28.82   58.96                                                                F             N35
+F03MA          MAGETTADolan, Reilly                                      FRF  2                                                                              N54
+G03MA          Dolan, Reilly                           1 8  50C 1:30.54 2:06.07                                                                F             N44
+F03MA  SO      MAGETTAPuckett, Morgan                            1118200717F  3                                                                              N46
+G03MA          Puckett, Morgan                         1 8  50C 2:33.19 3:05.97                                                                F             N45
+F03MA  SR      MAGETTAReck, Delaney                              0401200518F  4                                                                              N45
+G03MA          Reck, Delaney                           1 8  50C 3:31.16 3:59.68                                                                F             N44
+Z03Meet Res02Successful Build on 11/7/2026   1  1   2   2   165    85   29   116   266                                                                       N59`;
 
 const SAMPLE_GOOGLE_SHEET_CSV = `Name\tClass\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds
 Ava Berry\tFr.\t1000 Free\t10\t46.20\t2026-10-24\tGettysburg PA\tGettysburg Invitational\t1\t10:46.20\tWomen 1000 Freestyle\t646.20
@@ -104,8 +128,23 @@ const STROKE_MAP = {
   '3': 'Breaststroke',
   '4': 'Butterfly',
   '5': 'Individual Medley',
-  '6': 'Freestyle',
-  '7': 'Medley',
+  '6': 'Freestyle Relay',
+  '7': 'Medley Relay',
+};
+
+const COURSE_MAP = {
+  Y: 'SCY (Yards)',
+  S: 'SCM (Short Course Meters)',
+  L: 'LCM (Long Course Meters)',
+  '1': 'SCM',
+  '2': 'SCY',
+  '3': 'LCM',
+};
+
+const GENDER_MAP = {
+  M: 'Men',
+  F: 'Women',
+  X: 'Mixed',
 };
 
 const CANONICAL_EVENTS = [
@@ -205,7 +244,30 @@ function normalizeDateIso(raw) {
 }
 
 function sliceCol(line, start1Based, end1Based) {
-  return (line || '').slice(start1Based - 1, end1Based).trim();
+  if (!line || line.length < start1Based) return '';
+  return line.slice(start1Based - 1, end1Based).trim();
+}
+
+function formatDateSDIF(raw) {
+  if (!raw || raw.length !== 8) return raw || '';
+  const mm = parseInt(raw.slice(0, 2), 10);
+  const dd = parseInt(raw.slice(2, 4), 10);
+  const yyyy = raw.slice(4, 8);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+    return `${months[mm - 1]} ${dd}, ${yyyy}`;
+  }
+  return raw;
+}
+
+function formatSwimmerDisplay(rawName, preferredFirst) {
+  if (!rawName) return 'Unknown Swimmer';
+  const parts = rawName.split(',');
+  if (parts.length < 2) return preferredFirst ? `${preferredFirst} ${rawName}` : rawName;
+  const lastName = parts[0].trim();
+  const firstPart = parts[1].trim();
+  const displayFirst = preferredFirst && preferredFirst.trim() ? preferredFirst.trim() : firstPart;
+  return `${displayFirst} ${lastName}`;
 }
 
 function formatSdifDate(raw) {
@@ -356,8 +418,8 @@ function getCurrentSeasonStart() {
 }
 
 // Extract all legal flat-start opening splits (e.g., 50 Back off 100 Back, 100 Free off 200 Free, 1000 Free off 1650 Free)
-function extractLegalOpeningSplits(ev, splits) {
-  if (!ev || ev.type !== 'Individual' || !Array.isArray(splits) || splits.length === 0) return [];
+function extractLegalOpeningSplits(totalDistance, gender, stroke, eventLabel, splits, splitInterval = 50, splitType = 'C') {
+  if (!Array.isArray(splits) || splits.length === 0) return [];
   const validByStroke = {
     Freestyle: [50, 100, 200, 500, 1000],
     Backstroke: [50, 100],
@@ -365,223 +427,533 @@ function extractLegalOpeningSplits(ev, splits) {
     Butterfly: [50, 100],
     'Individual Medley': [],
   };
-  const targets = validByStroke[ev.stroke] || [];
+  const targets = validByStroke[stroke] || [];
   if (targets.length === 0) return [];
 
-  // Infer split interval (50y standard in SCY/SCM/LCM; fallback to 25y if split count indicates 25s)
-  const interval =
-    ev.distance > 0 && splits.length > 0 && Math.round(ev.distance / splits.length) === 25
-      ? 25
-      : 50;
-
+  const interval = splitInterval && splitInterval > 0 ? splitInterval : 50;
+  let runningSec = 0;
   const legal = [];
-  splits.forEach((sp) => {
-    const distAtSplit = sp.splitNumber * interval;
-    if (distAtSplit < ev.distance && targets.includes(distAtSplit) && sp.cumulative) {
-      const sec = timeToSeconds(sp.cumulative);
-      if (sec !== null && sec > 0) {
-        legal.push({
-          splitDistance: distAtSplit,
-          eventLabel: `${ev.gender} ${distAtSplit} ${ev.stroke}`,
-          eventKey: normalizeEventKey(`${ev.gender} ${distAtSplit} ${ev.stroke}`),
-          time: sp.cumulative,
-          seconds: sec,
-          context: `${distAtSplit} Split in ${ev.eventLabel}`,
-        });
-      }
+
+  splits.forEach((rawVal, idx) => {
+    const valStr = typeof rawVal === 'object' ? rawVal.cumulative : rawVal;
+    const valSec = timeToSeconds(valStr);
+    if (valSec === null) return;
+    if (splitType === 'I') {
+      runningSec += valSec;
+    } else {
+      runningSec = valSec;
+    }
+    const distAtSplit = (idx + 1) * interval;
+    if (distAtSplit < totalDistance && targets.includes(distAtSplit) && runningSec > 0) {
+      const cumFormatted = splitType === 'I' ? secondsToTime(runningSec) : String(valStr).trim();
+      legal.push({
+        splitDistance: distAtSplit,
+        eventLabel: `${gender} ${distAtSplit} ${stroke}`,
+        eventKey: normalizeEventKey(`${gender} ${distAtSplit} ${stroke}`),
+        time: cumFormatted,
+        seconds: runningSec,
+        context: `${distAtSplit} Split in ${eventLabel}`,
+      });
     }
   });
   return legal;
 }
 
 // ============================================================================
-// SDIF / CL2 FILE PARSER
+// CORE FIXED-WIDTH HY-TEK SDIF (.CL2 / .SD3) PARSER (EXACT ORIGINAL ENGINE)
 // ============================================================================
-function parseSdifCl2(rawText) {
-  const lines = rawText.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  const meet = {
-    name: 'Swim Meet',
-    location: '',
+function parseSDIFContent(content) {
+  const lines = content.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) {
+    throw new Error('The uploaded file is empty.');
+  }
+
+  const validPrefixes = ['A0', 'B1', 'B2', 'C1', 'C2', 'D0', 'D1', 'D2', 'D3', 'E0', 'F0', 'G0', 'Z0'];
+  const hasValidHeader = lines.some((l) => validPrefixes.includes(l.slice(0, 2)));
+  if (!hasValidHeader) {
+    throw new Error(
+      'Invalid file format. No standard SDIF/CL2 record identifiers (A0, B1, C1, D0, E0) were found.'
+    );
+  }
+
+  const meetInfo = {
+    name: 'Swim Meet Results',
+    city: '',
+    state: '',
     startDate: '',
-    endDate: '',
-    course: 'SCY',
-  };
-  const teams = {};
-  const eventsMap = {};
-  let lastIndividualEntry = null;
-  let lastRelayEntry = null;
-
-  const ensureEvent = (genderCode, distance, strokeCode, isRelay) => {
-    const gender = genderCode === 'F' ? 'Women' : genderCode === 'M' ? 'Men' : 'Mixed';
-    const stroke = STROKE_MAP[strokeCode] || 'Freestyle';
-    const key = `${gender}-${distance}-${stroke}-${isRelay ? 'R' : 'I'}`;
-    if (!eventsMap[key]) {
-      eventsMap[key] = {
-        key,
-        gender,
-        distance: parseInt(distance, 10) || 0,
-        stroke,
-        type: isRelay ? 'Relay' : 'Individual',
-        eventLabel: `${gender} ${distance} ${stroke}${isRelay ? ' Relay' : ''}`,
-        entries: [],
-      };
-    }
-    return eventsMap[key];
+    isoDate: '',
+    software: '',
   };
 
-  lines.forEach((line) => {
-    const rec = line.slice(0, 2);
+  const teamsMap = new Map();
+  const individualResults = [];
+  const relayResults = [];
 
-    if (rec === 'B1') {
-      meet.name = sliceCol(line, 12, 41) || 'Swim Meet';
-      meet.location = sliceCol(line, 42, 71) || '';
-      meet.startDate = formatSdifDate(sliceCol(line, 72, 79));
-      meet.endDate = formatSdifDate(sliceCol(line, 80, 87));
-      const courseCode = sliceCol(line, 98, 98);
-      meet.course = courseCode === 'L' ? 'LCM' : courseCode === 'S' ? 'SCM' : 'SCY';
-    } else if (rec === 'C1') {
-      const code = sliceCol(line, 4, 9);
-      const fullName = sliceCol(line, 12, 41) || code;
-      const shortName = sliceCol(line, 42, 57) || fullName;
+  let currentTeamContext = null;
+  let lastRecordType = null;
+  let lastD0 = null;
+  let lastE0 = null;
+  let lastF0 = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const recType = line.slice(0, 2);
+
+    if (recType === 'A0') {
+      meetInfo.software = sliceCol(line, 44, 63) || sliceCol(line, 64, 73);
+    } else if (recType === 'B1') {
+      meetInfo.name = sliceCol(line, 12, 41) || 'Unnamed Swim Meet';
+      meetInfo.city = sliceCol(line, 86, 105);
+      meetInfo.state = sliceCol(line, 106, 107);
+      const rawDate = sliceCol(line, 122, 129);
+      meetInfo.startDate = formatDateSDIF(rawDate);
+      meetInfo.isoDate = formatSdifDate(rawDate);
+    } else if (recType === 'C1') {
+      const code = sliceCol(line, 12, 17);
+      const name = sliceCol(line, 18, 47) || code;
+      const city = sliceCol(line, 110, 129);
+      const state = sliceCol(line, 130, 131);
       if (code) {
-        teams[code] = {
-          code,
-          name: fullName,
-          shortName,
-          points: 0,
-        };
+        currentTeamContext = code;
+        if (!teamsMap.has(code)) {
+          teamsMap.set(code, {
+            code,
+            name,
+            city,
+            state,
+            swimmers: new Map(),
+          });
+        }
       }
-    } else if (rec === 'D0') {
-      const teamCode = sliceCol(line, 4, 9);
-      const rawName = sliceCol(line, 12, 39);
-      const prefFirst = sliceCol(line, 56, 70);
-      const genderCode = sliceCol(line, 79, 79);
-      const classYear = sliceCol(line, 82, 83);
-      const distance = sliceCol(line, 84, 87);
-      const strokeCode = sliceCol(line, 88, 88);
-      const seedTime = sliceCol(line, 96, 103);
-      const prelimTimeRaw = sliceCol(line, 106, 113).replace(/[YLS]$/i, '');
-      const finalsTimeRaw = sliceCol(line, 116, 123).replace(/[YLS]$/i, '');
-      const hasFinals = Boolean(finalsTimeRaw && !['NT', 'NS', 'SCR'].includes(finalsTimeRaw));
-      const hasPrelim = Boolean(prelimTimeRaw && !['NT', 'NS', 'SCR'].includes(prelimTimeRaw));
-      const effectiveTime = hasFinals ? finalsTimeRaw : prelimTimeRaw || finalsTimeRaw;
-      const round = !hasFinals && hasPrelim ? 'Prelims' : 'Finals';
-      const placeStr = sliceCol(line, 126, 128);
-      const pointsStr = sliceCol(line, 132, 137);
-      const points = parseFloat(pointsStr) || 0;
-
-      const swimmerName = formatSwimmerDisplayName(rawName, prefFirst);
-      const ev = ensureEvent(genderCode, distance, strokeCode, false);
-      const entry = {
-        id: `ind-${ev.key}-${ev.entries.length}`,
-        teamCode,
-        teamName: teams[teamCode]?.name || teamCode,
-        swimmerName,
-        classYear: normalizeClass(classYear),
-        seedTime: seedTime.replace(/[YLS]$/i, ''),
-        prelimTime: prelimTimeRaw,
-        finalsTime: effectiveTime,
-        round,
-        place: placeStr ? String(parseInt(placeStr, 10) || placeStr) : '',
-        points,
-        splits: [],
-      };
-      ev.entries.push(entry);
-      lastIndividualEntry = entry;
-      if (teams[teamCode]) teams[teamCode].points += points;
-    } else if (rec === 'D3') {
-      if (lastIndividualEntry) {
-        const prefFirst = sliceCol(line, 17, 31);
-        if (prefFirst) {
-          const parts = lastIndividualEntry.swimmerName.split(' ');
-          if (parts.length >= 2) {
-            lastIndividualEntry.swimmerName = `${prefFirst} ${parts.slice(1).join(' ')}`;
+    } else if (recType === 'D0') {
+      const rawTeamSlice = sliceCol(line, 4, 9);
+      let teamCode = currentTeamContext || rawTeamSlice || 'UNAT';
+      if (rawTeamSlice) {
+        for (const [registeredCode] of teamsMap.entries()) {
+          if (registeredCode.startsWith(rawTeamSlice) || rawTeamSlice === registeredCode) {
+            teamCode = registeredCode;
+            break;
           }
         }
       }
-    } else if (rec === 'G0') {
-      if (lastIndividualEntry) {
-        const splitChunks = line.slice(44, 155);
-        for (let i = 0; i + 10 <= splitChunks.length; i += 11) {
-          const chunk = splitChunks.slice(i, i + 11).trim();
-          const timeMatch = chunk.match(/(\d*:?\d+\.\d{2})/);
-          if (timeMatch) {
-            const cumStr = timeMatch[1];
-            const cumSec = timeToSeconds(cumStr);
-            const prevSec =
-              lastIndividualEntry.splits.length > 0
-                ? timeToSeconds(
-                    lastIndividualEntry.splits[lastIndividualEntry.splits.length - 1].cumulative
-                  )
-                : 0;
-            const lapSec = cumSec !== null && prevSec !== null ? cumSec - prevSec : null;
-            lastIndividualEntry.splits.push({
-              splitNumber: lastIndividualEntry.splits.length + 1,
-              cumulative: cumStr,
-              lap: lapSec !== null ? secondsToTime(lapSec) : '',
+
+      const classYear = sliceCol(line, 8, 9);
+      const swimmerName = sliceCol(line, 12, 39);
+      const genderCode = sliceCol(line, 67, 67) || sliceCol(line, 66, 66);
+      const distance = sliceCol(line, 68, 71);
+      const strokeCode = sliceCol(line, 72, 72);
+      const eventNumber = sliceCol(line, 73, 76);
+      const finalsTimeRaw = sliceCol(line, 116, 123);
+      const courseCode = sliceCol(line, 124, 124);
+
+      const tailTokens = line.slice(125, 152).trim().split(/\s+/);
+      const heat = tailTokens[0] || '';
+      const lane = tailTokens[1] || '';
+      const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
+      const place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
+      const pointsToken = tailTokens[3] || '';
+      const points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
+
+      const strokeName = STROKE_MAP[strokeCode] || `Stroke ${strokeCode}`;
+      const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
+      const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
+      const parsedSec = timeToSeconds(finalsTimeRaw);
+
+      const record = {
+        id: `ind-${i}-${swimmerName}-${eventNumber}`,
+        type: 'individual',
+        teamCode,
+        teamName: teamsMap.get(teamCode)?.name || teamCode,
+        swimmerName,
+        preferredFirst: '',
+        classYear: ['FR', 'SO', 'JR', 'SR'].includes(classYear) ? classYear : '',
+        genderCode,
+        genderLabel,
+        distance: parseInt(distance, 10) || distance,
+        strokeCode,
+        strokeName,
+        eventNumber: parseInt(eventNumber, 10) || eventNumber,
+        eventLabel,
+        finalsTime: finalsTimeRaw || 'NT',
+        timeSeconds: parsedSec === null ? Infinity : parsedSec,
+        course: COURSE_MAP[courseCode] || courseCode || 'SCY',
+        heat,
+        lane,
+        place: place || null,
+        points,
+        splitInterval: 50,
+        splitType: 'C',
+        splitPages: [],
+        splits: [],
+      };
+
+      individualResults.push(record);
+      lastD0 = record;
+      lastRecordType = 'D0';
+
+      if (!teamsMap.has(teamCode)) {
+        teamsMap.set(teamCode, {
+          code: teamCode,
+          name: teamCode,
+          city: '',
+          state: '',
+          swimmers: new Map(),
+        });
+      }
+      const roster = teamsMap.get(teamCode).swimmers;
+      if (!roster.has(swimmerName)) {
+        roster.set(swimmerName, {
+          name: swimmerName,
+          preferredFirst: '',
+          gender: genderLabel,
+          classYear: record.classYear,
+          events: [],
+        });
+      }
+      roster.get(swimmerName).events.push(`${distance} ${strokeName} (${finalsTimeRaw || 'NT'})`);
+    } else if (recType === 'D3') {
+      const prefFirst = sliceCol(line, 17, 31).replace(/^[0-9A-F]{2,}/i, '').trim();
+      if (prefFirst && lastD0) {
+        lastD0.preferredFirst = prefFirst;
+        const roster = teamsMap.get(lastD0.teamCode)?.swimmers;
+        if (roster && roster.has(lastD0.swimmerName)) {
+          roster.get(lastD0.swimmerName).preferredFirst = prefFirst;
+        }
+      }
+    } else if (recType === 'E0') {
+      const relayLetter = sliceCol(line, 12, 12) || 'A';
+      const teamCode = sliceCol(line, 13, 18) || currentTeamContext || 'UNAT';
+      const genderCode = sliceCol(line, 21, 21);
+      const distance = sliceCol(line, 23, 25);
+      const strokeCode = sliceCol(line, 26, 26);
+      const eventNumber = sliceCol(line, 27, 30);
+      const finalsTimeRaw = sliceCol(line, 72, 80);
+      const courseCode = sliceCol(line, 81, 81);
+
+      const tailTokens = line.slice(81, 115).trim().split(/\s+/);
+      const heat = tailTokens[0] || '';
+      const lane = tailTokens[1] || '';
+      const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
+      const place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
+      const pointsToken = tailTokens[3] || '';
+      const points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
+
+      const strokeName = STROKE_MAP[strokeCode] || 'Relay';
+      const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
+      const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
+      const parsedSec = timeToSeconds(finalsTimeRaw);
+
+      const relayObj = {
+        id: `rel-${i}-${teamCode}-${relayLetter}-${eventNumber}`,
+        type: 'relay',
+        relayLetter,
+        teamCode,
+        teamName: teamsMap.get(teamCode)?.name || teamCode,
+        relayTitle: `${teamsMap.get(teamCode)?.name || teamCode} "${relayLetter}"`,
+        genderCode,
+        genderLabel,
+        distance: parseInt(distance, 10) || distance,
+        strokeCode,
+        strokeName,
+        eventNumber: parseInt(eventNumber, 10) || eventNumber,
+        eventLabel,
+        finalsTime: finalsTimeRaw || 'NT',
+        timeSeconds: parsedSec === null ? Infinity : parsedSec,
+        course: COURSE_MAP[courseCode] || courseCode || 'SCY',
+        heat,
+        lane,
+        place,
+        points,
+        splitInterval: 50,
+        splitType: 'C',
+        splitPages: [],
+        legs: [],
+        splits: [],
+      };
+
+      relayResults.push(relayObj);
+      lastE0 = relayObj;
+      lastRecordType = 'E0';
+    } else if (recType === 'F0') {
+      const swimmerName = sliceCol(line, 23, 50);
+      const legOrderRaw = sliceCol(line, 77, 77);
+      const classYear = sliceCol(line, 8, 9);
+      const prefFirst = sliceCol(line, 99, 113).replace(/^[0-9A-F]{2,}/i, '').trim();
+
+      const parsedLegOrder = /^[1-4]$/.test(legOrderRaw)
+        ? parseInt(legOrderRaw, 10)
+        : lastE0
+        ? lastE0.legs.length + 1
+        : 1;
+
+      const legObj = {
+        legOrder: parsedLegOrder,
+        swimmerName,
+        preferredFirst: prefFirst,
+        classYear: ['FR', 'SO', 'JR', 'SR'].includes(classYear) ? classYear : '',
+        splitInterval: 50,
+        splitType: 'C',
+        splitPages: [],
+        splits: [],
+      };
+
+      if (lastE0) {
+        lastE0.legs.push(legObj);
+        lastE0.legs.sort((a, b) => a.legOrder - b.legOrder);
+
+        const tCode = lastE0.teamCode;
+        if (teamsMap.has(tCode) && swimmerName) {
+          const roster = teamsMap.get(tCode).swimmers;
+          if (!roster.has(swimmerName)) {
+            roster.set(swimmerName, {
+              name: swimmerName,
+              preferredFirst: prefFirst,
+              gender: lastE0.genderLabel,
+              classYear: legObj.classYear,
+              events: [`${lastE0.distance} ${lastE0.strokeName} (Relay Leg ${legObj.legOrder})`],
             });
           }
         }
       }
-    } else if (rec === 'E0') {
-      const teamCode = sliceCol(line, 4, 9);
-      const relayLetter = sliceCol(line, 12, 12) || 'A';
-      const genderCode = sliceCol(line, 17, 17);
-      const distance = sliceCol(line, 18, 21);
-      const strokeCode = sliceCol(line, 22, 22);
-      const seedTime = sliceCol(line, 30, 37);
-      const finalsTime = sliceCol(line, 50, 57) || sliceCol(line, 40, 47);
-      const placeStr = sliceCol(line, 60, 62);
-      const pointsStr = sliceCol(line, 66, 71);
-      const points = parseFloat(pointsStr) || 0;
+      lastF0 = legObj;
+      lastRecordType = 'F0';
+    } else if (recType === 'G0') {
+      const seqRaw = line.slice(55, 56).trim();
+      const seqNum = /^\d+$/.test(seqRaw) ? parseInt(seqRaw, 10) : 1;
+      const intervalRaw = line.slice(58, 62).trim();
+      const splitInterval = /^\d+$/.test(intervalRaw) ? parseInt(intervalRaw, 10) : 50;
+      const splitType = line.slice(62, 63).trim() || 'C';
 
-      const ev = ensureEvent(genderCode, distance, strokeCode, true);
-      const entry = {
-        id: `rel-${ev.key}-${ev.entries.length}`,
-        teamCode,
-        teamName: teams[teamCode]?.name || teamCode,
-        relayLetter,
-        seedTime: seedTime.replace(/[YLS]$/i, ''),
-        finalsTime: finalsTime.replace(/[YLS]$/i, ''),
-        place: placeStr ? String(parseInt(placeStr, 10) || placeStr) : '',
-        points,
-        legs: [],
-      };
-      ev.entries.push(entry);
-      lastRelayEntry = entry;
-      if (teams[teamCode]) teams[teamCode].points += points;
-    } else if (rec === 'F0') {
-      if (lastRelayEntry) {
-        const rawName = sliceCol(line, 14, 41);
-        const prefFirst = sliceCol(line, 107, 122);
-        const legNum = parseInt(sliceCol(line, 76, 77), 10) || lastRelayEntry.legs.length + 1;
-        const splitTime = sliceCol(line, 80, 87).replace(/[YLS]$/i, '');
-        const swimmerName = formatSwimmerDisplayName(rawName, prefFirst);
-        lastRelayEntry.legs.push({
-          leg: legNum,
-          name: swimmerName,
-          split: splitTime,
-          classYear: '',
-        });
+      const parsedSplits = [];
+      for (let s = 0; s < 10; s++) {
+        const startIdx = 63 + s * 8;
+        const endIdx = 63 + (s + 1) * 8;
+        if (line.length <= startIdx) break;
+        const chunk = line.slice(startIdx, endIdx).trim();
+        if (chunk && /[\d:.]/.test(chunk)) {
+          parsedSplits.push(chunk);
+        }
       }
+
+      if (parsedSplits.length > 0) {
+        const attachSplits = (target) => {
+          if (!target) return;
+          target.splitInterval = splitInterval;
+          target.splitType = splitType;
+          target.splitPages.push({ seq: seqNum, splits: parsedSplits });
+          target.splitPages.sort((a, b) => a.seq - b.seq);
+          target.splits = target.splitPages.flatMap((p) => p.splits);
+        };
+
+        if (lastRecordType === 'D0' && lastD0) {
+          attachSplits(lastD0);
+        } else if (lastRecordType === 'F0' && lastF0 && lastE0) {
+          attachSplits(lastF0);
+          lastE0.legs.sort((a, b) => a.legOrder - b.legOrder);
+          lastE0.splitInterval = splitInterval;
+          lastE0.splitType = splitType;
+          lastE0.splits = lastE0.legs.flatMap((leg) => leg.splits);
+        } else if (lastRecordType === 'E0' && lastE0) {
+          attachSplits(lastE0);
+        }
+      }
+    }
+  }
+
+  const preferredBySwimmerKey = new Map();
+  teamsMap.forEach((team, tCode) => {
+    team.swimmers.forEach((sw, sName) => {
+      if (sw.preferredFirst) {
+        preferredBySwimmerKey.set(`${tCode}|${sName}`, sw.preferredFirst);
+      }
+    });
+  });
+
+  individualResults.forEach((rec) => {
+    if (!rec.preferredFirst) {
+      rec.preferredFirst = preferredBySwimmerKey.get(`${rec.teamCode}|${rec.swimmerName}`) || '';
     }
   });
 
-  const events = Object.values(eventsMap).map((ev) => {
-    ev.entries.sort((a, b) => {
-      const pa = parseInt(a.place, 10);
-      const pb = parseInt(b.place, 10);
-      if (!Number.isNaN(pa) && !Number.isNaN(pb)) return pa - pb;
-      if (!Number.isNaN(pa)) return -1;
-      if (!Number.isNaN(pb)) return 1;
-      const sa = timeToSeconds(a.finalsTime) ?? 999999;
-      const sb = timeToSeconds(b.finalsTime) ?? 999999;
-      return sa - sb;
+  relayResults.forEach((rel) => {
+    rel.legs.forEach((leg) => {
+      if (!leg.preferredFirst) {
+        leg.preferredFirst = preferredBySwimmerKey.get(`${rel.teamCode}|${leg.swimmerName}`) || '';
+      }
     });
-    return ev;
   });
 
-  return { meet, teams, events };
+  const teams = Array.from(teamsMap.values()).map((t) => ({
+    ...t,
+    swimmerList: Array.from(t.swimmers.values()).sort((a, b) => a.name.localeCompare(b.name)),
+  }));
+
+  const teamScoresMap = new Map();
+  teams.forEach((t) => {
+    teamScoresMap.set(t.code, {
+      code: t.code,
+      name: t.name,
+      womenPoints: 0,
+      menPoints: 0,
+      totalPoints: 0,
+    });
+  });
+
+  const addScore = (teamCode, genderLabel, pts) => {
+    if (!pts || pts <= 0) return;
+    if (!teamScoresMap.has(teamCode)) {
+      teamScoresMap.set(teamCode, {
+        code: teamCode,
+        name: teamCode,
+        womenPoints: 0,
+        menPoints: 0,
+        totalPoints: 0,
+      });
+    }
+    const entry = teamScoresMap.get(teamCode);
+    if (genderLabel === 'Women') entry.womenPoints += pts;
+    else if (genderLabel === 'Men') entry.menPoints += pts;
+    entry.totalPoints += pts;
+  };
+
+  individualResults.forEach((r) => addScore(r.teamCode, r.genderLabel, r.points));
+  relayResults.forEach((r) => addScore(r.teamCode, r.genderLabel, r.points));
+
+  const teamScores = Array.from(teamScoresMap.values()).sort(
+    (a, b) => b.totalPoints - a.totalPoints
+  );
+
+  const totalUniqueSwimmers = teams.reduce((acc, t) => acc + t.swimmerList.length, 0);
+
+  return {
+    meetInfo,
+    teams,
+    teamScores,
+    individualResults,
+    relayResults,
+    stats: {
+      totalTeams: teams.length,
+      totalSwimmers: totalUniqueSwimmers,
+      totalIndividualSwims: individualResults.length,
+      totalRelays: relayResults.length,
+      totalSwims: individualResults.length + relayResults.length,
+    },
+  };
+}
+
+function calculateSplitBreakdown(rawSplits, totalDistance, splitInterval = 50, splitType = 'C') {
+  if (!rawSplits || rawSplits.length === 0) return { rows: [], stats: null };
+
+  const interval =
+    splitInterval && splitInterval > 0
+      ? splitInterval
+      : totalDistance && rawSplits.length > 0
+      ? Math.round(totalDistance / rawSplits.length)
+      : 50;
+
+  let prevCumSeconds = 0;
+  const rows = rawSplits.map((splitStr, idx) => {
+    const valSec = timeToSeconds(splitStr) ?? Infinity;
+    let cumSec = Infinity;
+    let lapSec = Infinity;
+
+    if (splitType === 'I') {
+      lapSec = valSec;
+      cumSec = isFinite(valSec) ? prevCumSeconds + valSec : Infinity;
+    } else {
+      cumSec = valSec;
+      lapSec = isFinite(cumSec) ? cumSec - prevCumSeconds : Infinity;
+    }
+
+    if (isFinite(cumSec)) {
+      prevCumSeconds = cumSec;
+    }
+
+    return {
+      index: idx + 1,
+      distance: (idx + 1) * interval,
+      distanceLabel: `${(idx + 1) * interval}y`,
+      cumulative: splitType === 'I' ? secondsToTime(cumSec) : splitStr,
+      cumulativeSec: cumSec,
+      lap: isFinite(lapSec) && lapSec > 0 ? secondsToTime(lapSec) : splitStr,
+      lapSec: isFinite(lapSec) && lapSec > 0 ? lapSec : Infinity,
+    };
+  });
+
+  const validLaps = rows.filter((r) => isFinite(r.lapSec) && r.lapSec > 0);
+  if (validLaps.length === 0) {
+    return { rows, stats: null };
+  }
+
+  const allLapSecs = validLaps.map((r) => r.lapSec);
+  const minLap = Math.min(...allLapSecs);
+  const maxLap = Math.max(...allLapSecs);
+  const avgLap = allLapSecs.reduce((acc, v) => acc + v, 0) / allLapSecs.length;
+
+  let halfDiff = null;
+  if (rows.length >= 2 && rows.length % 2 === 0) {
+    const mid = rows.length / 2;
+    const firstHalfSec = rows[mid - 1].cumulativeSec;
+    const totalSec = rows[rows.length - 1].cumulativeSec;
+    if (isFinite(firstHalfSec) && isFinite(totalSec)) {
+      const secondHalfSec = totalSec - firstHalfSec;
+      halfDiff = secondHalfSec - firstHalfSec;
+    }
+  }
+
+  return {
+    rows: rows.map((r) => ({
+      ...r,
+      isFastest: validLaps.length > 1 && Math.abs(r.lapSec - minLap) < 0.005,
+      isSlowest: validLaps.length > 1 && Math.abs(r.lapSec - maxLap) < 0.005,
+    })),
+    stats: {
+      interval,
+      minLap,
+      maxLap,
+      avgLap: secondsToTime(avgLap),
+      avgLapSec: avgLap,
+      halfDiff,
+    },
+  };
+}
+
+function calculateRelayLegBreakdown(relay) {
+  let prevCumulativeSec = 0;
+  const interval = relay.splitInterval || 50;
+
+  return relay.legs.map((leg) => {
+    const legSubSplits = [];
+    const legStartSec = prevCumulativeSec;
+
+    if (leg.splits && leg.splits.length > 0) {
+      leg.splits.forEach((cumStr, sIdx) => {
+        const cumSec = timeToSeconds(cumStr) ?? Infinity;
+        const subLapSec = isFinite(cumSec) ? cumSec - prevCumulativeSec : Infinity;
+        if (isFinite(cumSec)) {
+          prevCumulativeSec = cumSec;
+        }
+        legSubSplits.push({
+          subIndex: sIdx + 1,
+          subDistance: `${(sIdx + 1) * interval}y`,
+          cumulative: cumStr,
+          lap: isFinite(subLapSec) && subLapSec > 0 ? secondsToTime(subLapSec) : '-',
+        });
+      });
+    }
+
+    const legEndSec = prevCumulativeSec;
+    const totalLegSec = legEndSec > legStartSec ? legEndSec - legStartSec : Infinity;
+    const endCumulativeStr =
+      leg.splits && leg.splits.length > 0 ? leg.splits[leg.splits.length - 1] : '-';
+
+    return {
+      ...leg,
+      subSplits: legSubSplits,
+      legTotalTime: isFinite(totalLegSec) ? secondsToTime(totalLegSec) : '-',
+      endCumulativeTime: endCumulativeStr,
+    };
+  });
 }
 
 // ============================================================================
@@ -693,6 +1065,9 @@ export default function App() {
 
   // Active Meet State
   const [parsedData, setParsedData] = useState(null);
+  const [meetErrorMsg, setMeetErrorMsg] = useState('');
+  const [isDraggingMeet, setIsDraggingMeet] = useState(false);
+  const [meetSubTab, setMeetSubTab] = useState('individual'); // 'individual' | 'relays' | 'roster'
   const [selectedTeam, setSelectedTeam] = useState(() => {
     try {
       return localStorage.getItem('swimmeet_primary_team_v1') || 'ALL';
@@ -700,10 +1075,11 @@ export default function App() {
       return 'ALL';
     }
   });
+  const [selectedEventFilter, setSelectedEventFilter] = useState('ALL');
   const [genderFilter, setGenderFilter] = useState('ALL');
-  const [typeFilter, setTypeFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [expandedSplits, setExpandedSplits] = useState({});
+  const [sortConfig, setSortConfig] = useState({ key: 'eventNumber', direction: 'asc' });
+  const [expandedRows, setExpandedRows] = useState(new Set());
   const [copiedRecap, setCopiedRecap] = useState(false);
 
   // Historical Database, Master Roster, Master Competitions, & Master Events State
@@ -1254,15 +1630,14 @@ export default function App() {
       });
     });
     if (parsedData) {
-      parsedData.events.forEach((ev) => {
-        ev.entries.forEach((entry) => {
-          if (ev.type === 'Individual') {
-            map[normalizeSwimmerKey(entry.swimmerName)] = ev.gender;
-          } else {
-            (entry.legs || []).forEach((leg) => {
-              map[normalizeSwimmerKey(leg.name)] = ev.gender;
-            });
-          }
+      parsedData.individualResults.forEach((entry) => {
+        map[normalizeSwimmerKey(formatSwimmerDisplay(entry.swimmerName, entry.preferredFirst))] =
+          entry.genderLabel;
+      });
+      parsedData.relayResults.forEach((rel) => {
+        (rel.legs || []).forEach((leg) => {
+          map[normalizeSwimmerKey(formatSwimmerDisplay(leg.swimmerName, leg.preferredFirst))] =
+            rel.genderLabel;
         });
       });
     }
@@ -1550,16 +1925,19 @@ export default function App() {
 
     if (!selectedTeam || selectedTeam === 'ALL') {
       setBenchmarkStatusMsg(
-        'Select a specific Primary Program Focus (e.g., Gettysburg College) before committing a meet so opponent times are not imported.'
+        'Select a specific Primary Program Focus (e.g., Gettysburg College) in Section 4 or Post-Meet Tools before committing so opponent times are not imported.'
       );
       return;
     }
 
     const targetCode = selectedTeam;
-    const targetName = parsedData.teams[targetCode]?.name || targetCode;
-    const meetComp = parsedData.meet.name || 'Imported Meet';
-    const meetLoc = parsedData.meet.location || '';
-    const meetDate = parsedData.meet.startDate || '';
+    const targetTeamObj = parsedData.teams.find((t) => t.code === targetCode);
+    const targetName = targetTeamObj?.name || targetCode;
+    const meetComp = parsedData.meetInfo.name || 'Imported Meet';
+    const meetLoc = [parsedData.meetInfo.city, parsedData.meetInfo.state]
+      .filter(Boolean)
+      .join(', ');
+    const meetDate = parsedData.meetInfo.isoDate || parsedData.meetInfo.startDate || '';
 
     const existingHashes = new Set(
       historicalRecords.map(
@@ -1570,176 +1948,192 @@ export default function App() {
 
     const newEntries = [];
 
-    parsedData.events.forEach((ev) => {
-      const evKey = normalizeEventKey(ev.eventLabel);
-      if (!evKey) return;
+    // 1. Individual Results
+    parsedData.individualResults.forEach((entry) => {
+      if (entry.teamCode !== targetCode) return;
+      if (
+        !entry.finalsTime ||
+        entry.finalsTime === 'NT' ||
+        entry.finalsTime === 'DQ' ||
+        entry.finalsTime === 'SCR'
+      )
+        return;
+      const sec = timeToSeconds(entry.finalsTime);
+      if (sec === null) return;
 
-      if (ev.type === 'Individual') {
-        ev.entries.forEach((entry) => {
-          if (entry.teamCode !== targetCode) return;
-          if (!entry.finalsTime || entry.finalsTime === 'NT' || entry.finalsTime === 'DQ' || entry.finalsTime === 'SCR') return;
-          const sec = timeToSeconds(entry.finalsTime);
-          if (sec === null) return;
+      const displaySwimmer = formatSwimmerDisplay(entry.swimmerName, entry.preferredFirst);
+      const resolvedAth = resolveMasterAthlete(displaySwimmer);
+      const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
+      const resolvedEv = resolveMasterEvent(entry.eventLabel, entry.genderLabel);
+      const finalName = resolvedAth ? resolvedAth.canonicalName : displaySwimmer;
+      const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
+      const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
+      const finalLoc = resolvedComp?.defaultLocation || meetLoc;
+      const evKey = normalizeEventKey(entry.eventLabel, entry.genderLabel);
+      const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
+      const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : entry.eventLabel;
+      const placeStr = entry.place ? String(entry.place) : '';
 
-          const resolvedAth = resolveMasterAthlete(entry.swimmerName);
-          const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
-          const resolvedEv = resolveMasterEvent(ev.eventLabel, ev.gender);
-          const finalName = resolvedAth ? resolvedAth.canonicalName : entry.swimmerName;
-          const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
-          const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
-          const finalLoc = resolvedComp?.defaultLocation || meetLoc;
-          const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
-          const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : ev.eventLabel;
-          const entryRound = entry.round || 'Finals';
+      const hash = `${normalizeSwimmerKey(finalName)}|${finalEvKey}|${sec.toFixed(2)}|${finalDate}|Finals|${placeStr}`;
+      if (!existingHashes.has(hash)) {
+        existingHashes.add(hash);
+        newEntries.push({
+          id: `meet-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
+          swimmerName: finalName,
+          swimmerKey: normalizeSwimmerKey(finalName),
+          classYear: normalizeClass(entry.classYear),
+          eventKey: finalEvKey,
+          eventLabel: finalEvLabel,
+          time: entry.finalsTime,
+          seconds: sec,
+          date: finalDate,
+          dateObj: parseFlexibleDate(finalDate),
+          location: finalLoc,
+          competition: finalComp,
+          round: 'Finals',
+          place: placeStr,
+          swimType: 'OFFICIAL',
+          isOfficial: true,
+          source: 'cl2_meet',
+        });
+      }
 
-          const hash = `${normalizeSwimmerKey(finalName)}|${finalEvKey}|${sec.toFixed(2)}|${finalDate}|${entryRound}|${entry.place || ''}`;
-          if (!existingHashes.has(hash)) {
-            existingHashes.add(hash);
+      if (includeSplitsOnCommit && entry.splits && entry.splits.length > 0) {
+        const legalSplits = extractLegalOpeningSplits(
+          Number(entry.distance) || 0,
+          entry.genderLabel,
+          entry.strokeName,
+          finalEvLabel,
+          entry.splits,
+          entry.splitInterval,
+          entry.splitType
+        );
+        legalSplits.forEach((spItem) => {
+          const resolvedSplitEv = resolveMasterEvent(spItem.eventLabel, entry.genderLabel);
+          const splitEvKey = resolvedSplitEv ? resolvedSplitEv.eventKey : spItem.eventKey;
+          const splitEvLabel = resolvedSplitEv ? resolvedSplitEv.canonicalName : spItem.eventLabel;
+          if (!splitEvKey) return;
+
+          const sHash = `${normalizeSwimmerKey(finalName)}|${splitEvKey}|${spItem.seconds.toFixed(2)}|${finalDate}|Finals|S`;
+          if (!existingHashes.has(sHash)) {
+            existingHashes.add(sHash);
             newEntries.push({
-              id: `meet-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
+              id: `meet-split-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
               swimmerName: finalName,
               swimmerKey: normalizeSwimmerKey(finalName),
               classYear: normalizeClass(entry.classYear),
-              eventKey: finalEvKey,
-              eventLabel: finalEvLabel,
-              time: entry.finalsTime,
-              seconds: sec,
+              eventKey: splitEvKey,
+              eventLabel: splitEvLabel,
+              time: spItem.time,
+              seconds: spItem.seconds,
               date: finalDate,
               dateObj: parseFlexibleDate(finalDate),
               location: finalLoc,
               competition: finalComp,
-              round: entryRound,
-              place: entry.place || '',
-              swimType: 'OFFICIAL',
+              round: 'Finals',
+              place: 'S',
+              swimType: 'INTERMEDIATE_SPLIT',
               isOfficial: true,
-              source: 'cl2_meet',
-            });
-          }
-
-          if (includeSplitsOnCommit && entry.splits && entry.splits.length > 0) {
-            const legalSplits = extractLegalOpeningSplits(ev, entry.splits);
-            legalSplits.forEach((spItem) => {
-              const resolvedSplitEv = resolveMasterEvent(spItem.eventLabel, ev.gender);
-              const splitEvKey = resolvedSplitEv ? resolvedSplitEv.eventKey : spItem.eventKey;
-              const splitEvLabel = resolvedSplitEv
-                ? resolvedSplitEv.canonicalName
-                : spItem.eventLabel;
-              if (!splitEvKey) return;
-
-              const sHash = `${normalizeSwimmerKey(finalName)}|${splitEvKey}|${spItem.seconds.toFixed(2)}|${finalDate}|${entryRound}|S`;
-              if (!existingHashes.has(sHash)) {
-                existingHashes.add(sHash);
-                newEntries.push({
-                  id: `meet-split-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
-                  swimmerName: finalName,
-                  swimmerKey: normalizeSwimmerKey(finalName),
-                  classYear: normalizeClass(entry.classYear),
-                  eventKey: splitEvKey,
-                  eventLabel: splitEvLabel,
-                  time: spItem.time,
-                  seconds: spItem.seconds,
-                  date: finalDate,
-                  dateObj: parseFlexibleDate(finalDate),
-                  location: finalLoc,
-                  competition: finalComp,
-                  round: entryRound,
-                  place: 'S',
-                  swimType: 'INTERMEDIATE_SPLIT',
-                  isOfficial: true,
-                  splitContext: spItem.context,
-                  source: 'cl2_split',
-                });
-              }
+              splitContext: spItem.context,
+              source: 'cl2_split',
             });
           }
         });
-      } else if (ev.type === 'Relay') {
-        const legDist = Math.round(ev.distance / 4);
-        const legStroke = ev.stroke === 'Medley' ? 'Backstroke' : 'Freestyle';
-        const legEvLabel = `${ev.gender} ${legDist} ${legStroke}`;
-        const legEvKey = normalizeEventKey(legEvLabel);
+      }
+    });
 
-        ev.entries.forEach((entry) => {
-          if (entry.teamCode !== targetCode) return;
-          if (!entry.legs || entry.legs.length === 0) return;
+    // 2. Relay Results (Lead-Offs "R" + Relay Team Wins)
+    parsedData.relayResults.forEach((entry) => {
+      if (entry.teamCode !== targetCode) return;
+      if (!entry.legs || entry.legs.length === 0) return;
 
-          // Only flat-start Relay Lead-Off (Leg 1) is recorded with Place = "R"
-          const leadOffLeg = entry.legs.find((l) => l.leg === 1);
-          if (leadOffLeg && leadOffLeg.name && leadOffLeg.split) {
-            const splitSec = timeToSeconds(leadOffLeg.split);
-            if (splitSec !== null && legEvKey) {
-              const resolvedAth = resolveMasterAthlete(leadOffLeg.name);
-              const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
-              const finalName = resolvedAth ? resolvedAth.canonicalName : leadOffLeg.name;
-              const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
-              const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
-              const finalLoc = resolvedComp?.defaultLocation || meetLoc;
+      const legDist = Math.round((Number(entry.distance) || 0) / 4);
+      const legStroke = String(entry.strokeName || '').includes('Medley')
+        ? 'Backstroke'
+        : 'Freestyle';
+      const legEvLabel = `${entry.genderLabel} ${legDist} ${legStroke}`;
+      const legEvKey = normalizeEventKey(legEvLabel, entry.genderLabel);
+      const legBreakdown = calculateRelayLegBreakdown(entry);
 
-              const hash = `${normalizeSwimmerKey(finalName)}|${legEvKey}|${splitSec.toFixed(2)}|${finalDate}|R`;
-              if (!existingHashes.has(hash)) {
-                existingHashes.add(hash);
-                newEntries.push({
-                  id: `meet-relay-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
-                  swimmerName: finalName,
-                  swimmerKey: normalizeSwimmerKey(finalName),
-                  classYear: normalizeClass(leadOffLeg.classYear),
-                  eventKey: legEvKey,
-                  eventLabel: legEvLabel,
-                  time: leadOffLeg.split,
-                  seconds: splitSec,
-                  date: finalDate,
-                  dateObj: parseFlexibleDate(finalDate),
-                  location: finalLoc,
-                  competition: finalComp,
-                  place: 'R',
-                  swimType: 'RELAY_LEADOFF',
-                  isOfficial: true,
-                  splitContext: `Lead-Off (${ev.eventLabel})`,
-                  source: 'cl2_leadoff',
-                });
-              }
-            }
+      const leadOffLeg = legBreakdown.find((l) => l.legOrder === 1);
+      if (leadOffLeg && leadOffLeg.swimmerName && leadOffLeg.legTotalTime !== '-') {
+        const splitSec = timeToSeconds(leadOffLeg.legTotalTime);
+        if (splitSec !== null && legEvKey) {
+          const displayLead = formatSwimmerDisplay(
+            leadOffLeg.swimmerName,
+            leadOffLeg.preferredFirst
+          );
+          const resolvedAth = resolveMasterAthlete(displayLead);
+          const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
+          const finalName = resolvedAth ? resolvedAth.canonicalName : displayLead;
+          const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
+          const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
+          const finalLoc = resolvedComp?.defaultLocation || meetLoc;
+
+          const hash = `${normalizeSwimmerKey(finalName)}|${legEvKey}|${splitSec.toFixed(2)}|${finalDate}|R`;
+          if (!existingHashes.has(hash)) {
+            existingHashes.add(hash);
+            newEntries.push({
+              id: `meet-relay-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
+              swimmerName: finalName,
+              swimmerKey: normalizeSwimmerKey(finalName),
+              classYear: normalizeClass(leadOffLeg.classYear),
+              eventKey: legEvKey,
+              eventLabel: legEvLabel,
+              time: leadOffLeg.legTotalTime,
+              seconds: splitSec,
+              date: finalDate,
+              dateObj: parseFlexibleDate(finalDate),
+              location: finalLoc,
+              competition: finalComp,
+              place: 'R',
+              swimType: 'RELAY_LEADOFF',
+              isOfficial: true,
+              splitContext: `Lead-Off (${entry.eventLabel})`,
+              source: 'cl2_leadoff',
+            });
           }
+        }
+      }
 
-          // Also record 1st-place Relay Team Wins (Legs 1-4) for All-Time Wins tracking
-          if (String(entry.place || '').trim() === '1') {
-            const relaySec = timeToSeconds(entry.finalsTime);
-            const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
-            const resolvedEv = resolveMasterEvent(ev.eventLabel, ev.gender);
-            const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
-            const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
-            const finalLoc = resolvedComp?.defaultLocation || meetLoc;
-            const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
-            const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : ev.eventLabel;
+      if (Number(entry.place) === 1) {
+        const relaySec = timeToSeconds(entry.finalsTime);
+        const resolvedComp = resolveMasterCompetition(meetComp, meetDate);
+        const resolvedEv = resolveMasterEvent(entry.eventLabel, entry.genderLabel);
+        const finalComp = resolvedComp ? resolvedComp.canonicalName : meetComp;
+        const finalDate = resolvedComp?.date ? normalizeDateIso(resolvedComp.date) : meetDate;
+        const finalLoc = resolvedComp?.defaultLocation || meetLoc;
+        const evKey = normalizeEventKey(entry.eventLabel, entry.genderLabel);
+        const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
+        const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : entry.eventLabel;
 
-            entry.legs.forEach((leg) => {
-              if (!leg.name || relaySec === null) return;
-              const resolvedAth = resolveMasterAthlete(leg.name);
-              const finalName = resolvedAth ? resolvedAth.canonicalName : leg.name;
-              const winHash = `${normalizeSwimmerKey(finalName)}|${finalEvKey}|${relaySec.toFixed(2)}|${finalDate}|1`;
-              if (!existingHashes.has(winHash)) {
-                existingHashes.add(winHash);
-                newEntries.push({
-                  id: `meet-relwin-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
-                  swimmerName: finalName,
-                  swimmerKey: normalizeSwimmerKey(finalName),
-                  classYear: normalizeClass(leg.classYear),
-                  eventKey: finalEvKey,
-                  eventLabel: finalEvLabel,
-                  time: entry.finalsTime,
-                  seconds: relaySec,
-                  date: finalDate,
-                  dateObj: parseFlexibleDate(finalDate),
-                  location: finalLoc,
-                  competition: finalComp,
-                  round: 'Finals',
-                  place: '1',
-                  swimType: 'RELAY_WIN',
-                  isOfficial: false,
-                  splitContext: `Leg ${leg.leg}${leg.split ? ` (${leg.split})` : ''}`,
-                  source: 'cl2_relay_win',
-                });
-              }
+        legBreakdown.forEach((leg) => {
+          if (!leg.swimmerName || relaySec === null) return;
+          const displaySwimmer = formatSwimmerDisplay(leg.swimmerName, leg.preferredFirst);
+          const resolvedAth = resolveMasterAthlete(displaySwimmer);
+          const finalName = resolvedAth ? resolvedAth.canonicalName : displaySwimmer;
+          const winHash = `${normalizeSwimmerKey(finalName)}|${finalEvKey}|${relaySec.toFixed(2)}|${finalDate}|1`;
+          if (!existingHashes.has(winHash)) {
+            existingHashes.add(winHash);
+            newEntries.push({
+              id: `meet-relwin-${Date.now()}-${newEntries.length}-${Math.random().toString(36).slice(2, 6)}`,
+              swimmerName: finalName,
+              swimmerKey: normalizeSwimmerKey(finalName),
+              classYear: normalizeClass(leg.classYear),
+              eventKey: finalEvKey,
+              eventLabel: finalEvLabel,
+              time: entry.finalsTime,
+              seconds: relaySec,
+              date: finalDate,
+              dateObj: parseFlexibleDate(finalDate),
+              location: finalLoc,
+              competition: finalComp,
+              round: 'Finals',
+              place: '1',
+              swimType: 'RELAY_WIN',
+              isOfficial: false,
+              splitContext: `Leg ${leg.legOrder}${leg.legTotalTime !== '-' ? ` (${leg.legTotalTime})` : ''}`,
+              source: 'cl2_relay_win',
             });
           }
         });
@@ -1807,31 +2201,67 @@ export default function App() {
 
   // Process uploaded or sample CL2/SD3 text
   const handleProcessMeetText = (rawText) => {
-    const parsed = parseSdifCl2(rawText);
-    setParsedData(parsed);
+    try {
+      setMeetErrorMsg('');
+      const parsed = parseSDIFContent(rawText);
+      setParsedData(parsed);
+      setSelectedEventFilter('ALL');
+      setGenderFilter('ALL');
+      setSearchQuery('');
+      setExpandedRows(new Set());
+      setMeetSubTab('individual');
 
-    const teamCodes = Object.keys(parsed.teams);
-    if (teamCodes.length > 0) {
-      const gettysburgCode = teamCodes.find((c) =>
-        parsed.teams[c].name.toLowerCase().includes('gettysburg')
-      );
-      const chosen =
-        gettysburgCode || (teamCodes.includes(selectedTeam) ? selectedTeam : teamCodes[0]);
-      setSelectedTeam(chosen);
-      try {
-        localStorage.setItem('swimmeet_primary_team_v1', chosen);
-      } catch {}
+      if (parsed.teams.length > 0) {
+        const gettysburgTeam = parsed.teams.find((t) =>
+          t.name.toLowerCase().includes('gettysburg')
+        );
+        const chosen = gettysburgTeam
+          ? gettysburgTeam.code
+          : parsed.teams.some((t) => t.code === selectedTeam)
+          ? selectedTeam
+          : 'ALL';
+        setSelectedTeam(chosen);
+        try {
+          localStorage.setItem('swimmeet_primary_team_v1', chosen);
+        } catch {}
+      }
+    } catch (err) {
+      setMeetErrorMsg(err.message || 'Failed to parse SDIF/CL2 file.');
     }
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
+  const handleFileUpload = (fileOrEvent) => {
+    const file = fileOrEvent?.target ? fileOrEvent.target.files?.[0] : fileOrEvent;
     if (!file) return;
+    const validExt = /\.(cl2|sd3|txt)$/i;
+    if (!validExt.test(file.name)) {
+      setMeetErrorMsg('Please upload a valid .cl2, .sd3, or .txt Hy-Tek results file.');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (ev) => {
       handleProcessMeetText(ev.target.result);
     };
+    reader.onerror = () => {
+      setMeetErrorMsg('Error reading the selected file.');
+    };
     reader.readAsText(file);
+  };
+
+  const toggleRow = (id) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSort = (key) => {
+    setSortConfig((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
+    }));
   };
 
   // Benchmark Evaluation Engine (Dual Full-Distance vs Split PB/SB, All-Time Top-10, Freshman Record)
@@ -2119,41 +2549,44 @@ export default function App() {
     const athleteMap = {};
     let totalWins = 0;
 
-    parsedData.events.forEach((ev) => {
-      const winner = ev.entries.find((e) => String(e.place) === '1');
-      if (!winner) return;
-      if (selectedTeam !== 'ALL' && winner.teamCode !== selectedTeam) return;
-
+    parsedData.individualResults.forEach((r) => {
+      if (Number(r.place) !== 1) return;
+      if (selectedTeam !== 'ALL' && r.teamCode !== selectedTeam) return;
       totalWins++;
-      if (ev.type === 'Individual') {
-        const name = winner.swimmerName;
+      const name = formatSwimmerDisplay(r.swimmerName, r.preferredFirst);
+      if (!athleteMap[name]) {
+        athleteMap[name] = {
+          name,
+          teamName: r.teamName,
+          indWins: 0,
+          relWins: 0,
+          events: [],
+        };
+      }
+      athleteMap[name].indWins += 1;
+      athleteMap[name].events.push(`${r.eventLabel} (${r.finalsTime})`);
+    });
+
+    parsedData.relayResults.forEach((rel) => {
+      if (Number(rel.place) !== 1) return;
+      if (selectedTeam !== 'ALL' && rel.teamCode !== selectedTeam) return;
+      totalWins++;
+      (rel.legs || []).forEach((leg) => {
+        const name = formatSwimmerDisplay(leg.swimmerName, leg.preferredFirst);
         if (!athleteMap[name]) {
           athleteMap[name] = {
             name,
-            teamName: winner.teamName,
+            teamName: rel.teamName,
             indWins: 0,
             relWins: 0,
             events: [],
           };
         }
-        athleteMap[name].indWins += 1;
-        athleteMap[name].events.push(`${ev.eventLabel} (${winner.finalsTime})`);
-      } else {
-        (winner.legs || []).forEach((leg) => {
-          const name = leg.name;
-          if (!athleteMap[name]) {
-            athleteMap[name] = {
-              name,
-              teamName: winner.teamName,
-              indWins: 0,
-              relWins: 0,
-              events: [],
-            };
-          }
-          athleteMap[name].relWins += 1;
-          athleteMap[name].events.push(`${ev.eventLabel} — Leg ${leg.leg} (${winner.finalsTime})`);
-        });
-      }
+        athleteMap[name].relWins += 1;
+        athleteMap[name].events.push(
+          `${rel.eventLabel} — Leg ${leg.legOrder} (${rel.finalsTime})`
+        );
+      });
     });
 
     const athletes = Object.values(athleteMap).sort(
@@ -2163,37 +2596,315 @@ export default function App() {
     return { totalWins, athletes };
   }, [parsedData, selectedTeam]);
 
-  // Filtered Events for Section 4 (Import Meet Results)
-  const filteredEvents = useMemo(() => {
+  // Available Events Dropdown Options for Section 4
+  const availableMeetEvents = useMemo(() => {
     if (!parsedData) return [];
-    return parsedData.events.filter((ev) => {
-      if (genderFilter !== 'ALL' && ev.gender.toUpperCase() !== genderFilter) return false;
-      if (typeFilter !== 'ALL' && ev.type.toUpperCase() !== typeFilter) return false;
-      if (searchQuery.trim()) {
+    const list =
+      meetSubTab === 'relays' ? parsedData.relayResults : parsedData.individualResults;
+    const map = new Map();
+    list.forEach((item) => {
+      if (!map.has(item.eventLabel)) {
+        map.set(item.eventLabel, item.eventNumber);
+      }
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(([label, num]) => ({ label, num }));
+  }, [parsedData, meetSubTab]);
+
+  // Filtered & Sorted Individual Results for Section 4
+  const filteredMeetIndividuals = useMemo(() => {
+    if (!parsedData) return [];
+    return parsedData.individualResults
+      .filter((row) => {
+        if (selectedTeam !== 'ALL' && row.teamCode !== selectedTeam) return false;
+        if (genderFilter !== 'ALL' && row.genderLabel !== genderFilter) return false;
+        if (selectedEventFilter !== 'ALL' && row.eventLabel !== selectedEventFilter) return false;
+        if (searchQuery.trim() !== '') {
+          const q = searchQuery.toLowerCase();
+          const fullText =
+            `${row.swimmerName} ${row.preferredFirst} ${row.teamName} ${row.eventLabel}`.toLowerCase();
+          if (!fullText.includes(q)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const dir = sortConfig.direction === 'asc' ? 1 : -1;
+        switch (sortConfig.key) {
+          case 'eventNumber':
+            if (a.eventNumber !== b.eventNumber) return (a.eventNumber - b.eventNumber) * dir;
+            return a.timeSeconds - b.timeSeconds;
+          case 'swimmerName':
+            return a.swimmerName.localeCompare(b.swimmerName) * dir;
+          case 'teamName':
+            return a.teamName.localeCompare(b.teamName) * dir;
+          case 'time':
+            return (a.timeSeconds - b.timeSeconds) * dir;
+          case 'place': {
+            const pA = a.place ?? 9999;
+            const pB = b.place ?? 9999;
+            return (pA - pB) * dir;
+          }
+          default:
+            return 0;
+        }
+      });
+  }, [parsedData, selectedTeam, genderFilter, selectedEventFilter, searchQuery, sortConfig]);
+
+  const groupedIndividualEvents = useMemo(() => {
+    const groupsMap = new Map();
+    filteredMeetIndividuals.forEach((row) => {
+      const key = `${row.eventNumber}-${row.eventLabel}`;
+      if (!groupsMap.has(key)) {
+        groupsMap.set(key, {
+          key,
+          eventNumber: row.eventNumber,
+          eventLabel: row.eventLabel,
+          course: row.course,
+          swims: [],
+        });
+      }
+      groupsMap.get(key).swims.push(row);
+    });
+
+    const groups = Array.from(groupsMap.values());
+    groups.sort((a, b) => {
+      const dir = sortConfig.key === 'eventNumber' && sortConfig.direction === 'desc' ? -1 : 1;
+      return (a.eventNumber - b.eventNumber) * dir;
+    });
+
+    groups.forEach((group) => {
+      group.swims.sort((a, b) => {
+        const dir = sortConfig.direction === 'asc' ? 1 : -1;
+        if (sortConfig.key === 'swimmerName') return a.swimmerName.localeCompare(b.swimmerName) * dir;
+        if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
+        if (sortConfig.key === 'time') return (a.timeSeconds - b.timeSeconds) * dir;
+        if (sortConfig.key === 'place') {
+          const pA = a.place ?? 9999;
+          const pB = b.place ?? 9999;
+          return (pA - pB) * dir;
+        }
+        const pA = a.place ?? 9999;
+        const pB = b.place ?? 9999;
+        if (pA !== pB) return pA - pB;
+        return a.timeSeconds - b.timeSeconds;
+      });
+
+      const validTimes = group.swims.map((r) => r.timeSeconds).filter((t) => isFinite(t));
+      group.fastestTimeSec = validTimes.length > 0 ? Math.min(...validTimes) : Infinity;
+    });
+
+    return groups;
+  }, [filteredMeetIndividuals, sortConfig]);
+
+  const toggleAllIndividualsInEvent = (swimsInEvent) => {
+    const expandableIds = swimsInEvent
+      .filter((r) => r.splits && r.splits.length > 0)
+      .map((r) => r.id);
+    if (expandableIds.length === 0) return;
+    const allExpanded = expandableIds.every((id) => expandedRows.has(id));
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (allExpanded) expandableIds.forEach((id) => next.delete(id));
+      else expandableIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  // Filtered & Grouped Relays for Section 4
+  const filteredMeetRelays = useMemo(() => {
+    if (!parsedData) return [];
+    return parsedData.relayResults.filter((row) => {
+      if (selectedTeam !== 'ALL' && row.teamCode !== selectedTeam) return false;
+      if (genderFilter !== 'ALL' && row.genderLabel !== genderFilter) return false;
+      if (selectedEventFilter !== 'ALL' && row.eventLabel !== selectedEventFilter) return false;
+      if (searchQuery.trim() !== '') {
         const q = searchQuery.toLowerCase();
-        const matchEv = ev.eventLabel.toLowerCase().includes(q);
-        const matchEntry = ev.entries.some(
-          (e) =>
-            (e.swimmerName && e.swimmerName.toLowerCase().includes(q)) ||
-            (e.legs && e.legs.some((l) => l.name.toLowerCase().includes(q)))
-        );
-        return matchEv || matchEntry;
+        const legsText = row.legs.map((l) => `${l.swimmerName} ${l.preferredFirst}`).join(' ');
+        const fullText = `${row.relayTitle} ${row.teamName} ${row.eventLabel} ${legsText}`.toLowerCase();
+        if (!fullText.includes(q)) return false;
       }
       return true;
     });
-  }, [parsedData, genderFilter, typeFilter, searchQuery]);
+  }, [parsedData, selectedTeam, genderFilter, selectedEventFilter, searchQuery]);
+
+  const groupedRelayEvents = useMemo(() => {
+    const groupsMap = new Map();
+    filteredMeetRelays.forEach((relay) => {
+      const key = `${relay.eventNumber}-${relay.eventLabel}`;
+      if (!groupsMap.has(key)) {
+        groupsMap.set(key, {
+          key,
+          eventNumber: relay.eventNumber,
+          eventLabel: relay.eventLabel,
+          course: relay.course,
+          relays: [],
+        });
+      }
+      groupsMap.get(key).relays.push(relay);
+    });
+
+    const groups = Array.from(groupsMap.values());
+    groups.sort((a, b) => {
+      const dir = sortConfig.key === 'eventNumber' && sortConfig.direction === 'desc' ? -1 : 1;
+      return (a.eventNumber - b.eventNumber) * dir;
+    });
+
+    groups.forEach((group) => {
+      group.relays.sort((a, b) => {
+        if (sortConfig.key === 'swimmerName') {
+          const dir = sortConfig.direction === 'asc' ? 1 : -1;
+          return a.relayTitle.localeCompare(b.relayTitle) * dir;
+        }
+        if (sortConfig.key === 'time') {
+          const dir = sortConfig.direction === 'asc' ? 1 : -1;
+          return (a.timeSeconds - b.timeSeconds) * dir;
+        }
+        if (sortConfig.key === 'place') {
+          const dir = sortConfig.direction === 'asc' ? 1 : -1;
+          const pA = a.place ?? 9999;
+          const pB = b.place ?? 9999;
+          return (pA - pB) * dir;
+        }
+        const pA = a.place ?? 9999;
+        const pB = b.place ?? 9999;
+        if (pA !== pB) return pA - pB;
+        return a.timeSeconds - b.timeSeconds;
+      });
+
+      const validTimes = group.relays.map((r) => r.timeSeconds).filter((t) => isFinite(t));
+      group.fastestTimeSec = validTimes.length > 0 ? Math.min(...validTimes) : Infinity;
+    });
+
+    return groups;
+  }, [filteredMeetRelays, sortConfig]);
+
+  const toggleAllRelaysInEvent = (relaysInEvent) => {
+    const expandableIds = relaysInEvent
+      .filter((r) => r.legs.length > 0 || r.splits.length > 0)
+      .map((r) => r.id);
+    if (expandableIds.length === 0) return;
+    const allExpanded = expandableIds.every((id) => expandedRows.has(id));
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (allExpanded) expandableIds.forEach((id) => next.delete(id));
+      else expandableIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  // Filtered Team Roster for Section 4
+  const filteredMeetTeams = useMemo(() => {
+    if (!parsedData) return [];
+    return parsedData.teams
+      .filter((t) => selectedTeam === 'ALL' || t.code === selectedTeam)
+      .map((team) => ({
+        ...team,
+        swimmerList: team.swimmerList.filter((s) => {
+          if (genderFilter !== 'ALL' && s.gender !== genderFilter) return false;
+          if (searchQuery.trim() !== '') {
+            const q = searchQuery.toLowerCase();
+            if (!`${s.name} ${s.preferredFirst}`.toLowerCase().includes(q)) return false;
+          }
+          return true;
+        }),
+      }));
+  }, [parsedData, selectedTeam, genderFilter, searchQuery]);
+
+  // CSV Export of Parsed Meet Results
+  const handleExportMeetCSV = () => {
+    if (!parsedData) return;
+    const headers = [
+      'Result Type',
+      'Event #',
+      'Event',
+      'Gender',
+      'Team Name',
+      'Swimmer / Relay',
+      'Class',
+      'Finals Time',
+      'Course',
+      'Heat',
+      'Lane',
+      'Place',
+      'Cumulative Splits',
+      'Relay Swimmers',
+    ];
+    const rows = [];
+    parsedData.individualResults.forEach((r) => {
+      rows.push([
+        'Individual',
+        r.eventNumber,
+        r.eventLabel,
+        r.genderLabel,
+        r.teamName,
+        formatSwimmerDisplay(r.swimmerName, r.preferredFirst),
+        r.classYear,
+        r.finalsTime,
+        r.course,
+        r.heat,
+        r.lane,
+        r.place ?? '',
+        r.splits.join(' | '),
+        '',
+      ]);
+    });
+    parsedData.relayResults.forEach((r) => {
+      const legsText = r.legs
+        .map((l) => `${l.legOrder}. ${formatSwimmerDisplay(l.swimmerName, l.preferredFirst)}`)
+        .join(' ; ');
+      rows.push([
+        'Relay',
+        r.eventNumber,
+        r.eventLabel,
+        r.genderLabel,
+        r.teamName,
+        r.relayTitle,
+        '',
+        r.finalsTime,
+        r.course,
+        r.heat,
+        r.lane,
+        r.place ?? '',
+        r.splits.join(' | '),
+        legsText,
+      ]);
+    });
+
+    const csvString = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\r\n');
+
+    const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeMeetName = (parsedData.meetInfo.name || 'swim_meet')
+      .replace(/[^a-z0-9]+/gi, '_')
+      .replace(/^_|_$/g, '')
+      .toLowerCase();
+    link.href = url;
+    link.setAttribute('download', `${safeMeetName}_parsed_results.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   // SID Post-Meet Recap Generator
   const generatedRecapText = useMemo(() => {
     if (!parsedData) return '';
-    const teamList = Object.values(parsedData.teams);
-    const scoreLine = teamList
-      .map((t) => `${t.name} ${t.points % 1 === 0 ? t.points : t.points.toFixed(1)}`)
-      .join(', ');
+    const scoreLine = parsedData.teamScores
+      .map(
+        (t) =>
+          `${t.name}: Women ${t.womenPoints}, Men ${t.menPoints} (Total ${t.totalPoints})`
+      )
+      .join(' | ');
 
     const lines = [
-      `${parsedData.meet.name.toUpperCase()} — POST-MEET RECAP`,
-      `Date: ${parsedData.meet.startDate || 'TBD'} | Location: ${parsedData.meet.location || 'Pool'}`,
+      `${parsedData.meetInfo.name.toUpperCase()} — POST-MEET RECAP`,
+      `Date: ${parsedData.meetInfo.startDate || 'TBD'} | Location: ${
+        [parsedData.meetInfo.city, parsedData.meetInfo.state].filter(Boolean).join(', ') || 'Pool'
+      }`,
       `Team Scores: ${scoreLine}`,
       '',
     ];
@@ -2401,10 +3112,10 @@ export default function App() {
                   </div>
                   <div className="bg-white/5 border border-white/10 rounded-xl p-3.5 text-center">
                     <div className="text-xl sm:text-2xl font-extrabold text-amber-400">
-                      {parsedData ? parsedData.events.length : 0}
+                      {parsedData ? parsedData.stats.totalSwims : 0}
                     </div>
                     <div className="text-[11px] text-slate-400 font-medium mt-0.5">
-                      Meet Events
+                      Meet Swims
                     </div>
                   </div>
                 </div>
@@ -2508,7 +3219,7 @@ export default function App() {
                   </p>
                 </div>
                 <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-blue-700">
-                  <span>{parsedData ? parsedData.meet.name : 'Upload .CL2 / .SD3 File'}</span>
+                  <span>{parsedData ? parsedData.meetInfo.name : 'Upload .CL2 / .SD3 File'}</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition" />
                 </div>
               </div>
@@ -2541,41 +3252,36 @@ export default function App() {
         )}
 
         {/* ==================================================================== */}
-        {/* SECTION 1: IMPORT / REVIEW HISTORICAL DATA & MASTER LISTS            */}
+        {/* SECTION 1: HISTORICAL & MASTER LISTS                                 */}
         {/* ==================================================================== */}
         {activeSection === 'history' && (
           <div className="space-y-6">
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="p-5 sm:p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="px-5 sm:px-6 py-4 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg sm:text-xl font-extrabold text-slate-900">
-                    Master Historical Database & Reference Lists
+                  <h2 className="text-base sm:text-lg font-extrabold">
+                    Historical Benchmarks & Master Reference Lists
                   </h2>
-                  <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                    Maintain canonical athlete names (with Active flags), dated competitions, and
-                    canonical events so every Sheet row and `.cl2` meet matches cleanly.
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Import Google Sheet history, reconcile athlete/competition/event aliases, and
+                    manage canonical master lists.
                   </p>
                 </div>
-
-                {/* Sub-tabs */}
-                <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1 rounded-xl">
+                <div className="flex flex-wrap gap-1.5 bg-slate-800 p-1 rounded-xl text-xs font-bold">
                   {[
                     { id: 'import', label: 'Import & Reconcile' },
                     { id: 'roster', label: `Master Roster (${masterRoster.length})` },
-                    {
-                      id: 'competitions',
-                      label: `Master Competitions (${masterCompetitions.length})`,
-                    },
-                    { id: 'events', label: `Master Events (${masterEvents.length})` },
+                    { id: 'competitions', label: `Competitions (${masterCompetitions.length})` },
+                    { id: 'events', label: `Events (${masterEvents.length})` },
                     { id: 'database', label: `Committed DB (${historicalRecords.length})` },
                   ].map((tab) => (
                     <button
                       key={tab.id}
                       onClick={() => setHistorySubTab(tab.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
                         historySubTab === tab.id
-                          ? 'bg-white text-slate-900 shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
+                          ? 'bg-cyan-600 text-white shadow-sm'
+                          : 'text-slate-300 hover:text-white'
                       }`}
                     >
                       {tab.label}
@@ -2584,124 +3290,120 @@ export default function App() {
                 </div>
               </div>
 
-              {/* SUB-TAB A: IMPORT & RECONCILE GOOGLE SHEET DATA */}
+              {/* SUB-TAB A: GOOGLE SHEET IMPORT & RECONCILIATION */}
               {historySubTab === 'import' && (
                 <div className="p-5 sm:p-6 space-y-6">
-                  <div className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200 space-y-3">
+                  <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                        Paste 12-Column Google Sheet Rows (TSV or CSV)
+                        Paste 12-Column Google Sheet Rows (TSV / CSV)
                       </label>
                       <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setPasteSheetText(SAMPLE_GOOGLE_SHEET_CSV)}
-                          className="text-xs font-semibold text-cyan-700 hover:text-cyan-900 underline cursor-pointer"
-                        >
-                          Load Sample Sheet Rows
-                        </button>
                         <input
                           ref={historyCsvInputRef}
                           type="file"
                           accept=".csv,.tsv,.txt"
+                          className="hidden"
                           onChange={(e) => {
                             const f = e.target.files?.[0];
                             if (!f) return;
-                            const r = new FileReader();
-                            r.onload = (ev) => {
-                              setPasteSheetText(ev.target.result);
-                              handleStageHistoryText(ev.target.result);
+                            const reader = new FileReader();
+                            reader.onload = (ev) => {
+                              const txt = String(ev.target?.result || '');
+                              setPasteSheetText(txt);
+                              handleStageHistoryText(txt);
                             };
-                            r.readAsText(f);
+                            reader.readAsText(f);
+                            e.target.value = '';
                           }}
-                          className="hidden"
                         />
                         <button
                           onClick={() => historyCsvInputRef.current?.click()}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
                         >
-                          <Upload className="w-3.5 h-3.5" />
-                          Upload CSV/TSV
+                          Upload CSV/TSV File
+                        </button>
+                        <button
+                          onClick={() => {
+                            setPasteSheetText(SAMPLE_GOOGLE_SHEET_CSV);
+                            handleStageHistoryText(SAMPLE_GOOGLE_SHEET_CSV);
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 cursor-pointer"
+                        >
+                          Load Sample Sheet Rows
                         </button>
                       </div>
                     </div>
-
-                    <p className="text-[11px] text-slate-500">
-                      Expected column order:{' '}
-                      <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-700">
-                        Name | Class | Event | Min | Sec | Date | Location | Competition | Place | Time | Event | Seconds
-                      </code>
-                      . Split codes: <code className="font-bold">R</code> = Relay Lead-Off
-                      (Official), <code className="font-bold">S</code> = Intermediate Distance
-                      Split (Official + Noted).
-                    </p>
 
                     <textarea
                       rows={5}
                       value={pasteSheetText}
                       onChange={(e) => setPasteSheetText(e.target.value)}
-                      placeholder="Paste rows directly from Google Sheets here..."
-                      className="w-full p-3 text-xs font-mono bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      placeholder={`Name\tClass\tEvent\tMin\tSec\tDate\tLocation\tCompetition\tPlace\tTime\tEvent\tSeconds\nAva Berry\tFr.\t1000 Free\t10\t46.20\t2026-10-24\tGettysburg PA\tGettysburg Invitational\t1\t10:46.20\tWomen 1000 Freestyle\t646.20`}
+                      className="w-full p-3 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     />
 
-                    <div className="flex flex-wrap items-center gap-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => handleStageHistoryText(pasteSheetText)}
                         disabled={!pasteSheetText.trim()}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white shadow-sm transition cursor-pointer"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white transition cursor-pointer"
                       >
                         <SlidersHorizontal className="w-3.5 h-3.5" />
-                        Stage & Validate Rows
+                        Stage & Reconcile Rows
                       </button>
+                      {stagedHistoryRows.length > 0 && (
+                        <button
+                          onClick={() => setStagedHistoryRows([])}
+                          className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                        >
+                          Clear Staging
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Reconciliation Prompt when Unmatched Athletes/Competitions/Events appear */}
+                  {/* Unmatched Master List Reconciliation Panel */}
                   {(stagingUnmatched.athletes.length > 0 ||
                     stagingUnmatched.competitions.length > 0 ||
                     stagingUnmatched.events.length > 0) && (
-                    <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-4 sm:p-5 space-y-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 sm:p-5 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
                           <h3 className="text-sm font-extrabold text-amber-950 flex items-center gap-1.5">
-                            <AlertCircle className="w-4 h-4 text-amber-600" />
-                            Master List Reconciliation Needed ({stagingUnmatched.athletes.length}{' '}
-                            Athletes, {stagingUnmatched.competitions.length} Competitions,{' '}
+                            <Link2 className="w-4 h-4 text-amber-700" />
+                            Master List Reconciliation ({stagingUnmatched.athletes.length} Athletes,{' '}
+                            {stagingUnmatched.competitions.length} Competitions,{' '}
                             {stagingUnmatched.events.length} Events)
                           </h3>
                           <p className="text-xs text-amber-800 mt-0.5">
-                            Map spelling/nickname variants as an Alias to an existing Master entry
-                            (so future imports auto-match) or create a new Master entry.
+                            Map incoming names to existing Master List records as aliases or add them
+                            as new canonical entries.
                           </p>
                         </div>
                         <button
                           onClick={handleApplyReconciliations}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-sm transition cursor-pointer shrink-0"
+                          className="px-4 py-2 rounded-xl text-xs font-extrabold bg-amber-600 hover:bg-amber-500 text-white shadow-sm transition cursor-pointer"
                         >
-                          <Link2 className="w-3.5 h-3.5" />
-                          Apply All Reconciliations
+                          Apply Reconciliations
                         </button>
                       </div>
 
-                      {stagingUnmatched.athletes.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="text-[11px] font-bold uppercase tracking-wider text-amber-900">
-                            Unmatched Athletes
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        {stagingUnmatched.athletes.length > 0 && (
+                          <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2.5">
+                            <div className="text-xs font-bold uppercase text-slate-600">
+                              Unmatched Athletes
+                            </div>
                             {stagingUnmatched.athletes.map((item) => {
                               const selKey = `ath:${normalizeSwimmerKey(item.rawName)}`;
                               return (
-                                <div
-                                  key={selKey}
-                                  className="bg-white p-3 rounded-lg border border-amber-200 flex items-center justify-between gap-2"
-                                >
-                                  <div>
-                                    <div className="text-xs font-bold text-slate-900">
-                                      {item.rawName}
-                                    </div>
-                                    <div className="text-[11px] text-slate-500">
-                                      {item.inferredGender} • {item.count} staged row(s)
-                                    </div>
+                                <div key={selKey} className="space-y-1 text-xs">
+                                  <div className="font-bold text-slate-900">
+                                    {item.rawName}{' '}
+                                    <span className="text-slate-400 font-normal">
+                                      ({item.count} rows)
+                                    </span>
                                   </div>
                                   <select
                                     value={reconcileSelections[selKey] || '__NEW__'}
@@ -2711,15 +3413,19 @@ export default function App() {
                                         [selKey]: e.target.value,
                                       }))
                                     }
-                                    className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 max-w-[200px]"
+                                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                                   >
-                                    <option value="__NEW__">+ Create New Master Athlete</option>
+                                    <option value="__NEW__">
+                                      + Add &quot;{item.rawName}&quot; as New ({item.inferredGender})
+                                    </option>
                                     {masterRoster
                                       .slice()
-                                      .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
+                                      .sort((a, b) =>
+                                        compareByLastName(a.canonicalName, b.canonicalName)
+                                      )
                                       .map((ath) => (
                                         <option key={ath.id} value={ath.id}>
-                                          Alias → {ath.canonicalName}
+                                          Alias → {ath.canonicalName} ({ath.gender})
                                         </option>
                                       ))}
                                   </select>
@@ -2727,30 +3433,22 @@ export default function App() {
                               );
                             })}
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {stagingUnmatched.competitions.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="text-[11px] font-bold uppercase tracking-wider text-amber-900">
-                            Unmatched Competitions
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        {stagingUnmatched.competitions.length > 0 && (
+                          <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2.5">
+                            <div className="text-xs font-bold uppercase text-slate-600">
+                              Unmatched Competitions (Name + Date)
+                            </div>
                             {stagingUnmatched.competitions.map((item) => {
                               const selKey = `comp:${normalizeCompKey(item.rawName)}|${item.sampleDate}`;
                               return (
-                                <div
-                                  key={selKey}
-                                  className="bg-white p-3 rounded-lg border border-amber-200 flex items-center justify-between gap-2"
-                                >
-                                  <div>
-                                    <div className="text-xs font-bold text-slate-900">
-                                      {item.rawName}
-                                    </div>
-                                    <div className="text-[11px] text-slate-500">
-                                      {item.sampleDate || 'No date'} •{' '}
-                                      {item.sampleLocation || 'No location'} • {item.count} row(s)
-                                    </div>
+                                <div key={selKey} className="space-y-1 text-xs">
+                                  <div className="font-bold text-slate-900">
+                                    {item.rawName}{' '}
+                                    <span className="font-mono text-cyan-700">
+                                      [{item.sampleDate || 'No Date'}]
+                                    </span>
                                   </div>
                                   <select
                                     value={reconcileSelections[selKey] || '__NEW__'}
@@ -2760,13 +3458,14 @@ export default function App() {
                                         [selKey]: e.target.value,
                                       }))
                                     }
-                                    className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 max-w-[220px]"
+                                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                                   >
-                                    <option value="__NEW__">+ Create New Competition</option>
+                                    <option value="__NEW__">
+                                      + Add &quot;{item.rawName}&quot; ({item.sampleDate || 'Any Date'})
+                                    </option>
                                     {masterCompetitions.map((c) => (
                                       <option key={c.id} value={c.id}>
-                                        Alias → {c.canonicalName}
-                                        {c.date ? ` (${c.date})` : ''}
+                                        Alias → {c.canonicalName} ({c.date || 'Any Date'})
                                       </option>
                                     ))}
                                   </select>
@@ -2774,29 +3473,20 @@ export default function App() {
                               );
                             })}
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {stagingUnmatched.events.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="text-[11px] font-bold uppercase tracking-wider text-amber-900">
-                            Unmatched Events (Map to Canonical Master Event)
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        {stagingUnmatched.events.length > 0 && (
+                          <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2.5">
+                            <div className="text-xs font-bold uppercase text-slate-600">
+                              Unmatched Events
+                            </div>
                             {stagingUnmatched.events.map((item) => {
                               const selKey = `ev:${item.rawEvent.toLowerCase()}|${item.genderHint}`;
                               return (
-                                <div
-                                  key={selKey}
-                                  className="bg-white p-3 rounded-lg border border-amber-200 flex items-center justify-between gap-2"
-                                >
-                                  <div>
-                                    <div className="text-xs font-bold text-slate-900">
-                                      {item.rawEvent}
-                                    </div>
-                                    <div className="text-[11px] text-slate-500">
-                                      {item.genderHint || 'Gender unknown'} • {item.count} row(s)
-                                    </div>
+                                <div key={selKey} className="space-y-1 text-xs">
+                                  <div className="font-bold text-slate-900">
+                                    {item.rawEvent}{' '}
+                                    {item.genderHint ? `(${item.genderHint})` : ''}
                                   </div>
                                   <select
                                     value={reconcileSelections[selKey] || ''}
@@ -2806,12 +3496,12 @@ export default function App() {
                                         [selKey]: e.target.value,
                                       }))
                                     }
-                                    className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 max-w-[220px]"
+                                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                                   >
-                                    <option value="">-- Select Master Event --</option>
+                                    <option value="">-- Select Canonical Event --</option>
                                     {masterEvents.map((ev) => (
                                       <option key={ev.id} value={ev.id}>
-                                        Alias → {ev.canonicalName}
+                                        {ev.canonicalName}
                                       </option>
                                     ))}
                                   </select>
@@ -2819,23 +3509,23 @@ export default function App() {
                               );
                             })}
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   )}
 
                   {/* Staged Preview Table */}
                   {stagedHistoryRows.length > 0 && (
                     <div className="space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="text-xs font-bold text-slate-700">
-                          Staging Preview ({stagedHistoryRows.filter((r) => r.selected).length} of{' '}
-                          {stagedHistoryRows.length} rows selected)
+                          Staged Rows ({stagedHistoryRows.filter((r) => r.selected).length} of{' '}
+                          {stagedHistoryRows.length} selected)
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <button
                             onClick={() => handleCommitStagedRows('append')}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             Append Selected to Database
@@ -2849,153 +3539,113 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-96">
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[420px]">
                         <table className="w-full text-left text-xs">
                           <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
                             <tr>
-                              <th className="py-2.5 px-3">Keep</th>
+                              <th className="py-2.5 px-3 w-10">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    stagedHistoryRows.length > 0 &&
+                                    stagedHistoryRows.every((r) => r.selected)
+                                  }
+                                  onChange={(e) =>
+                                    setStagedHistoryRows((prev) =>
+                                      prev.map((r) => ({ ...r, selected: e.target.checked }))
+                                    )
+                                  }
+                                />
+                              </th>
                               <th className="py-2.5 px-3">Athlete</th>
-                              <th className="py-2.5 px-3">Class</th>
-                              <th className="py-2.5 px-3">Master Event</th>
+                              <th className="py-2.5 px-3">Event</th>
                               <th className="py-2.5 px-3">Time</th>
-                              <th className="py-2.5 px-3">Master Competition</th>
+                              <th className="py-2.5 px-3">Competition</th>
                               <th className="py-2.5 px-3">Date</th>
-                              <th className="py-2.5 px-3">Swim Classification</th>
+                              <th className="py-2.5 px-3">Classification</th>
+                              <th className="py-2.5 px-3">Status</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {stagedHistoryRows.map((row, idx) => (
+                            {stagedHistoryRows.map((row) => (
                               <tr
                                 key={row.id}
-                                className={row.isDuplicate ? 'bg-amber-50/50' : 'bg-white'}
+                                className={row.isDuplicate ? 'bg-slate-50/70 text-slate-400' : ''}
                               >
                                 <td className="py-2 px-3">
                                   <input
                                     type="checkbox"
                                     checked={row.selected}
-                                    onChange={(e) => {
-                                      const checked = e.target.checked;
+                                    onChange={(e) =>
                                       setStagedHistoryRows((prev) =>
-                                        prev.map((item, i) =>
-                                          i === idx ? { ...item, selected: checked } : item
+                                        prev.map((item) =>
+                                          item.id === row.id
+                                            ? { ...item, selected: e.target.checked }
+                                            : item
                                         )
-                                      );
-                                    }}
-                                    className="rounded text-cyan-600"
+                                      )
+                                    }
                                   />
                                 </td>
                                 <td className="py-2 px-3 font-bold text-slate-900">
                                   {row.swimmerName}
                                 </td>
-                                <td className="py-2 px-3">{row.classYear || '—'}</td>
+                                <td className="py-2 px-3">{row.eventLabel}</td>
+                                <td className="py-2 px-3 font-mono font-bold text-cyan-800">
+                                  {row.time}
+                                </td>
+                                <td className="py-2 px-3">
+                                  {row.competition || '—'}
+                                  {row.round === 'Prelims' && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                      Prelims (SF)
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3 font-mono">{row.date || '—'}</td>
                                 <td className="py-2 px-3">
                                   <select
-                                    value={row.eventKey}
+                                    value={row.swimType}
                                     onChange={(e) => {
-                                      const chosenEv = masterEvents.find(
-                                        (ev) => ev.eventKey === e.target.value
-                                      );
+                                      const val = e.target.value;
                                       setStagedHistoryRows((prev) =>
-                                        prev.map((item, i) =>
-                                          i === idx
+                                        prev.map((item) =>
+                                          item.id === row.id
                                             ? {
                                                 ...item,
-                                                eventKey: e.target.value,
-                                                eventLabel: chosenEv
-                                                  ? chosenEv.canonicalName
-                                                  : toTitleEventLabel(e.target.value),
-                                                isEventMatched: Boolean(chosenEv),
+                                                swimType: val,
+                                                place:
+                                                  val === 'RELAY_LEADOFF'
+                                                    ? 'R'
+                                                    : val === 'INTERMEDIATE_SPLIT'
+                                                    ? 'S'
+                                                    : item.place === 'R' || item.place === 'S'
+                                                    ? ''
+                                                    : item.place,
                                               }
                                             : item
                                         )
                                       );
                                     }}
-                                    className={`text-xs border rounded px-2 py-1 ${
-                                      row.isEventMatched
-                                        ? 'bg-white border-slate-200 text-slate-800'
-                                        : 'bg-amber-50 border-amber-300 text-amber-900 font-semibold'
-                                    }`}
+                                    className="px-2 py-1 bg-white border border-slate-200 rounded text-[11px]"
                                   >
-                                    {!masterEvents.some((ev) => ev.eventKey === row.eventKey) && (
-                                      <option value={row.eventKey}>{row.eventLabel} (Unmatched)</option>
-                                    )}
-                                    {masterEvents.map((ev) => (
-                                      <option key={ev.id} value={ev.eventKey}>
-                                        {ev.canonicalName}
-                                      </option>
-                                    ))}
+                                    <option value="OFFICIAL">Official Individual</option>
+                                    <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
+                                    <option value="INTERMEDIATE_SPLIT">
+                                      Intermediate Split (S)
+                                    </option>
                                   </select>
                                 </td>
-                                <td className="py-2 px-3 font-mono font-semibold">{row.time}</td>
-                                <td className="py-2 px-3 text-slate-700 font-medium">
-                                  <div className="flex flex-wrap items-center gap-1.5">
-                                    <span>{row.competition || '—'}</span>
-                                    {row.round === 'Prelims' && (
-                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
-                                        Prelims (SF)
-                                      </span>
-                                    )}
-                                    {row.round === 'Time Trial' && (
-                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">
-                                        TT
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="py-2 px-3 text-slate-500">{row.date || '—'}</td>
                                 <td className="py-2 px-3">
-                                  <div className="flex items-center gap-1.5">
-                                    <select
-                                      value={row.swimType || 'OFFICIAL'}
-                                      onChange={(e) => {
-                                        const nextType = e.target.value;
-                                        const nextPlace =
-                                          nextType === 'RELAY_LEADOFF'
-                                            ? 'R'
-                                            : nextType === 'INTERMEDIATE_SPLIT'
-                                            ? 'S'
-                                            : row.place === 'R' ||
-                                              row.place === 'S' ||
-                                              row.place === 'LR'
-                                            ? ''
-                                            : row.place;
-                                        setStagedHistoryRows((prev) =>
-                                          prev.map((item, i) =>
-                                            i === idx
-                                              ? {
-                                                  ...item,
-                                                  swimType: nextType,
-                                                  isOfficial: true,
-                                                  place: nextPlace,
-                                                  splitContext:
-                                                    nextType === 'INTERMEDIATE_SPLIT'
-                                                      ? 'Intermediate Distance Split'
-                                                      : '',
-                                                }
-                                              : item
-                                          )
-                                        );
-                                      }}
-                                      className={`text-[11px] font-bold border rounded px-2 py-1 ${
-                                        row.swimType === 'INTERMEDIATE_SPLIT'
-                                          ? 'bg-amber-50 border-amber-200 text-amber-900'
-                                          : row.swimType === 'RELAY_LEADOFF'
-                                          ? 'bg-cyan-50 border-cyan-200 text-cyan-800'
-                                          : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                                      }`}
-                                    >
-                                      <option value="OFFICIAL">Official Individual</option>
-                                      <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
-                                      <option value="INTERMEDIATE_SPLIT">
-                                        Intermediate Split (S)
-                                      </option>
-                                    </select>
-                                    {row.isDuplicate && (
-                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                                        Dup
-                                      </span>
-                                    )}
-                                  </div>
+                                  {row.isDuplicate ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-600">
+                                      Duplicate
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                      Ready
+                                    </span>
+                                  )}
                                 </td>
                               </tr>
                             ))}
@@ -3007,19 +3657,19 @@ export default function App() {
                 </div>
               )}
 
-              {/* SUB-TAB B: MASTER ATHLETE ROSTER */}
+              {/* SUB-TAB B: MASTER ROSTER */}
               {historySubTab === 'roster' && (
                 <div className="p-5 sm:p-6 space-y-5">
                   <div className="bg-cyan-50/50 p-4 rounded-xl border border-cyan-200/80 space-y-2.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label className="text-xs font-bold uppercase tracking-wider text-cyan-900 flex items-center gap-1.5">
-                        <Users className="w-4 h-4 text-cyan-700" />
-                        Mass Roster Importer (Paste from Google Sheets or CSV)
+                        <UserPlus className="w-4 h-4 text-cyan-700" />
+                        Mass Roster Importer
                       </label>
                       <span className="text-[11px] text-cyan-800 font-medium">
                         Columns:{' '}
                         <code className="bg-white px-1 rounded">
-                          Name, Gender (Women/Men), Active (Yes/No), Aliases
+                          Name, Gender, Active (Yes/No), Aliases (semicolon-separated)
                         </code>
                       </span>
                     </div>
@@ -4123,403 +4773,1296 @@ export default function App() {
         )}
 
         {/* ==================================================================== */}
-        {/* SECTION 4: IMPORT MEET RESULTS (.CL2 / .SD3)                         */}
+        {/* SECTION 4: IMPORT MEET RESULTS (EXACT ORIGINAL PARSER & LAYOUT)      */}
         {/* ==================================================================== */}
         {activeSection === 'import' && (
           <div className="space-y-6">
-            {/* Upload / Sample Header Bar */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-cyan-700 mb-1">
-                  <FolderUp className="w-4 h-4" />
-                  SDIF / CL2 Meet Results Analyzer
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".cl2,.sd3,.txt"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
+                e.target.value = '';
+              }}
+            />
+
+            {/* Compact Command Center Upload & Quick-Load Bar */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingMeet(true);
+              }}
+              onDragLeave={() => setIsDraggingMeet(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingMeet(false);
+                if (e.dataTransfer.files?.[0]) handleFileUpload(e.dataTransfer.files[0]);
+              }}
+              className={`bg-white rounded-2xl border-2 border-dashed p-4 sm:p-5 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm ${
+                isDraggingMeet
+                  ? 'border-cyan-500 bg-cyan-50/70'
+                  : 'border-slate-300 hover:border-cyan-400'
+              }`}
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-xl bg-cyan-50 border border-cyan-100 flex items-center justify-center text-cyan-600 shrink-0">
+                  <FileText className="w-5 h-5" />
                 </div>
-                <h2 className="text-lg sm:text-xl font-extrabold text-slate-900">
-                  {parsedData ? parsedData.meet.name : 'Upload Hy-Tek .CL2 or .SD3 File'}
-                </h2>
-                <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                  {parsedData
-                    ? `${parsedData.meet.location || 'Pool'} • ${parsedData.meet.startDate || ''} • Course: ${parsedData.meet.course}`
-                    : 'Drop a Hy-Tek .cl2 / .sd3 results file or load the sample dual meet to inspect team scores, event results, and splits.'}
-                </p>
+                <div>
+                  <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
+                    Hy-Tek Meet Results Importer (.CL2 / .SD3)
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Drag &amp; drop a <code className="font-mono text-slate-700">.cl2</code> or{' '}
+                    <code className="font-mono text-slate-700">.sd3</code> results file anywhere in
+                    this box, or choose a file to parse below.
+                  </p>
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2.5">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".cl2,.sd3,.txt"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white shadow-sm transition cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs shadow-sm transition cursor-pointer"
                 >
-                  <Upload className="w-4 h-4" />
-                  Upload .CL2 / .SD3
+                  <Upload className="w-3.5 h-3.5 text-cyan-400" />
+                  Select .CL2 / .SD3 File
                 </button>
                 <button
                   onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs shadow-sm transition cursor-pointer"
                 >
-                  <Sparkles className="w-4 h-4 text-cyan-400" />
+                  <Play className="w-3.5 h-3.5 fill-current" />
                   Load Sample Meet
                 </button>
               </div>
             </div>
 
+            {/* Error Alert */}
+            {meetErrorMsg && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start justify-between gap-3 text-red-800 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-sm font-semibold">Unable to Parse File</h3>
+                    <p className="text-sm text-red-700 mt-0.5">{meetErrorMsg}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMeetErrorMsg('')}
+                  className="text-red-500 hover:text-red-700 p-1 rounded-lg cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Parsed Meet Results View (Always visible below the compact upload bar) */}
             {!parsedData ? (
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="bg-white border-2 border-dashed border-slate-300 hover:border-cyan-500 rounded-2xl p-12 text-center cursor-pointer transition group"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-cyan-50 text-cyan-600 flex items-center justify-center mx-auto mb-3 group-hover:scale-105 transition">
-                  <Upload className="w-6 h-6" />
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950 px-6 py-4 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-300">
+                      Ready to Parse
+                    </span>
+                    <h3 className="text-lg font-bold tracking-tight mt-0.5">
+                      No Meet File Loaded Yet
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-0.5">
+                      Select a `.cl2` / `.sd3` file above or load the sample meet to populate team
+                      scores, event results, splits, and relays here.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 shrink-0">
+                    <div className="bg-white/10 border border-white/10 rounded-xl px-4 py-2.5 text-center">
+                      <div className="text-[11px] text-cyan-200 font-medium uppercase">Teams</div>
+                      <div className="text-lg font-bold text-white">—</div>
+                    </div>
+                    <div className="bg-white/10 border border-white/10 rounded-xl px-4 py-2.5 text-center">
+                      <div className="text-[11px] text-cyan-200 font-medium uppercase">Swimmers</div>
+                      <div className="text-lg font-bold text-white">—</div>
+                    </div>
+                    <div className="bg-white/10 border border-white/10 rounded-xl px-4 py-2.5 text-center">
+                      <div className="text-[11px] text-cyan-200 font-medium uppercase">Swims</div>
+                      <div className="text-lg font-bold text-white">—</div>
+                    </div>
+                  </div>
                 </div>
-                <div className="text-base font-extrabold text-slate-900">
-                  Click to select a Hy-Tek .CL2 or .SD3 file
+                <div className="p-8 text-center text-xs sm:text-sm text-slate-500">
+                  Individual results, relay splits, and Women&apos;s / Men&apos;s team scoreboards
+                  will populate right here as soon as a meet file is imported.
                 </div>
-                <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                  Automatically parses B1 Meet Headers, C1 Team Scores, D0/D3 Individual Results,
-                  G0 50-Yard Splits, and E0/F0 Relay Lineups.
-                </p>
               </div>
             ) : (
-              <>
-                {/* Meet Hero Banner + Team Scoreboard Cards */}
-                <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950 text-white rounded-2xl p-5 sm:p-6 shadow-lg border border-slate-800 space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
+              <div className="space-y-6">
+                {/* Meet Summary Banner Card */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950 px-6 py-5 text-white flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                     <div>
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-cyan-400">
-                        Meet Scoreboard & Primary Team Focus
+                      <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
+                        {parsedData.meetInfo.name}
+                      </h2>
+                      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-2 text-sm text-slate-300">
+                        {parsedData.meetInfo.startDate && (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Calendar className="w-4 h-4 text-cyan-400" />
+                            {parsedData.meetInfo.startDate}
+                          </span>
+                        )}
+                        {(parsedData.meetInfo.city || parsedData.meetInfo.state) && (
+                          <span className="inline-flex items-center gap-1.5">
+                            <MapPin className="w-4 h-4 text-cyan-400" />
+                            {[parsedData.meetInfo.city, parsedData.meetInfo.state]
+                              .filter(Boolean)
+                              .join(', ')}
+                          </span>
+                        )}
+                        {parsedData.meetInfo.software && (
+                          <span className="inline-flex items-center gap-1.5 text-xs bg-white/10 px-2.5 py-0.5 rounded-full text-slate-200">
+                            {parsedData.meetInfo.software}
+                          </span>
+                        )}
                       </div>
-                      <h3 className="text-xl sm:text-2xl font-extrabold mt-0.5">
-                        {parsedData.meet.name}
-                      </h3>
-                      <div className="text-xs text-slate-300 mt-1">
-                        {parsedData.meet.location || 'Pool'} • {parsedData.meet.startDate || 'Date TBD'} • {parsedData.meet.course}
+
+                      <div className="flex flex-wrap items-center gap-2 mt-4">
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white shadow-sm transition cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Import New .CL2</span>
+                        </button>
+                        <button
+                          onClick={handleExportMeetCSV}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Export CSV</span>
+                        </button>
+                        <button
+                          onClick={() => setActiveSection('postmeet')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 text-cyan-200 border border-white/15 transition cursor-pointer"
+                        >
+                          <Award className="w-3.5 h-3.5" />
+                          <span>Post-Meet Wins & Commit</span>
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
+                    {/* KPI Stats Pills */}
+                    <div className="grid grid-cols-3 gap-3 sm:gap-4 shrink-0">
+                      <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl px-4 py-3 text-center">
+                        <div className="text-xs text-cyan-200 font-medium uppercase tracking-wider">
+                          Teams
+                        </div>
+                        <div className="text-xl sm:text-2xl font-bold text-white mt-0.5">
+                          {parsedData.stats.totalTeams}
+                        </div>
+                      </div>
+                      <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl px-4 py-3 text-center">
+                        <div className="text-xs text-cyan-200 font-medium uppercase tracking-wider">
+                          Swimmers
+                        </div>
+                        <div className="text-xl sm:text-2xl font-bold text-white mt-0.5">
+                          {parsedData.stats.totalSwimmers}
+                        </div>
+                      </div>
+                      <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl px-4 py-3 text-center">
+                        <div className="text-xs text-cyan-200 font-medium uppercase tracking-wider">
+                          Total Swims
+                        </div>
+                        <div className="text-xl sm:text-2xl font-bold text-white mt-0.5">
+                          {parsedData.stats.totalSwims}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Women's & Men's Team Scoreboards */}
+                  {parsedData.teamScores && parsedData.teamScores.length > 0 && (
+                    <div className="px-4 sm:px-6 py-4 bg-white border-t border-slate-200">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Women's Team Score Card */}
+                        {(() => {
+                          const womenSorted = [...parsedData.teamScores].sort(
+                            (a, b) => b.womenPoints - a.womenPoints
+                          );
+                          return (
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+                              <div className="flex items-center justify-between mb-2.5">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                                  <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                                  Women&apos;s Team Scores
+                                </span>
+                                {womenSorted.length === 2 && (
+                                  <span className="text-xs font-mono font-bold text-cyan-800 bg-cyan-50 border border-cyan-200 px-2 py-0.5 rounded-full">
+                                    {womenSorted[0].womenPoints} – {womenSorted[1].womenPoints}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="space-y-1.5">
+                                {womenSorted.map((t, idx) => (
+                                  <div
+                                    key={`w-${t.code}`}
+                                    onClick={() => {
+                                      setSelectedTeam(t.code);
+                                      try {
+                                        localStorage.setItem('swimmeet_primary_team_v1', t.code);
+                                      } catch {}
+                                    }}
+                                    className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition ${
+                                      idx === 0 && t.womenPoints > 0
+                                        ? 'bg-white border border-amber-200 shadow-2xs font-bold text-slate-900'
+                                        : 'bg-white/70 border border-slate-200/70 text-slate-700 font-medium hover:bg-white'
+                                    }`}
+                                  >
+                                    <span className="truncate pr-2">{t.name}</span>
+                                    <span className="font-mono font-bold tabular-nums">
+                                      {t.womenPoints}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Men's Team Score Card */}
+                        {(() => {
+                          const menSorted = [...parsedData.teamScores].sort(
+                            (a, b) => b.menPoints - a.menPoints
+                          );
+                          return (
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+                              <div className="flex items-center justify-between mb-2.5">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                                  <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                                  Men&apos;s Team Scores
+                                </span>
+                                {menSorted.length === 2 && (
+                                  <span className="text-xs font-mono font-bold text-cyan-800 bg-cyan-50 border border-cyan-200 px-2 py-0.5 rounded-full">
+                                    {menSorted[0].menPoints} – {menSorted[1].menPoints}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="space-y-1.5">
+                                {menSorted.map((t, idx) => (
+                                  <div
+                                    key={`m-${t.code}`}
+                                    onClick={() => {
+                                      setSelectedTeam(t.code);
+                                      try {
+                                        localStorage.setItem('swimmeet_primary_team_v1', t.code);
+                                      } catch {}
+                                    }}
+                                    className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition ${
+                                      idx === 0 && t.menPoints > 0
+                                        ? 'bg-white border border-amber-200 shadow-2xs font-bold text-slate-900'
+                                        : 'bg-white/70 border border-slate-200/70 text-slate-700 font-medium hover:bg-white'
+                                    }`}
+                                  >
+                                    <span className="truncate pr-2">{t.name}</span>
+                                    <span className="font-mono font-bold tabular-nums">
+                                      {t.menPoints}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* View Switcher Tabs */}
+                  <div className="px-4 sm:px-6 bg-slate-50/80 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-1 -mb-px overflow-x-auto">
                       <button
-                        onClick={() => setActiveSection('postmeet')}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition cursor-pointer"
+                        onClick={() => {
+                          setMeetSubTab('individual');
+                          setSelectedEventFilter('ALL');
+                        }}
+                        className={`px-4 py-3.5 text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 cursor-pointer ${
+                          meetSubTab === 'individual'
+                            ? 'border-cyan-600 text-cyan-700'
+                            : 'border-transparent text-slate-600 hover:text-slate-900'
+                        }`}
                       >
-                        <Award className="w-4 h-4" />
-                        Post-Meet Wins & Commit
+                        <Timer className="w-4 h-4" />
+                        Individual Results
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700">
+                          {parsedData.individualResults.length}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setMeetSubTab('relays');
+                          setSelectedEventFilter('ALL');
+                        }}
+                        className={`px-4 py-3.5 text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 cursor-pointer ${
+                          meetSubTab === 'relays'
+                            ? 'border-cyan-600 text-cyan-700'
+                            : 'border-transparent text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <Layers className="w-4 h-4" />
+                        Relay Results
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700">
+                          {parsedData.relayResults.length}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => setMeetSubTab('roster')}
+                        className={`px-4 py-3.5 text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 cursor-pointer ${
+                          meetSubTab === 'roster'
+                            ? 'border-cyan-600 text-cyan-700'
+                            : 'border-transparent text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <Users className="w-4 h-4" />
+                        Team Roster
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700">
+                          {parsedData.stats.totalSwimmers}
+                        </span>
                       </button>
                     </div>
-                  </div>
 
-                  {/* Team Score Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                    {Object.values(parsedData.teams).map((team) => {
-                      const isSelected = selectedTeam === team.code;
-                      return (
-                        <div
-                          key={team.code}
-                          onClick={() => {
-                            setSelectedTeam(team.code);
-                            try {
-                              localStorage.setItem('swimmeet_primary_team_v1', team.code);
-                            } catch {}
-                          }}
-                          className={`p-4 rounded-xl border transition cursor-pointer flex items-center justify-between ${
-                            isSelected
-                              ? 'bg-cyan-500/20 border-cyan-400 shadow-md'
-                              : 'bg-white/5 border-white/10 hover:bg-white/10'
-                          }`}
+                    <div className="py-2 text-xs text-slate-500 hidden md:block">
+                      Tip: Click any row with splits or relay legs to inspect detailed breakdowns
+                    </div>
+                  </div>
+                </div>
+
+                {/* Filter & Search Bar */}
+                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-center">
+                    <div className="lg:col-span-4 relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search swimmer, team, or event..."
+                        className="w-full pl-9 pr-8 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:bg-white transition"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
                         >
-                          <div>
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">
-                              {isSelected ? '★ Primary Program Focus' : `Team Code: ${team.code}`}
-                            </div>
-                            <div className="text-base font-extrabold text-white mt-0.5">
-                              {team.name}
-                            </div>
-                          </div>
-                          <div className="text-2xl sm:text-3xl font-black text-cyan-300 font-mono">
-                            {team.points % 1 === 0 ? team.points : team.points.toFixed(1)}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
 
-                {/* 3-Card Summary KPI Strip */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center shrink-0">
-                      <Timer className="w-5 h-5" />
+                    <div className="lg:col-span-3">
+                      <select
+                        value={selectedTeam}
+                        onChange={(e) => {
+                          setSelectedTeam(e.target.value);
+                          try {
+                            localStorage.setItem('swimmeet_primary_team_v1', e.target.value);
+                          } catch {}
+                        }}
+                        className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:bg-white"
+                      >
+                        <option value="ALL">All Teams ({parsedData.teams.length})</option>
+                        {parsedData.teams.map((t) => (
+                          <option key={t.code} value={t.code}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                    <div>
-                      <div className="text-[11px] font-bold uppercase text-slate-400">
-                        Total Events Parsed
-                      </div>
-                      <div className="text-xl font-black text-slate-900">
-                        {parsedData.events.length} Events
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                      <Trophy className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="text-[11px] font-bold uppercase text-slate-400">
-                        Event Victories ({parsedData.teams[selectedTeam]?.shortName || 'Selected'})
+                    {meetSubTab !== 'roster' ? (
+                      <div className="lg:col-span-3">
+                        <select
+                          value={selectedEventFilter}
+                          onChange={(e) => setSelectedEventFilter(e.target.value)}
+                          className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:bg-white"
+                        >
+                          <option value="ALL">All Events ({availableMeetEvents.length})</option>
+                          {availableMeetEvents.map((ev) => (
+                            <option key={ev.label} value={ev.label}>
+                              #{ev.num} — {ev.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                      <div className="text-xl font-black text-slate-900">
-                        {winSummary.totalWins} Wins
-                      </div>
-                    </div>
-                  </div>
+                    ) : (
+                      <div className="lg:col-span-3 hidden lg:block" />
+                    )}
 
-                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-                      <Users className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="text-[11px] font-bold uppercase text-slate-400">
-                        Swimmers & Relays
-                      </div>
-                      <div className="text-xl font-black text-slate-900">
-                        {parsedData.events.reduce((sum, e) => sum + e.entries.length, 0)} Entries
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Filters & Search Bar */}
-                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex bg-slate-100 p-1 rounded-xl">
-                      {['ALL', 'WOMEN', 'MEN'].map((g) => (
+                    <div className="lg:col-span-2 flex bg-slate-100 p-1 rounded-lg border border-slate-200/80">
+                      {['ALL', 'Men', 'Women'].map((g) => (
                         <button
                           key={g}
                           onClick={() => setGenderFilter(g)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          className={`flex-1 py-1 text-xs font-semibold rounded-md transition cursor-pointer ${
                             genderFilter === g
-                              ? 'bg-white text-slate-900 shadow-sm'
+                              ? 'bg-white text-slate-900 shadow-xs'
                               : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
-                          {g === 'ALL' ? 'All Genders' : g}
+                          {g === 'ALL' ? 'All' : g}
                         </button>
                       ))}
                     </div>
-
-                    <div className="flex bg-slate-100 p-1 rounded-xl">
-                      {['ALL', 'INDIVIDUAL', 'RELAY'].map((t) => (
-                        <button
-                          key={t}
-                          onClick={() => setTypeFilter(t)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                            typeFilter === t
-                              ? 'bg-cyan-600 text-white shadow-sm'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          {t === 'ALL' ? 'All Events' : t}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="relative flex-1 min-w-[220px] max-w-xs">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search swimmer or event..."
-                      className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    />
                   </div>
                 </div>
 
-                {/* Event-by-Event Result Cards */}
-                <div className="space-y-4">
-                  {filteredEvents.map((ev) => (
-                    <div
-                      key={ev.key}
-                      className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-                    >
-                      <div className="bg-slate-900 text-white px-5 py-3 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                            {ev.type}
-                          </span>
-                          <h4 className="font-extrabold text-sm">{ev.eventLabel}</h4>
-                        </div>
-                        <span className="text-xs text-slate-400 font-semibold">
-                          {ev.entries.length} {ev.type === 'Relay' ? 'Relays' : 'Swimmers'}
-                        </span>
+                {/* TAB 1: INDIVIDUAL RESULTS (GROUPED BY EVENT CARDS) */}
+                {meetSubTab === 'individual' && (
+                  <div className="space-y-6">
+                    {groupedIndividualEvents.length === 0 ? (
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm py-12 text-center text-slate-500 text-sm">
+                        No individual swim results match the current filter criteria.
                       </div>
+                    ) : (
+                      groupedIndividualEvents.map((eventGroup) => {
+                        const expandableSwims = eventGroup.swims.filter(
+                          (r) => r.splits && r.splits.length > 0
+                        );
+                        const allExpanded =
+                          expandableSwims.length > 0 &&
+                          expandableSwims.every((r) => expandedRows.has(r.id));
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs">
-                          <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200">
-                            <tr>
-                              <th className="py-2.5 px-4 w-16">Place</th>
-                              <th className="py-2.5 px-4">
-                                {ev.type === 'Relay' ? 'Relay Team & Legs' : 'Athlete'}
-                              </th>
-                              <th className="py-2.5 px-4">Team</th>
-                              <th className="py-2.5 px-4">Seed</th>
-                              <th className="py-2.5 px-4">Finals</th>
-                              <th className="py-2.5 px-4 text-right">Points</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {ev.entries.map((entry) => {
-                              const isPrimary = entry.teamCode === selectedTeam;
-                              const tags =
-                                ev.type === 'Individual' && isPrimary
-                                  ? benchmarkIndex.evaluateSwim(
-                                      entry.swimmerName,
-                                      ev.eventLabel,
-                                      entry.finalsTime,
-                                      entry.classYear
-                                    )
-                                  : [];
-                              const hasSplits = entry.splits && entry.splits.length > 0;
-                              const isExpanded = Boolean(expandedSplits[entry.id]);
+                        return (
+                          <div
+                            key={eventGroup.key}
+                            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+                          >
+                            <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
+                                  Event #{eventGroup.eventNumber}
+                                </span>
+                                <div>
+                                  <h3 className="text-base font-bold tracking-tight">
+                                    {eventGroup.eventLabel}
+                                  </h3>
+                                  <p className="text-xs text-slate-400">
+                                    {eventGroup.swims.length}{' '}
+                                    {eventGroup.swims.length === 1 ? 'Swimmer' : 'Swimmers'} •{' '}
+                                    {eventGroup.course}
+                                  </p>
+                                </div>
+                              </div>
 
-                              return (
-                                <React.Fragment key={entry.id}>
-                                  <tr
-                                    className={
-                                      isPrimary
-                                        ? 'bg-cyan-50/40 font-medium'
-                                        : 'hover:bg-slate-50'
-                                    }
-                                  >
-                                    <td className="py-3 px-4 font-black text-slate-900">
-                                      {entry.place === '1' ? (
-                                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-900 font-black">
-                                          1
-                                        </span>
-                                      ) : (
-                                        entry.place || '—'
-                                      )}
-                                    </td>
-                                    <td className="py-3 px-4">
-                                      {ev.type === 'Individual' ? (
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <span className="font-bold text-slate-900">
-                                            {entry.swimmerName}
-                                          </span>
-                                          {entry.classYear && (
-                                            <span className="text-[11px] text-slate-400 font-semibold">
-                                              ({entry.classYear})
-                                            </span>
-                                          )}
-                                          {tags.map((t, i) => (
-                                            <span
-                                              key={i}
-                                              className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
-                                            >
-                                              {t.label}
-                                            </span>
-                                          ))}
-                                          {hasSplits && (
-                                            <button
-                                              onClick={() =>
-                                                setExpandedSplits((prev) => ({
-                                                  ...prev,
-                                                  [entry.id]: !prev[entry.id],
-                                                }))
-                                              }
-                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-50 text-cyan-700 hover:bg-cyan-100 text-[11px] font-bold transition cursor-pointer"
-                                            >
-                                              {isExpanded ? 'Hide Splits' : `Splits (${entry.splits.length})`}
-                                              {isExpanded ? (
-                                                <ChevronUp className="w-3 h-3" />
-                                              ) : (
-                                                <ChevronDown className="w-3 h-3" />
-                                              )}
-                                            </button>
-                                          )}
-                                        </div>
-                                      ) : (
-                                        <div className="space-y-1">
-                                          <div className="font-bold text-slate-900">
-                                            {entry.teamName} — Relay {entry.relayLetter}
-                                          </div>
-                                          {entry.legs && entry.legs.length > 0 && (
-                                            <div className="text-[11px] text-slate-600 flex flex-wrap gap-x-3 gap-y-0.5">
-                                              {entry.legs.map((l) => (
-                                                <span key={l.leg}>
-                                                  <strong className="text-slate-700">
-                                                    {l.leg}.
-                                                  </strong>{' '}
-                                                  {l.name}
-                                                  {l.split ? ` (${l.split})` : ''}
+                              {expandableSwims.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleAllIndividualsInEvent(eventGroup.swims)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition cursor-pointer"
+                                >
+                                  {allExpanded ? (
+                                    <>
+                                      <ChevronDown className="w-3.5 h-3.5" />
+                                      <span>Collapse All Splits</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ChevronRight className="w-3.5 h-3.5" />
+                                      <span>Expand All Splits</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left border-collapse">
+                                <thead>
+                                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                    <th className="py-3 pl-4 pr-2 w-10"></th>
+                                    <th
+                                      onClick={() => handleSort('place')}
+                                      className="py-3 px-3 w-20 text-center cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center justify-center gap-1">
+                                        <span>Place</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th
+                                      onClick={() => handleSort('swimmerName')}
+                                      className="py-3 px-3 cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center gap-1">
+                                        <span>Swimmer</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th
+                                      onClick={() => handleSort('teamName')}
+                                      className="py-3 px-3 cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center gap-1">
+                                        <span>Team</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th
+                                      onClick={() => handleSort('time')}
+                                      className="py-3 px-3 text-right cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center justify-end gap-1">
+                                        <span>Finals Time</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th className="py-3 px-3 text-right w-28">Behind</th>
+                                    <th className="py-3 px-3 text-center w-16">Pts</th>
+                                    <th className="py-3 pl-3 pr-5 text-right w-28">Splits</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 text-sm">
+                                  {eventGroup.swims.map((row) => {
+                                    const hasSplits = row.splits && row.splits.length > 0;
+                                    const isExpanded = expandedRows.has(row.id);
+                                    const splitAnalysis = isExpanded
+                                      ? calculateSplitBreakdown(
+                                          row.splits,
+                                          row.distance,
+                                          row.splitInterval,
+                                          row.splitType
+                                        )
+                                      : null;
+                                    const behindSec =
+                                      isFinite(row.timeSeconds) &&
+                                      isFinite(eventGroup.fastestTimeSec)
+                                        ? row.timeSeconds - eventGroup.fastestTimeSec
+                                        : Infinity;
+                                    const displaySwimmer = formatSwimmerDisplay(
+                                      row.swimmerName,
+                                      row.preferredFirst
+                                    );
+                                    const tags = benchmarkIndex.evaluateSwim(
+                                      displaySwimmer,
+                                      row.eventLabel,
+                                      row.finalsTime,
+                                      row.classYear
+                                    );
+
+                                    return (
+                                      <React.Fragment key={row.id}>
+                                        <tr
+                                          onClick={() => hasSplits && toggleRow(row.id)}
+                                          className={`transition ${
+                                            hasSplits
+                                              ? 'cursor-pointer hover:bg-cyan-50/40'
+                                              : 'hover:bg-slate-50/70'
+                                          } ${isExpanded ? 'bg-cyan-50/50' : ''}`}
+                                        >
+                                          <td className="py-3 pl-4 pr-2 text-slate-400">
+                                            {hasSplits && (
+                                              <button
+                                                type="button"
+                                                aria-label="Toggle splits"
+                                                className="p-1 rounded hover:bg-slate-200/60 text-cyan-600"
+                                              >
+                                                {isExpanded ? (
+                                                  <ChevronDown className="w-4 h-4" />
+                                                ) : (
+                                                  <ChevronRight className="w-4 h-4" />
+                                                )}
+                                              </button>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3 text-center">
+                                            {row.place ? (
+                                              <span
+                                                className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+                                                  row.place === 1
+                                                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                                    : row.place === 2
+                                                    ? 'bg-slate-200 text-slate-800 border border-slate-300'
+                                                    : row.place === 3
+                                                    ? 'bg-orange-100 text-orange-800 border border-orange-300'
+                                                    : 'bg-slate-100 text-slate-600'
+                                                }`}
+                                              >
+                                                {row.place}
+                                              </span>
+                                            ) : (
+                                              <span className="text-slate-400 text-xs">—</span>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3">
+                                            <div className="font-semibold text-slate-900 flex flex-wrap items-center gap-1.5">
+                                              <span>{displaySwimmer}</span>
+                                              {tags.map((t, i) => (
+                                                <span
+                                                  key={i}
+                                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
+                                                >
+                                                  {t.label}
                                                 </span>
                                               ))}
                                             </div>
-                                          )}
-                                        </div>
-                                      )}
-                                    </td>
-                                    <td className="py-3 px-4 text-slate-600 font-medium">
-                                      {entry.teamName}
-                                    </td>
-                                    <td className="py-3 px-4 font-mono text-slate-500">
-                                      {entry.seedTime || '—'}
-                                    </td>
-                                    <td className="py-3 px-4 font-mono font-extrabold text-slate-900">
-                                      {entry.finalsTime || '—'}
-                                    </td>
-                                    <td className="py-3 px-4 text-right font-bold text-slate-700">
-                                      {entry.points > 0 ? entry.points : '—'}
-                                    </td>
-                                  </tr>
-
-                                  {hasSplits && isExpanded && (
-                                    <tr className="bg-slate-50/90">
-                                      <td colSpan={6} className="px-4 py-3">
-                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                                          Cumulative & 50-Yard Lap Splits
-                                        </div>
-                                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-10 gap-2">
-                                          {entry.splits.map((sp) => (
-                                            <div
-                                              key={sp.splitNumber}
-                                              className="bg-white border border-slate-200 rounded-lg p-2 text-center font-mono"
-                                            >
-                                              <div className="text-[10px] text-slate-400 font-sans font-bold">
-                                                Split #{sp.splitNumber}
-                                              </div>
-                                              <div className="text-xs font-extrabold text-slate-900 mt-0.5">
-                                                {sp.cumulative}
-                                              </div>
-                                              {sp.lap && (
-                                                <div className="text-[10px] font-bold text-cyan-700">
-                                                  ({sp.lap})
-                                                </div>
+                                            <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                                              {row.classYear && <span>Class: {row.classYear}</span>}
+                                              {(row.heat || row.lane) && (
+                                                <span className="font-mono text-slate-400">
+                                                  {row.heat ? `Heat ${row.heat}` : ''}
+                                                  {row.heat && row.lane ? ' • ' : ''}
+                                                  {row.lane ? `Lane ${row.lane}` : ''}
+                                                </span>
                                               )}
                                             </div>
-                                          ))}
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  )}
-                                </React.Fragment>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                                          </td>
+                                          <td className="py-3 px-3">
+                                            <div className="text-slate-700 font-medium">
+                                              {row.teamName}
+                                            </div>
+                                          </td>
+                                          <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
+                                            {row.finalsTime}
+                                          </td>
+                                          <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
+                                            {isFinite(behindSec) ? (
+                                              behindSec < 0.005 ? (
+                                                <span className="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/80">
+                                                  Leader
+                                                </span>
+                                              ) : (
+                                                <span className="text-slate-500">
+                                                  +{behindSec.toFixed(2)}s
+                                                </span>
+                                              )
+                                            ) : (
+                                              <span className="text-slate-400">—</span>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3 text-center font-mono text-xs tabular-nums">
+                                            {row.points > 0 ? (
+                                              <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
+                                                {row.points}
+                                              </span>
+                                            ) : (
+                                              <span className="text-slate-300">—</span>
+                                            )}
+                                          </td>
+                                          <td className="py-3 pl-3 pr-5 text-right">
+                                            {hasSplits ? (
+                                              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200/80">
+                                                {row.splits.length} splits
+                                              </span>
+                                            ) : (
+                                              <span className="text-xs text-slate-400">
+                                                No splits
+                                              </span>
+                                            )}
+                                          </td>
+                                        </tr>
+
+                                        {/* Expanded Individual Split Breakdown Drawer */}
+                                        {isExpanded && hasSplits && splitAnalysis && (
+                                          <tr className="bg-slate-50/95 border-b border-slate-200">
+                                            <td colSpan={8} className="px-4 sm:px-6 py-4">
+                                              <div className="bg-white rounded-xl border border-cyan-200/90 p-4 sm:p-5 shadow-xs space-y-4">
+                                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                                  <div className="text-xs font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
+                                                    <Timer className="w-4 h-4 text-cyan-600" />
+                                                    <span>
+                                                      Split Breakdown (
+                                                      {splitAnalysis.stats?.interval || 50}y
+                                                      Intervals) — {displaySwimmer}
+                                                    </span>
+                                                  </div>
+
+                                                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                                                    {splitAnalysis.stats && (
+                                                      <>
+                                                        <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-mono">
+                                                          Avg Lap:{' '}
+                                                          <strong>
+                                                            {splitAnalysis.stats.avgLap}
+                                                          </strong>
+                                                        </span>
+                                                        {splitAnalysis.stats.halfDiff !== null && (
+                                                          <span
+                                                            className={`px-2.5 py-1 rounded-md font-mono font-semibold ${
+                                                              splitAnalysis.stats.halfDiff < 0
+                                                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                                                : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                                            }`}
+                                                          >
+                                                            {splitAnalysis.stats.halfDiff < 0
+                                                              ? `Negative Split (${splitAnalysis.stats.halfDiff.toFixed(
+                                                                  2
+                                                                )}s)`
+                                                              : `2nd Half +${splitAnalysis.stats.halfDiff.toFixed(
+                                                                  2
+                                                                )}s`}
+                                                          </span>
+                                                        )}
+                                                      </>
+                                                    )}
+                                                    {(row.heat || row.lane) && (
+                                                      <span className="text-slate-500 font-mono">
+                                                        {row.heat ? `Heat ${row.heat}` : ''}{' '}
+                                                        {row.lane ? `• Lane ${row.lane}` : ''}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </div>
+
+                                                {/* Pacing Bar Visualization */}
+                                                {splitAnalysis.stats &&
+                                                  splitAnalysis.rows.length > 1 && (
+                                                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-200/70">
+                                                      <div className="text-[11px] font-semibold text-slate-500 mb-2 flex items-center justify-between">
+                                                        <span className="flex items-center gap-1">
+                                                          <TrendingUp className="w-3.5 h-3.5 text-cyan-600" />
+                                                          Lap Pacing Comparison (Shorter bar =
+                                                          faster lap)
+                                                        </span>
+                                                        <span className="flex items-center gap-3">
+                                                          <span className="inline-flex items-center gap-1 text-emerald-700">
+                                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                                            Fastest
+                                                          </span>
+                                                          <span className="inline-flex items-center gap-1 text-amber-700">
+                                                            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                                                            Slowest
+                                                          </span>
+                                                        </span>
+                                                      </div>
+                                                      <div className="flex items-end gap-1.5 h-16 pt-2">
+                                                        {splitAnalysis.rows.map((s) => {
+                                                          const { minLap, maxLap } =
+                                                            splitAnalysis.stats;
+                                                          const range = Math.max(
+                                                            maxLap - minLap,
+                                                            0.5
+                                                          );
+                                                          const norm = isFinite(s.lapSec)
+                                                            ? 35 +
+                                                              ((s.lapSec - minLap) / range) * 65
+                                                            : 50;
+                                                          return (
+                                                            <div
+                                                              key={s.index}
+                                                              className="flex-1 flex flex-col items-center gap-1 min-w-[20px]"
+                                                              title={`${s.distanceLabel}: Lap ${s.lap} (Cum ${s.cumulative})`}
+                                                            >
+                                                              <div className="w-full flex items-end justify-center h-11">
+                                                                <div
+                                                                  style={{
+                                                                    height: `${Math.round(norm)}%`,
+                                                                  }}
+                                                                  className={`w-full max-w-[28px] rounded-t transition-all ${
+                                                                    s.isFastest
+                                                                      ? 'bg-emerald-500'
+                                                                      : s.isSlowest
+                                                                      ? 'bg-amber-400'
+                                                                      : 'bg-cyan-500/80'
+                                                                  }`}
+                                                                />
+                                                              </div>
+                                                              <span className="text-[9px] font-mono text-slate-500">
+                                                                {s.distance}
+                                                              </span>
+                                                            </div>
+                                                          );
+                                                        })}
+                                                      </div>
+                                                    </div>
+                                                  )}
+
+                                                {/* Structured Split Table */}
+                                                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                                                  <table className="w-full text-left border-collapse text-xs">
+                                                    <thead>
+                                                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
+                                                        <th className="py-2 px-3">Distance</th>
+                                                        <th className="py-2 px-3 text-right">
+                                                          Cumulative Time
+                                                        </th>
+                                                        <th className="py-2 px-3 text-right">
+                                                          {splitAnalysis.stats?.interval || 50}y Lap
+                                                          Split
+                                                        </th>
+                                                        <th className="py-2 px-3 text-right">
+                                                          Pace Note
+                                                        </th>
+                                                      </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-100 font-mono tabular-nums">
+                                                      {splitAnalysis.rows.map((s) => (
+                                                        <tr
+                                                          key={s.index}
+                                                          className={
+                                                            s.isFastest
+                                                              ? 'bg-emerald-50/40'
+                                                              : s.isSlowest
+                                                              ? 'bg-amber-50/30'
+                                                              : 'hover:bg-slate-50/80'
+                                                          }
+                                                        >
+                                                          <td className="py-2 px-3 font-sans font-semibold text-slate-700">
+                                                            {s.distanceLabel}
+                                                          </td>
+                                                          <td className="py-2 px-3 text-right font-bold text-slate-900">
+                                                            {s.cumulative}
+                                                          </td>
+                                                          <td className="py-2 px-3 text-right font-bold text-cyan-700">
+                                                            {s.lap}
+                                                          </td>
+                                                          <td className="py-2 px-3 text-right font-sans">
+                                                            {s.isFastest ? (
+                                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
+                                                                <Zap className="w-3 h-3" />
+                                                                Fastest Lap
+                                                              </span>
+                                                            ) : s.isSlowest ? (
+                                                              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800">
+                                                                Slowest Lap
+                                                              </span>
+                                                            ) : splitAnalysis.stats &&
+                                                              isFinite(s.lapSec) ? (
+                                                              <span className="text-[11px] text-slate-400">
+                                                                {s.lapSec -
+                                                                  splitAnalysis.stats.avgLapSec >=
+                                                                0
+                                                                  ? `+${(
+                                                                      s.lapSec -
+                                                                      splitAnalysis.stats.avgLapSec
+                                                                    ).toFixed(2)}s vs avg`
+                                                                  : `${(
+                                                                      s.lapSec -
+                                                                      splitAnalysis.stats.avgLapSec
+                                                                    ).toFixed(2)}s vs avg`}
+                                                              </span>
+                                                            ) : (
+                                                              '—'
+                                                            )}
+                                                          </td>
+                                                        </tr>
+                                                      ))}
+                                                    </tbody>
+                                                  </table>
+                                                </div>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )}
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 2: RELAY RESULTS (GROUPED BY EVENT CARDS) */}
+                {meetSubTab === 'relays' && (
+                  <div className="space-y-6">
+                    {groupedRelayEvents.length === 0 ? (
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm py-12 text-center text-slate-500 text-sm">
+                        No relay results match the current filter criteria.
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </>
+                    ) : (
+                      groupedRelayEvents.map((eventGroup) => {
+                        const expandableRelays = eventGroup.relays.filter(
+                          (r) => r.legs.length > 0 || r.splits.length > 0
+                        );
+                        const allExpanded =
+                          expandableRelays.length > 0 &&
+                          expandableRelays.every((r) => expandedRows.has(r.id));
+
+                        return (
+                          <div
+                            key={eventGroup.key}
+                            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+                          >
+                            <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
+                                  Event #{eventGroup.eventNumber}
+                                </span>
+                                <div>
+                                  <h3 className="text-base font-bold tracking-tight">
+                                    {eventGroup.eventLabel}
+                                  </h3>
+                                  <p className="text-xs text-slate-400">
+                                    {eventGroup.relays.length}{' '}
+                                    {eventGroup.relays.length === 1
+                                      ? 'Relay Entry'
+                                      : 'Relay Entries'}{' '}
+                                    • {eventGroup.course}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {expandableRelays.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleAllRelaysInEvent(eventGroup.relays)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition cursor-pointer"
+                                >
+                                  {allExpanded ? (
+                                    <>
+                                      <ChevronDown className="w-3.5 h-3.5" />
+                                      <span>Collapse All Splits</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ChevronRight className="w-3.5 h-3.5" />
+                                      <span>Expand All Splits</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left border-collapse">
+                                <thead>
+                                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                    <th className="py-3 pl-4 pr-2 w-10"></th>
+                                    <th
+                                      onClick={() => handleSort('place')}
+                                      className="py-3 px-3 w-20 text-center cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center justify-center gap-1">
+                                        <span>Place</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th
+                                      onClick={() => handleSort('swimmerName')}
+                                      className="py-3 px-3 cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center gap-1">
+                                        <span>Relay Squad</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th className="py-3 px-3">Swimmers (Legs 1–4)</th>
+                                    <th
+                                      onClick={() => handleSort('time')}
+                                      className="py-3 px-3 text-right cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="flex items-center justify-end gap-1">
+                                        <span>Finals Time</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th className="py-3 px-3 text-right w-28">Behind</th>
+                                    <th className="py-3 pl-3 pr-5 text-center w-16">Pts</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 text-sm">
+                                  {eventGroup.relays.map((relay) => {
+                                    const hasDetails =
+                                      relay.legs.length > 0 || relay.splits.length > 0;
+                                    const isExpanded = expandedRows.has(relay.id);
+                                    const legBreakdown = isExpanded
+                                      ? calculateRelayLegBreakdown(relay)
+                                      : [];
+                                    const behindSec =
+                                      isFinite(relay.timeSeconds) &&
+                                      isFinite(eventGroup.fastestTimeSec)
+                                        ? relay.timeSeconds - eventGroup.fastestTimeSec
+                                        : Infinity;
+
+                                    return (
+                                      <React.Fragment key={relay.id}>
+                                        <tr
+                                          onClick={() => hasDetails && toggleRow(relay.id)}
+                                          className={`transition ${
+                                            hasDetails
+                                              ? 'cursor-pointer hover:bg-cyan-50/40'
+                                              : 'hover:bg-slate-50/70'
+                                          } ${isExpanded ? 'bg-cyan-50/50' : ''}`}
+                                        >
+                                          <td className="py-3 pl-4 pr-2 text-slate-400">
+                                            {hasDetails && (
+                                              <button
+                                                type="button"
+                                                aria-label="Toggle relay legs"
+                                                className="p-1 rounded hover:bg-slate-200/60 text-cyan-600"
+                                              >
+                                                {isExpanded ? (
+                                                  <ChevronDown className="w-4 h-4" />
+                                                ) : (
+                                                  <ChevronRight className="w-4 h-4" />
+                                                )}
+                                              </button>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3 text-center">
+                                            {relay.place ? (
+                                              <span
+                                                className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+                                                  relay.place === 1
+                                                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                                    : relay.place === 2
+                                                    ? 'bg-slate-200 text-slate-800 border border-slate-300'
+                                                    : relay.place === 3
+                                                    ? 'bg-orange-100 text-orange-800 border border-orange-300'
+                                                    : 'bg-slate-100 text-slate-600'
+                                                }`}
+                                              >
+                                                {relay.place}
+                                              </span>
+                                            ) : (
+                                              <span className="text-slate-400 text-xs">—</span>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3">
+                                            <div className="font-semibold text-slate-900">
+                                              {relay.relayTitle}
+                                            </div>
+                                            {(relay.heat || relay.lane) && (
+                                              <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                                                {relay.heat ? `Heat ${relay.heat}` : ''}
+                                                {relay.heat && relay.lane ? ' • ' : ''}
+                                                {relay.lane ? `Lane ${relay.lane}` : ''}
+                                              </div>
+                                            )}
+                                          </td>
+                                          <td className="py-3 px-3">
+                                            <div className="text-xs text-slate-600 line-clamp-2">
+                                              {relay.legs.length > 0
+                                                ? relay.legs
+                                                    .map(
+                                                      (l) =>
+                                                        `${l.legOrder}) ${formatSwimmerDisplay(
+                                                          l.swimmerName,
+                                                          l.preferredFirst
+                                                        )}`
+                                                    )
+                                                    .join(' • ')
+                                                : 'No leg roster recorded'}
+                                            </div>
+                                          </td>
+                                          <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
+                                            {relay.finalsTime}
+                                          </td>
+                                          <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
+                                            {isFinite(behindSec) ? (
+                                              behindSec < 0.005 ? (
+                                                <span className="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/80">
+                                                  Leader
+                                                </span>
+                                              ) : (
+                                                <span className="text-slate-500">
+                                                  +{behindSec.toFixed(2)}s
+                                                </span>
+                                              )
+                                            ) : (
+                                              <span className="text-slate-400">—</span>
+                                            )}
+                                          </td>
+                                          <td className="py-3 pl-3 pr-5 text-center font-mono text-xs tabular-nums">
+                                            {relay.points > 0 ? (
+                                              <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
+                                                {relay.points}
+                                              </span>
+                                            ) : (
+                                              <span className="text-slate-300">—</span>
+                                            )}
+                                          </td>
+                                        </tr>
+
+                                        {/* Expanded Relay Legs & Splits */}
+                                        {isExpanded && hasDetails && (
+                                          <tr className="bg-slate-50/95 border-b border-slate-200">
+                                            <td colSpan={7} className="px-4 sm:px-6 py-4">
+                                              <div className="bg-white rounded-xl border border-cyan-200/90 p-4 sm:p-5 shadow-xs space-y-3">
+                                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                                  <div className="text-xs font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
+                                                    <Users className="w-4 h-4 text-cyan-600" />
+                                                    <span>
+                                                      Relay Leg Order & Splits — {relay.relayTitle}
+                                                    </span>
+                                                  </div>
+                                                  {(relay.heat || relay.lane) && (
+                                                    <div className="text-xs text-slate-500 font-mono">
+                                                      {relay.heat ? `Heat ${relay.heat}` : ''}{' '}
+                                                      {relay.lane ? `• Lane ${relay.lane}` : ''}
+                                                    </div>
+                                                  )}
+                                                </div>
+
+                                                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                                                  <table className="w-full text-left border-collapse text-xs">
+                                                    <thead>
+                                                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
+                                                        <th className="py-2.5 px-3 w-16">Leg</th>
+                                                        <th className="py-2.5 px-3">Swimmer</th>
+                                                        <th className="py-2.5 px-3 w-20">Class</th>
+                                                        <th className="py-2.5 px-3">
+                                                          Individual {relay.splitInterval || 50}y
+                                                          Sub-Splits
+                                                        </th>
+                                                        <th className="py-2.5 px-3 text-right">
+                                                          Leg Time
+                                                        </th>
+                                                        <th className="py-2.5 px-3 text-right">
+                                                          Cumulative Relay
+                                                        </th>
+                                                      </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-100">
+                                                      {legBreakdown.map((leg) => (
+                                                        <tr
+                                                          key={`${relay.id}-leg-${leg.legOrder}`}
+                                                          className="hover:bg-slate-50/80"
+                                                        >
+                                                          <td className="py-2.5 px-3">
+                                                            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded bg-cyan-50 text-cyan-800 border border-cyan-200 font-bold">
+                                                              Leg {leg.legOrder}
+                                                            </span>
+                                                          </td>
+                                                          <td className="py-2.5 px-3 font-semibold text-slate-900">
+                                                            {formatSwimmerDisplay(
+                                                              leg.swimmerName,
+                                                              leg.preferredFirst
+                                                            )}
+                                                          </td>
+                                                          <td className="py-2.5 px-3 text-slate-600">
+                                                            {leg.classYear ? (
+                                                              <span className="px-1.5 py-0.5 rounded bg-slate-100 font-medium">
+                                                                {leg.classYear}
+                                                              </span>
+                                                            ) : (
+                                                              '—'
+                                                            )}
+                                                          </td>
+                                                          <td className="py-2.5 px-3 font-mono tabular-nums">
+                                                            {leg.subSplits.length > 0 ? (
+                                                              <div className="flex flex-wrap items-center gap-1.5">
+                                                                {leg.subSplits.map((sub) => (
+                                                                  <span
+                                                                    key={sub.subIndex}
+                                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-700"
+                                                                  >
+                                                                    <span className="text-[10px] text-slate-400">
+                                                                      {sub.subDistance}:
+                                                                    </span>
+                                                                    <span className="font-semibold">
+                                                                      {sub.lap}
+                                                                    </span>
+                                                                  </span>
+                                                                ))}
+                                                              </div>
+                                                            ) : (
+                                                              <span className="text-slate-400">—</span>
+                                                            )}
+                                                          </td>
+                                                          <td className="py-2.5 px-3 text-right font-mono font-bold text-cyan-700 tabular-nums">
+                                                            {leg.legTotalTime}
+                                                          </td>
+                                                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
+                                                            {leg.endCumulativeTime}
+                                                          </td>
+                                                        </tr>
+                                                      ))}
+                                                    </tbody>
+                                                  </table>
+                                                </div>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )}
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 3: TEAM ROSTER CARDS */}
+                {meetSubTab === 'roster' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {filteredMeetTeams.map((team) => (
+                      <div
+                        key={team.code}
+                        className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col"
+                      >
+                        <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
+                          <div>
+                            <h3 className="font-bold text-base">{team.name}</h3>
+                            {(team.city || team.state) && (
+                              <p className="text-xs text-slate-400 mt-0.5">
+                                {[team.city, team.state].filter(Boolean).join(', ')}
+                              </p>
+                            )}
+                          </div>
+                          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                            {team.swimmerList.length} Athletes
+                          </span>
+                        </div>
+
+                        <div className="divide-y divide-slate-100 max-h-[540px] overflow-y-auto">
+                          {team.swimmerList.length === 0 ? (
+                            <div className="p-8 text-center text-sm text-slate-500">
+                              No swimmers match the selected filters.
+                            </div>
+                          ) : (
+                            team.swimmerList.map((swimmer) => (
+                              <div
+                                key={swimmer.name}
+                                className="px-5 py-3.5 hover:bg-slate-50 transition flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+                              >
+                                <div>
+                                  <div className="font-semibold text-sm text-slate-900 flex items-center gap-2">
+                                    <span>
+                                      {formatSwimmerDisplay(
+                                        swimmer.name,
+                                        swimmer.preferredFirst
+                                      )}
+                                    </span>
+                                    {swimmer.classYear && (
+                                      <span className="text-[11px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 font-medium">
+                                        {swimmer.classYear}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-slate-500 mt-0.5">
+                                    {swimmer.gender}
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                                  {swimmer.events.map((ev, idx) => (
+                                    <span
+                                      key={idx}
+                                      className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-50 text-cyan-800 border border-cyan-200/70"
+                                    >
+                                      {ev}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -4550,19 +6093,43 @@ export default function App() {
                     </h3>
                     <p className="text-xs text-slate-500">
                       Imports only{' '}
-                      <strong>{parsedData.teams[selectedTeam]?.name || selectedTeam}</strong>{' '}
+                      <strong>
+                        {parsedData.teams.find((t) => t.code === selectedTeam)?.name ||
+                          selectedTeam}
+                      </strong>{' '}
                       swims and resolves athlete, competition & event names against your Master
                       Lists.
                     </p>
-                    <label className="inline-flex items-center gap-2 text-xs text-slate-700 pt-1 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={includeSplitsOnCommit}
-                        onChange={(e) => setIncludeSplitsOnCommit(e.target.checked)}
-                        className="rounded text-cyan-600"
-                      />
-                      Also save legal opening splits (e.g., 50 Back off 100 Back, 1000 Free off 1650 Free as Place = S; Relay Lead-Offs "R" are always saved)
-                    </label>
+                    <div className="pt-1 flex flex-wrap items-center gap-3">
+                      <select
+                        value={selectedTeam}
+                        onChange={(e) => {
+                          setSelectedTeam(e.target.value);
+                          try {
+                            localStorage.setItem('swimmeet_primary_team_v1', e.target.value);
+                          } catch {}
+                        }}
+                        className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5"
+                      >
+                        <option value="ALL">-- Select Primary Program Team --</option>
+                        {parsedData.teams.map((t) => (
+                          <option key={t.code} value={t.code}>
+                            {t.name} ({t.code})
+                          </option>
+                        ))}
+                      </select>
+
+                      <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={includeSplitsOnCommit}
+                          onChange={(e) => setIncludeSplitsOnCommit(e.target.checked)}
+                          className="rounded text-cyan-600"
+                        />
+                        Also save legal opening splits (e.g., 50 Back off 100 Back, 1000 Free off
+                        1650 Free as Place = S; Relay Lead-Offs &quot;R&quot; are always saved)
+                      </label>
+                    </div>
                   </div>
 
                   <button
@@ -4570,7 +6137,8 @@ export default function App() {
                     className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-xs sm:text-sm font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer shrink-0"
                   >
                     <Database className="w-4 h-4" />
-                    Commit {parsedData.teams[selectedTeam]?.name || selectedTeam}
+                    Commit{' '}
+                    {parsedData.teams.find((t) => t.code === selectedTeam)?.name || selectedTeam}
                   </button>
                 </div>
 
@@ -4582,7 +6150,8 @@ export default function App() {
                         Event Winners ({winSummary.totalWins} Wins)
                       </h3>
                       <span className="text-xs font-bold text-cyan-700">
-                        {parsedData.teams[selectedTeam]?.name || 'All Teams'}
+                        {parsedData.teams.find((t) => t.code === selectedTeam)?.name ||
+                          'All Teams'}
                       </span>
                     </div>
 
