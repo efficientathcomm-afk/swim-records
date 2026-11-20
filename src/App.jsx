@@ -809,9 +809,15 @@ export default function App() {
       (snap) => {
         if (!snap.empty) {
           const rows = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-          setMasterEvents(rows);
+          // Keep default canonical events intact if Firestore only had a partial write
+          const existingKeys = new Set(rows.map((r) => r.eventKey));
+          const merged = [
+            ...rows,
+            ...DEFAULT_MASTER_EVENTS.filter((def) => !existingKeys.has(def.eventKey)),
+          ];
+          setMasterEvents(merged);
           try {
-            localStorage.setItem('swimmeet_master_events_v1', JSON.stringify(rows));
+            localStorage.setItem('swimmeet_master_events_v1', JSON.stringify(merged));
           } catch {}
         }
       },
@@ -976,9 +982,8 @@ export default function App() {
     if (cloudUser) {
       if (deletedId) {
         deleteDoc(doc(db, 'master_events', deletedId)).catch(() => {});
-      } else if (changedItems && changedItems.length > 0) {
-        syncCollectionToCloud('master_events', changedItems, false);
       } else {
+        // Sync the full masterEvents list so Firestore never holds only a single newly-added item
         syncCollectionToCloud('master_events', next, false);
       }
     }
