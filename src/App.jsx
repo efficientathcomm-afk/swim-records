@@ -1361,6 +1361,11 @@ export default function App() {
   const [selectedHeatNum, setSelectedHeatNum] = useState('ALL');
   const [broadcastGraphicTheme, setBroadcastGraphicTheme] = useState('slate'); // 'slate' | 'transparent'
   const [isExportingAllGraphics, setIsExportingAllGraphics] = useState(false);
+
+  // Swimmer Career Profile Modal State
+  const [profileSwimmerName, setProfileSwimmerName] = useState(null);
+  const [profileChartEventKey, setProfileChartEventKey] = useState('');
+
   const [teamColors, setTeamColors] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('swimmeet_team_colors_v1') || '{}');
@@ -4086,6 +4091,136 @@ const rRowId = `cl2-lo-${entry.id}`;
     });
   };
 
+  // Open Career Profile Modal for any swimmer name
+  const openSwimmerProfile = (rawName, preferredEventKey = '') => {
+    if (!rawName) return;
+    const resolved = resolveMasterAthlete(rawName);
+    const canonical = resolved ? resolved.canonicalName : rawName.trim();
+    setProfileSwimmerName(canonical);
+    setProfileChartEventKey(preferredEventKey || '');
+  };
+
+  // Computed Career Profile Data for the selected swimmer
+  const activeSwimmerProfile = useMemo(() => {
+    if (!profileSwimmerName) return null;
+    const resolvedAth = resolveMasterAthlete(profileSwimmerName);
+    const canonicalName = resolvedAth ? resolvedAth.canonicalName : profileSwimmerName;
+    const swKey = normalizeSwimmerKey(canonicalName);
+
+    const allRows = historicalRecords.filter((r) => {
+      const m = resolveMasterAthlete(r.swimmerName);
+      const k = normalizeSwimmerKey(m ? m.canonicalName : r.swimmerName);
+      return k === swKey;
+    });
+
+    const officialRows = allRows.filter((r) => r.isOfficial !== false);
+    const isSplitRow = (r) =>
+      r.swimType === 'INTERMEDIATE_SPLIT' || String(r.place || '').toUpperCase() === 'S';
+
+    // Career Finals Wins (Individual + Relay)
+    let indWins = 0;
+    let relWins = 0;
+    allRows.forEach((r) => {
+      if (String(r.place || '').trim() !== '1') return;
+      const rnd = String(r.round || 'Finals').toLowerCase();
+      if (rnd === 'prelims' || rnd === 'time trial') return;
+      const isRel =
+        r.swimType === 'RELAY_WIN' ||
+        String(r.eventKey || r.eventLabel || '').toLowerCase().includes('relay');
+      if (isRel) relWins += 1;
+      else indWins += 1;
+    });
+
+    // Event Bests (Full-Distance PB, Season Best, Split Best, & Current All-Time Top-10 Rank)
+    const seasonStart = getCurrentSeasonStart();
+    const eventMap = new Map();
+
+    officialRows.forEach((r) => {
+      if (!r.eventKey) return;
+      if (!eventMap.has(r.eventKey)) {
+        eventMap.set(r.eventKey, {
+          eventKey: r.eventKey,
+          eventLabel: r.eventLabel || toTitleEventLabel(r.eventKey),
+          fullPb: null,
+          fullSb: null,
+          splitPb: null,
+          swims: [],
+        });
+      }
+      const evEntry = eventMap.get(r.eventKey);
+      evEntry.swims.push(r);
+
+      if (isSplitRow(r)) {
+        if (!evEntry.splitPb || r.seconds < evEntry.splitPb.seconds) {
+          evEntry.splitPb = r;
+        }
+      } else {
+        if (!evEntry.fullPb || r.seconds < evEntry.fullPb.seconds) {
+          evEntry.fullPb = r;
+        }
+        if (r.dateObj && r.dateObj >= seasonStart) {
+          if (!evEntry.fullSb || r.seconds < evEntry.fullSb.seconds) {
+            evEntry.fullSb = r;
+          }
+        }
+      }
+    });
+
+    const eventSummaries = Array.from(eventMap.values())
+      .map((ev) => {
+        const pool = benchmarkIndex.byEvent[ev.eventKey] || [];
+        const bestByAth = new Map();
+        pool.forEach((rec) => {
+          if (!bestByAth.has(rec.swimmerKey) || rec.seconds < bestByAth.get(rec.swimmerKey)) {
+            bestByAth.set(rec.swimmerKey, rec.seconds);
+          }
+        });
+        const sortedBests = Array.from(bestByAth.entries()).sort((a, b) => a[1] - b[1]);
+        const rankIdx = sortedBests.findIndex(([k]) => k === swKey);
+        const allTimeRank = rankIdx >= 0 && rankIdx < 10 ? rankIdx + 1 : null;
+
+        ev.swims.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        return {
+          ...ev,
+          allTimeRank,
+        };
+      })
+      .sort((a, b) => a.eventLabel.localeCompare(b.eventLabel));
+
+    const chronologicalLog = [...allRows].sort((a, b) =>
+      (b.date || '').localeCompare(a.date || '')
+    );
+
+    const activeMeetSwims = parsedData
+      ? parsedData.individualResults.filter((entry) => {
+          const disp = formatSwimmerDisplay(entry.swimmerName, entry.preferredFirst);
+          const m = resolveMasterAthlete(disp);
+          return normalizeSwimmerKey(m ? m.canonicalName : disp) === swKey;
+        })
+      : [];
+
+    const selectedEvObj =
+      eventSummaries.find((e) => e.eventKey === profileChartEventKey) ||
+      eventSummaries.find((e) => e.swims.filter((s) => !isSplitRow(s)).length >= 2) ||
+      eventSummaries[0] ||
+      null;
+
+    return {
+      canonicalName,
+      gender: resolvedAth?.gender || (allRows[0]?.eventKey?.startsWith('men') ? 'Men' : 'Women'),
+      isActive: resolvedAth ? Boolean(resolvedAth.isActive) : null,
+      aliases: resolvedAth?.aliases || [],
+      indWins,
+      relWins,
+      totalWins: indWins + relWins,
+      totalLoggedSwims: allRows.length,
+      eventSummaries,
+      chronologicalLog,
+      activeMeetSwims,
+      selectedEvObj,
+    };
+  }, [profileSwimmerName, profileChartEventKey, historicalRecords, masterRoster, parsedData, benchmarkIndex]);
+
   // ============================================================================
   // RENDER
   // ============================================================================
@@ -5808,7 +5943,13 @@ const rRowId = `cl2-lo-${entry.id}`;
                                     />
                                   </td>
                                   <td className="py-2 px-3 font-bold text-slate-900">
-                                    {r.swimmerName}
+                                    <button
+                                      type="button"
+                                      onClick={() => openSwimmerProfile(r.swimmerName, r.eventKey)}
+                                      className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
+                                    >
+                                      {r.swimmerName}
+                                    </button>
                                   </td>
                                   <td className="py-2 px-3">{r.classYear || '—'}</td>
                                   <td className="py-2 px-3">{r.eventLabel}</td>
@@ -6106,7 +6247,13 @@ const rRowId = `cl2-lo-${entry.id}`;
                               <td className="py-3 px-4 font-black text-slate-900">#{idx + 1}</td>
                               <td className="py-3 px-4 font-bold text-slate-900">
                                 <div className="flex flex-wrap items-center gap-1.5">
-                                  <span>{row.swimmerName}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => openSwimmerProfile(row.swimmerName, recordBookEventKey)}
+                                    className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
+                                  >
+                                    {row.swimmerName}
+                                  </button>
                                   {(row.swimType === 'RELAY_LEADOFF' ||
                                     row.place === 'R' ||
                                     row.place === 'LR') && (
@@ -6197,7 +6344,13 @@ const rRowId = `cl2-lo-${entry.id}`;
                                 </td>
                                 <td className="py-2.5 px-4 font-bold text-slate-900">
                                   <div className="flex items-center gap-1.5">
-                                    <span>{ath.swimmerName}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => openSwimmerProfile(ath.swimmerName, recordBookEventKey)}
+                                      className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
+                                    >
+                                      {ath.swimmerName}
+                                    </button>
                                     {ath.isActive && (
                                       <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
                                         Active
@@ -6288,7 +6441,13 @@ const rRowId = `cl2-lo-${entry.id}`;
                                   </td>
                                   <td className="py-3 px-4 font-bold text-slate-900">
                                     <div className="flex items-center gap-2">
-                                      <span>{ath.swimmerName}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => openSwimmerProfile(ath.swimmerName)}
+                                        className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
+                                      >
+                                        {ath.swimmerName}
+                                      </button>
                                       {ath.isActive && (
                                         <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
                                           Active
@@ -6939,21 +7098,37 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         </td>
                                         <td className="py-3 px-3">
                                           <div className="font-bold text-slate-900">
-                                            {canonicalName}
+                                            {isRelayEvent ? (
+                                              canonicalName
+                                            ) : (
+                                              <button
+                                                type="button"
+                                                onClick={() => openSwimmerProfile(canonicalName, evKey)}
+                                                className="text-left hover:text-indigo-700 hover:underline cursor-pointer"
+                                              >
+                                                {canonicalName}
+                                              </button>
+                                            )}
                                             {!isRelayEvent && entry.classYear
                                               ? ` (${entry.classYear})`
                                               : ''}
                                           </div>
                                           {isRelayEvent && resolvedLegs.length > 0 && (
                                             <div className="text-[11px] text-slate-700 mt-0.5">
-                                              {resolvedLegs
-                                                .map(
-                                                  (l) =>
-                                                    `${l.legOrder}) ${l.name}${
-                                                      l.classYear ? ` (${l.classYear})` : ''
-                                                    }`
-                                                )
-                                                .join(' • ')}
+                                              {resolvedLegs.map((l, idx) => (
+                                                <React.Fragment key={l.legOrder}>
+                                                  {idx > 0 && ' • '}
+                                                  <span>{l.legOrder}) </span>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => openSwimmerProfile(l.name)}
+                                                    className="hover:text-indigo-700 hover:underline cursor-pointer"
+                                                  >
+                                                    {l.name}
+                                                  </button>
+                                                  {l.classYear ? ` (${l.classYear})` : ''}
+                                                </React.Fragment>
+                                              ))}
                                             </div>
                                           )}
                                           <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
@@ -7235,9 +7410,13 @@ const rRowId = `cl2-lo-${entry.id}`;
                               className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2.5"
                             >
                               <div className="flex items-center justify-between gap-2">
-                                <div className="font-extrabold text-sm text-slate-900">
+                                <button
+                                  type="button"
+                                  onClick={() => openSwimmerProfile(ath.canonicalName)}
+                                  className="font-extrabold text-sm text-slate-900 text-left hover:text-indigo-700 hover:underline cursor-pointer"
+                                >
                                   {ath.canonicalName}
-                                </div>
+                                </button>
                                 <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-600 shrink-0">
                                   {ath.gender}
                                 </span>
@@ -8127,7 +8306,19 @@ const rRowId = `cl2-lo-${entry.id}`;
                                           </td>
                                           <td className="py-3 px-3">
                                             <div className="font-semibold text-slate-900 flex flex-wrap items-center gap-1.5">
-                                              <span>{displaySwimmer}</span>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  openSwimmerProfile(
+                                                    displaySwimmer,
+                                                    normalizeEventKey(row.eventLabel)
+                                                  );
+                                                }}
+                                                className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
+                                              >
+                                                {displaySwimmer}
+                                              </button>
                                               {tags.map((t, i) => (
                                                 <span
                                                   key={i}
@@ -9387,6 +9578,403 @@ const rRowId = `cl2-lo-${entry.id}`;
           </div>
         )}
       </main>
+
+      {/* ==================================================================== */}
+      {/* SWIMMER CAREER PROFILE MODAL                                         */}
+      {/* ==================================================================== */}
+      {activeSwimmerProfile && (
+        <div
+          onClick={() => setProfileSwimmerName(null)}
+          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950 text-white px-5 sm:px-6 py-4 flex items-start justify-between gap-4 shrink-0">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg sm:text-2xl font-extrabold tracking-tight">
+                    {activeSwimmerProfile.canonicalName}
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white/10 text-cyan-200 border border-white/15">
+                    {activeSwimmerProfile.gender}
+                  </span>
+                  {activeSwimmerProfile.isActive !== null && (
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                        activeSwimmerProfile.isActive
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
+                          : 'bg-slate-700 text-slate-300'
+                      }`}
+                    >
+                      {activeSwimmerProfile.isActive ? 'Active Roster' : 'Alumni / Inactive'}
+                    </span>
+                  )}
+                </div>
+                {activeSwimmerProfile.aliases.length > 0 && (
+                  <p className="text-xs text-slate-400 mt-1">
+                    Aliases: {activeSwimmerProfile.aliases.join(', ')}
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setProfileSwimmerName(null)}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 transition cursor-pointer"
+                aria-label="Close swimmer career profile"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Scrollable Content */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-6">
+              {/* Career Summary KPI Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-cyan-50/70 border border-cyan-200 rounded-xl p-3.5">
+                  <div className="text-[10px] font-bold uppercase text-cyan-800">
+                    Career Finals Wins
+                  </div>
+                  <div className="text-2xl font-black text-cyan-950 mt-0.5">
+                    {activeSwimmerProfile.totalWins}
+                  </div>
+                  <div className="text-[11px] text-cyan-800 font-medium">
+                    {activeSwimmerProfile.indWins} Ind • {activeSwimmerProfile.relWins} Relay
+                  </div>
+                </div>
+
+                <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5">
+                  <div className="text-[10px] font-bold uppercase text-amber-800">
+                    All-Time Top-10 Events
+                  </div>
+                  <div className="text-2xl font-black text-amber-950 mt-0.5">
+                    {activeSwimmerProfile.eventSummaries.filter((e) => e.allTimeRank !== null).length}
+                  </div>
+                  <div className="text-[11px] text-amber-800 font-medium">
+                    {
+                      activeSwimmerProfile.eventSummaries.filter((e) => e.allTimeRank === 1)
+                        .length
+                    }{' '}
+                    School Record
+                    {activeSwimmerProfile.eventSummaries.filter((e) => e.allTimeRank === 1)
+                      .length === 1
+                      ? ''
+                      : 's'}
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                  <div className="text-[10px] font-bold uppercase text-slate-500">
+                    Events Swum
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 mt-0.5">
+                    {activeSwimmerProfile.eventSummaries.length}
+                  </div>
+                  <div className="text-[11px] text-slate-500">Official event distances</div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                  <div className="text-[10px] font-bold uppercase text-slate-500">
+                    Database Marks
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 mt-0.5">
+                    {activeSwimmerProfile.totalLoggedSwims}
+                  </div>
+                  <div className="text-[11px] text-slate-500">Historical records</div>
+                </div>
+              </div>
+
+              {/* Event Personal Bests, Season Bests & Top-10 Ranks */}
+              <div className="space-y-2.5">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <Trophy className="w-4 h-4 text-amber-500" />
+                  Career Personal Bests, Season Bests &amp; All-Time Rankings
+                </h3>
+
+                {activeSwimmerProfile.eventSummaries.length === 0 ? (
+                  <div className="text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl p-6 text-center">
+                    No official historical marks found in the committed database for this swimmer yet.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="py-2.5 px-3">Event</th>
+                          <th className="py-2.5 px-3">Career PB</th>
+                          <th className="py-2.5 px-3">Season Best</th>
+                          <th className="py-2.5 px-3">Split Best (S)</th>
+                          <th className="py-2.5 px-3">All-Time Rank</th>
+                          <th className="py-2.5 px-3 text-right">Progression</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {activeSwimmerProfile.eventSummaries.map((ev) => {
+                          const isSelectedChart =
+                            activeSwimmerProfile.selectedEvObj?.eventKey === ev.eventKey;
+                          return (
+                            <tr
+                              key={ev.eventKey}
+                              onClick={() => setProfileChartEventKey(ev.eventKey)}
+                              className={`cursor-pointer transition ${
+                                isSelectedChart ? 'bg-cyan-50/70' : 'hover:bg-slate-50'
+                              }`}
+                            >
+                              <td className="py-2.5 px-3 font-bold text-slate-900">
+                                {ev.eventLabel}
+                              </td>
+                              <td className="py-2.5 px-3 font-mono font-extrabold text-cyan-800">
+                                {ev.fullPb ? (
+                                  <div>
+                                    <span>{ev.fullPb.time}</span>
+                                    <span className="text-[10px] text-slate-400 font-normal ml-1.5">
+                                      ({formatDisplayDateMDY(ev.fullPb.date)})
+                                    </span>
+                                  </div>
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 font-mono font-semibold text-slate-700">
+                                {ev.fullSb ? ev.fullSb.time : '—'}
+                              </td>
+                              <td className="py-2.5 px-3 font-mono text-amber-800">
+                                {ev.splitPb ? `${ev.splitPb.time} (S)` : '—'}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                {ev.allTimeRank ? (
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                      ev.allTimeRank === 1
+                                        ? 'bg-amber-200 text-amber-950'
+                                        : 'bg-amber-100 text-amber-900'
+                                    }`}
+                                  >
+                                    {ev.allTimeRank === 1
+                                      ? '#1 School Record'
+                                      : `#${ev.allTimeRank} All-Time`}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                <span
+                                  className={`text-[11px] font-bold ${
+                                    isSelectedChart ? 'text-cyan-700' : 'text-slate-400'
+                                  }`}
+                                >
+                                  {isSelectedChart ? 'Viewing Graph' : 'Graph →'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Time Progression SVG Chart for Selected Event */}
+              {activeSwimmerProfile.selectedEvObj && (() => {
+                const chartEv = activeSwimmerProfile.selectedEvObj;
+                const chartSwims = chartEv.swims.filter(
+                  (s) =>
+                    s.swimType !== 'INTERMEDIATE_SPLIT' &&
+                    String(s.place || '').toUpperCase() !== 'S' &&
+                    Number.isFinite(s.seconds)
+                );
+                if (chartSwims.length === 0) return null;
+
+                const times = chartSwims.map((s) => s.seconds);
+                const minSec = Math.min(...times);
+                const maxSec = Math.max(...times);
+                const pad = Math.max((maxSec - minSec) * 0.15, 0.25);
+                const lo = minSec - pad;
+                const hi = maxSec + pad;
+
+                const W = 680;
+                const H = 180;
+                const padL = 56;
+                const padR = 24;
+                const padT = 20;
+                const padB = 34;
+                const plotW = W - padL - padR;
+                const plotH = H - padT - padB;
+
+                const points = chartSwims.map((s, idx) => {
+                  const x =
+                    chartSwims.length === 1
+                      ? padL + plotW / 2
+                      : padL + (idx / (chartSwims.length - 1)) * plotW;
+                  // Faster times (smaller seconds) sit higher on the chart
+                  const norm = (s.seconds - lo) / (hi - lo);
+                  const y = padT + norm * plotH;
+                  return { x, y, swim: s };
+                });
+
+                const polylinePoints = points.map((p) => `${p.x},${p.y}`).join(' ');
+
+                return (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
+                        <TrendingUp className="w-4 h-4 text-cyan-600" />
+                        <span>
+                          Time Progression — {chartEv.eventLabel} ({chartSwims.length} swim
+                          {chartSwims.length === 1 ? '' : 's'})
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-500">
+                        Higher points = faster marks
+                      </span>
+                    </div>
+
+                    <div className="w-full overflow-x-auto">
+                      <svg
+                        viewBox={`0 0 ${W} ${H}`}
+                        className="w-full h-44 bg-white rounded-xl border border-slate-200/80"
+                      >
+                        {/* Horizontal Reference Lines (Fastest & Slowest) */}
+                        <line
+                          x1={padL}
+                          y1={padT + ((minSec - lo) / (hi - lo)) * plotH}
+                          x2={W - padR}
+                          y2={padT + ((minSec - lo) / (hi - lo)) * plotH}
+                          stroke="#bae6fd"
+                          strokeDasharray="4 4"
+                        />
+                        <text
+                          x={padL - 6}
+                          y={padT + ((minSec - lo) / (hi - lo)) * plotH + 3}
+                          textAnchor="end"
+                          className="fill-cyan-700 text-[9px] font-mono font-bold"
+                        >
+                          {secondsToTime(minSec)}
+                        </text>
+
+                        {maxSec > minSec + 0.01 && (
+                          <>
+                            <line
+                              x1={padL}
+                              y1={padT + ((maxSec - lo) / (hi - lo)) * plotH}
+                              x2={W - padR}
+                              y2={padT + ((maxSec - lo) / (hi - lo)) * plotH}
+                              stroke="#e2e8f0"
+                              strokeDasharray="4 4"
+                            />
+                            <text
+                              x={padL - 6}
+                              y={padT + ((maxSec - lo) / (hi - lo)) * plotH + 3}
+                              textAnchor="end"
+                              className="fill-slate-400 text-[9px] font-mono"
+                            >
+                              {secondsToTime(maxSec)}
+                            </text>
+                          </>
+                        )}
+
+                        {points.length > 1 && (
+                          <polyline
+                            fill="none"
+                            stroke="#0284c7"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            points={polylinePoints}
+                          />
+                        )}
+
+                        {points.map((p, idx) => {
+                          const isBest = Math.abs(p.swim.seconds - minSec) < 0.005;
+                          return (
+                            <g key={p.swim.id || idx}>
+                              <circle
+                                cx={p.x}
+                                cy={p.y}
+                                r={isBest ? 5.5 : 4}
+                                fill={isBest ? '#f59e0b' : '#0284c7'}
+                                stroke="#ffffff"
+                                strokeWidth="1.5"
+                              />
+                              <text
+                                x={p.x}
+                                y={p.y - 8}
+                                textAnchor="middle"
+                                className={`text-[9px] font-mono font-bold ${
+                                  isBest ? 'fill-amber-700' : 'fill-slate-700'
+                                }`}
+                              >
+                                {p.swim.time}
+                              </text>
+                              <text
+                                x={p.x}
+                                y={H - 10}
+                                textAnchor="middle"
+                                className="fill-slate-400 text-[8.5px] font-mono"
+                              >
+                                {formatDisplayDateMDY(p.swim.date)}
+                              </text>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Full Chronological Swim Log */}
+              {activeSwimmerProfile.chronologicalLog.length > 0 && (
+                <div className="space-y-2.5">
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
+                    Chronological Career Swim Log ({activeSwimmerProfile.chronologicalLog.length})
+                  </h3>
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-64">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
+                        <tr>
+                          <th className="py-2 px-3">Date</th>
+                          <th className="py-2 px-3">Event</th>
+                          <th className="py-2 px-3">Time</th>
+                          <th className="py-2 px-3">Place</th>
+                          <th className="py-2 px-3">Competition</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {activeSwimmerProfile.chronologicalLog.map((r) => (
+                          <tr key={r.id} className="hover:bg-slate-50">
+                            <td className="py-2 px-3 font-mono text-slate-500">
+                              {formatDisplayDateMDY(r.date)}
+                            </td>
+                            <td className="py-2 px-3 font-semibold text-slate-900">
+                              {r.eventLabel}
+                              {r.splitContext ? (
+                                <span className="ml-1.5 text-[10px] text-slate-500 font-normal">
+                                  ({r.splitContext})
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="py-2 px-3 font-mono font-bold text-cyan-800">
+                              {r.time}
+                            </td>
+                            <td className="py-2 px-3 text-slate-600">{r.place || '—'}</td>
+                            <td className="py-2 px-3 text-slate-600">{r.competition || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
