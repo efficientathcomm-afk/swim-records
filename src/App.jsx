@@ -9903,6 +9903,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                   )}
                 </div>
               )}
+            </div>
+          </div>
+        )}
               
         {/* ==================================================================== */}
         {/* SECTION 4: IMPORT MEET RESULTS (EXACT ORIGINAL PARSER & LAYOUT)      */}
