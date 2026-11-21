@@ -580,6 +580,7 @@ function parseSDIFContent(content) {
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
+      const seedTimeRaw = sliceCol(line, 103, 110);
       const finalsTimeRaw = sliceCol(line, 116, 123);
       const courseCode = sliceCol(line, 124, 124);
 
@@ -595,6 +596,7 @@ function parseSDIFContent(content) {
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
       const parsedSec = timeToSeconds(finalsTimeRaw);
+      const parsedSeedSec = timeToSeconds(seedTimeRaw);
 
       const record = {
         id: `ind-${i}-${swimmerName}-${eventNumber}`,
@@ -612,6 +614,8 @@ function parseSDIFContent(content) {
         eventNumber: parseInt(eventNumber, 10) || eventNumber,
         eventLabel,
         swimDate: swimIsoDate || meetInfo.isoDate || '',
+        seedTime: seedTimeRaw || '',
+        seedSeconds: parsedSeedSec === null ? Infinity : parsedSeedSec,
         finalsTime: finalsTimeRaw || 'NT',
         timeSeconds: parsedSec === null ? Infinity : parsedSec,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
@@ -666,6 +670,7 @@ function parseSDIFContent(content) {
       const distance = sliceCol(line, 23, 25);
       const strokeCode = sliceCol(line, 26, 26);
       const eventNumber = sliceCol(line, 27, 30);
+      const seedTimeRaw = sliceCol(line, 59, 67);
       const finalsTimeRaw = sliceCol(line, 72, 80);
       const courseCode = sliceCol(line, 81, 81);
 
@@ -681,6 +686,7 @@ function parseSDIFContent(content) {
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
       const parsedSec = timeToSeconds(finalsTimeRaw);
+      const parsedSeedSec = timeToSeconds(seedTimeRaw);
 
       const relayObj = {
         id: `rel-${i}-${teamCode}-${relayLetter}-${eventNumber}`,
@@ -696,6 +702,8 @@ function parseSDIFContent(content) {
         strokeName,
         eventNumber: parseInt(eventNumber, 10) || eventNumber,
         eventLabel,
+        seedTime: seedTimeRaw || '',
+        seedSeconds: parsedSeedSec === null ? Infinity : parsedSeedSec,
         finalsTime: finalsTimeRaw || 'NT',
         timeSeconds: parsedSec === null ? Infinity : parsedSec,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
@@ -1403,6 +1411,13 @@ export default function App() {
   const [relayOptManualA, setRelayOptManualA] = useState(['', '', '', '']);
   const [relayOptManualB, setRelayOptManualB] = useState(['', '', '', '']);
   const [relayOptExcludedKeys, setRelayOptExcludedKeys] = useState(new Set());
+
+  // Virtual Dual-Meet Score Simulator State
+  const [simTimeBasis, setSimTimeBasis] = useState('AUTO'); // 'AUTO' | 'SEED' | 'FINALS'
+  const [simScoringFormat, setSimScoringFormat] = useState('DUAL_9'); // 'DUAL_9' (9-4-3-2-1 / 11-4-2) | 'DUAL_6' (6-4-3-2-1 / 8-4-2)
+  const [simGenderView, setSimGenderView] = useState('ALL'); // 'ALL' | 'Women' | 'Men'
+  const [simCustomOrders, setSimCustomOrders] = useState({}); // { [eventKey]: string[] of entry ids }
+  const [simScratchedIds, setSimScratchedIds] = useState(new Set());
 
   const [profileSwimmerName, setProfileSwimmerName] = useState(null);
   const [profileChartEventKey, setProfileChartEventKey] = useState('');
@@ -2954,6 +2969,8 @@ const rRowId = `cl2-lo-${entry.id}`;
       setDayRangeEndEvent('');
       setDayRangeTargetDate(parsed.meetInfo.isoDate || '');
       setExcludedMeetCommitIds(new Set());
+      setSimCustomOrders({});
+      setSimScratchedIds(new Set());
 
       // Assign default distinct hex colors to any teams not yet configured
       const palette = [
@@ -6956,6 +6973,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                 <div className="flex flex-wrap gap-1.5 bg-slate-800 p-1 rounded-xl text-xs font-bold">
                   {[
                     { id: 'heatsheet', label: 'Heat Sheet (Lanes 1–8)' },
+                    { id: 'scoresim', label: 'Score Simulator' },
                     { id: 'roster', label: `Active Roster (${masterRoster.filter((a) => a.isActive).length})` },
                     { id: 'relayopt', label: 'Relay Optimizer' },
                     { id: 'standards', label: `Standards & Pool Recs (${qualStandards.length})` },
@@ -7006,30 +7024,27 @@ const rRowId = `cl2-lo-${entry.id}`;
                             Pick a color or enter a hex code per team
                           </span>
                         </div>
-                        <div className="flex flex-wrap gap-2.5">
+                        <div className="flex flex-wrap gap-3">
                           {parsedData.teams.map((t) => {
-                            const hexVal = getTeamHexColor(t.code, t.name);
+                            const hex = getTeamHexColor(t.code, t.name);
                             return (
                               <div
                                 key={t.code}
-                                className="inline-flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs"
+                                className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs"
                               >
-                                <span
-                                  className="w-2.5 h-5 rounded-xs shrink-0"
-                                  style={{ backgroundColor: hexVal }}
+                                <input
+                                  type="color"
+                                  value={hex.startsWith('#') && hex.length === 7 ? hex : '#0284c7'}
+                                  onChange={(e) => handleSetTeamHexColor(t.code, e.target.value)}
+                                  className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent p-0"
                                 />
                                 <span className="font-bold text-slate-800">{t.name}</span>
                                 <input
-                                  type="color"
-                                  value={/^#[0-9a-fA-F]{6}$/.test(hexVal) ? hexVal : '#64748b'}
-                                  onChange={(e) => handleSetTeamHexColor(t.code, e.target.value)}
-                                  className="w-5 h-5 p-0 border-0 bg-transparent cursor-pointer"
-                                />
-                                <input
                                   type="text"
-                                  value={hexVal}
+                                  value={hex}
                                   onChange={(e) => handleSetTeamHexColor(t.code, e.target.value)}
-                                  className="w-20 px-1.5 py-0.5 text-[11px] font-mono bg-slate-50 border border-slate-200 rounded"
+                                  maxLength={7}
+                                  className="w-16 font-mono text-[11px] px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded"
                                 />
                               </div>
                             );
@@ -7037,7 +7052,6 @@ const rRowId = `cl2-lo-${entry.id}`;
                         </div>
                       </div>
 
-                      {/* Event & Heat Selector */}
                       {(() => {
                         const eventOptionMap = new Map();
                         parsedData.individualResults.forEach((r) => {
@@ -7065,7 +7079,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                           eventOptions.find((e) => e.label === selectedHeatEventLabel) ||
                           eventOptions[0] ||
                           null;
-                        const activeEventLabel = activeEventObj ? activeEventObj.label : '';
+                        const activeEventLabel = activeEventObj?.label || '';
                         const isRelayEvent = Boolean(activeEventObj?.isRelay);
 
                         const eventSwims = isRelayEvent
@@ -7073,34 +7087,33 @@ const rRowId = `cl2-lo-${entry.id}`;
                           : parsedData.individualResults.filter(
                               (r) => r.eventLabel === activeEventLabel
                             );
-
-                        const heats = Array.from(
+                        const availableHeats = Array.from(
                           new Set(eventSwims.map((r) => r.heat).filter(Boolean))
                         ).sort((a, b) => Number(a) - Number(b));
 
-                        const chosenHeat =
-                          selectedHeatNum !== 'ALL' && heats.includes(selectedHeatNum)
+                        const effectiveHeat =
+                          selectedHeatNum !== 'ALL' && availableHeats.includes(selectedHeatNum)
                             ? selectedHeatNum
-                            : heats[0] || 'ALL';
+                            : availableHeats[0] || 'ALL';
 
-                        const laneEntries =
-                          chosenHeat === 'ALL'
+                        const heatSwims =
+                          effectiveHeat === 'ALL'
                             ? eventSwims
-                            : eventSwims.filter((r) => String(r.heat) === String(chosenHeat));
+                            : eventSwims.filter((r) => String(r.heat) === String(effectiveHeat));
 
                         const laneMap = new Map();
-                        laneEntries.forEach((entry) => {
-                          const ln = parseInt(entry.lane, 10);
+                        heatSwims.forEach((r) => {
+                          const ln = parseInt(r.lane, 10);
                           if (ln >= 1 && ln <= 8 && !laneMap.has(ln)) {
-                            laneMap.set(ln, entry);
+                            laneMap.set(ln, r);
                           }
                         });
 
+                        // Pre-compute All-Time Top 10 for the active event + Reference Benchmarks
                         const activeEvKey = normalizeEventKey(activeEventLabel);
                         const officialEvPool = historicalRecords.filter(
                           (r) => r.isOfficial !== false && r.eventKey === activeEvKey
                         );
-
                         const allTimeRankBySwimmer = new Map();
                         const bestBySw = new Map();
                         officialEvPool.forEach((r) => {
@@ -7121,17 +7134,19 @@ const rRowId = `cl2-lo-${entry.id}`;
                           (a, b) => a.seconds - b.seconds
                         );
                         const schoolRecordMark = sortedEvBests[0] || null;
-                        const top10CutMark = sortedEvBests[9] || null;
-                        const freshmanRecordMark =
-                          officialEvPool
-                            .filter((r) => normalizeClass(r.classYear) === 'FR')
-                            .sort((a, b) => a.seconds - b.seconds)[0] || null;
+                        const tenthMark = sortedEvBests[9] || null;
+                        const freshmanRecordMark = isRelayEvent
+                          ? null
+                          : officialEvPool
+                              .filter((r) => normalizeClass(r.classYear) === 'FR')
+                              .sort((a, b) => a.seconds - b.seconds)[0] || null;
                         const matchingStandards = qualStandards.filter(
                           (s) => s.eventKey === activeEvKey
                         );
 
                         return (
                           <div className="space-y-4">
+                            {/* Event & Heat Selector + Broadcast Graphics Export */}
                             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                               <div className="flex flex-wrap items-center gap-3">
                                 <select
@@ -7140,26 +7155,25 @@ const rRowId = `cl2-lo-${entry.id}`;
                                     setSelectedHeatEventLabel(e.target.value);
                                     setSelectedHeatNum('ALL');
                                   }}
-                                  className="px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[240px]"
+                                  className="px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
                                   {eventOptions.map((ev) => (
                                     <option key={ev.label} value={ev.label}>
                                       #{ev.num} — {ev.label}
-                                      {ev.isRelay ? ' (Relay)' : ''}
                                     </option>
                                   ))}
                                 </select>
 
-                                {heats.length > 0 && (
-                                  <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
-                                    {heats.map((h) => (
+                                {availableHeats.length > 0 && (
+                                  <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                                    {availableHeats.map((h) => (
                                       <button
                                         key={h}
                                         type="button"
                                         onClick={() => setSelectedHeatNum(h)}
-                                        className={`px-3 py-1 rounded-lg transition cursor-pointer ${
-                                          String(chosenHeat) === String(h)
-                                            ? 'bg-indigo-600 text-white shadow-xs'
+                                        className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                          String(effectiveHeat) === String(h)
+                                            ? 'bg-white text-indigo-700 shadow-xs'
                                             : 'text-slate-600 hover:text-slate-900'
                                         }`}
                                       >
@@ -7170,170 +7184,175 @@ const rRowId = `cl2-lo-${entry.id}`;
                                 )}
                               </div>
 
-                              {/* Broadcast 1920x1080 Heat Graphic Export Controls */}
-                              {activeEventObj && (
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <div className="flex bg-slate-100 p-0.5 rounded-lg text-[11px] font-bold">
-                                    <button
-                                      type="button"
-                                      onClick={() => setBroadcastGraphicTheme('slate')}
-                                      className={`px-2 py-1 rounded-md transition cursor-pointer ${
-                                        broadcastGraphicTheme === 'slate'
-                                          ? 'bg-white text-slate-900 shadow-xs'
-                                          : 'text-slate-600 hover:text-slate-900'
-                                      }`}
-                                      title="Full dark broadcast slate background"
-                                    >
-                                      Full Slate
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setBroadcastGraphicTheme('transparent')}
-                                      className={`px-2 py-1 rounded-md transition cursor-pointer ${
-                                        broadcastGraphicTheme === 'transparent'
-                                          ? 'bg-white text-slate-900 shadow-xs'
-                                          : 'text-slate-600 hover:text-slate-900'
-                                      }`}
-                                      title="Transparent alpha PNG for live video overlay"
-                                    >
-                                      Transparent Key
-                                    </button>
-                                  </div>
-
+                              {/* Broadcast 1920x1080 PNG Graphics Export Controls */}
+                              <div className="flex flex-wrap items-center gap-2 bg-slate-900 text-white px-3 py-2 rounded-xl">
+                                <div className="flex bg-slate-800 p-0.5 rounded-lg text-[11px] font-bold">
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      const safeEv = activeEventObj.label
-                                        .replace(/[^a-z0-9]+/gi, '_')
-                                        .replace(/^_|_$/g, '');
-                                      const evPad = String(activeEventObj.num).padStart(2, '0');
-                                      const hLabel = chosenHeat === 'ALL' ? '1' : chosenHeat;
-                                      const url = renderBroadcastHeatGraphicPng(
-                                        activeEventObj,
-                                        hLabel,
-                                        laneMap,
-                                        broadcastGraphicTheme
-                                      );
-                                      triggerPngDownload(url, `Ev${evPad}_${safeEv}_Heat${hLabel}.png`);
-                                    }}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition cursor-pointer"
+                                    onClick={() => setBroadcastGraphicTheme('slate')}
+                                    className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                                      broadcastGraphicTheme === 'slate'
+                                        ? 'bg-cyan-600 text-white'
+                                        : 'text-slate-300 hover:text-white'
+                                    }`}
                                   >
-                                    <Download className="w-3.5 h-3.5 text-cyan-400" />
-                                    Export Heat PNG
+                                    Full Slate
                                   </button>
-
                                   <button
                                     type="button"
-                                    disabled={isExportingAllGraphics}
-                                    onClick={handleExportAllMeetGraphics}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white shadow-xs transition cursor-pointer"
+                                    onClick={() => setBroadcastGraphicTheme('transparent')}
+                                    className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                                      broadcastGraphicTheme === 'transparent'
+                                        ? 'bg-cyan-600 text-white'
+                                        : 'text-slate-300 hover:text-white'
+                                    }`}
                                   >
-                                    <Download className="w-3.5 h-3.5" />
-                                    {isExportingAllGraphics
-                                      ? 'Exporting All...'
-                                      : 'Export All Heats (1080p)'}
+                                    Transparent Key
                                   </button>
                                 </div>
-                              )}
+
+                                <button
+                                  type="button"
+                                  disabled={!activeEventObj}
+                                  onClick={() => {
+                                    if (!activeEventObj) return;
+                                    const hVal = effectiveHeat === 'ALL' ? '1' : effectiveHeat;
+                                    const safeEv = activeEventObj.label
+                                      .replace(/[^a-z0-9]+/gi, '_')
+                                      .replace(/^_|_$/g, '');
+                                    const evPad = String(activeEventObj.num).padStart(2, '0');
+                                    const dataUrl = renderBroadcastHeatGraphicPng(
+                                      activeEventObj,
+                                      hVal,
+                                      laneMap,
+                                      broadcastGraphicTheme
+                                    );
+                                    triggerPngDownload(
+                                      dataUrl,
+                                      `Ev${evPad}_${safeEv}_Heat${hVal}.png`
+                                    );
+                                  }}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition cursor-pointer"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  <span>Export Heat PNG</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={isExportingAllGraphics}
+                                  onClick={handleExportAllMeetGraphics}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition cursor-pointer"
+                                >
+                                  <Layers className="w-3.5 h-3.5" />
+                                  <span>
+                                    {isExportingAllGraphics
+                                      ? 'Exporting...'
+                                      : 'Export All Heats (1080p)'}
+                                  </span>
+                                </button>
+                              </div>
                             </div>
 
-                            {/* Event Benchmarks & Defined Standards / Pool Records Strip */}
-                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                                <div className="p-2.5 rounded-lg bg-amber-50/80 border border-amber-200 text-xs">
-                                  <div className="text-[10px] font-bold uppercase text-amber-800">
-                                    #1 Program Record
-                                  </div>
-                                  <div className="font-extrabold text-slate-900 mt-0.5 truncate">
-                                    {schoolRecordMark ? (
-                                      <>
-                                        <span className="font-mono text-amber-900">
-                                          {schoolRecordMark.time}
-                                        </span>{' '}
-                                        — {schoolRecordMark.swimmerName}
-                                      </>
-                                    ) : (
-                                      <span className="text-slate-500 font-normal">No record in DB</span>
-                                    )}
-                                  </div>
+                            {/* Event Benchmarks & Defined Standards/Records Strip */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                              <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-amber-800">
+                                  #1 Program Record
                                 </div>
-
-                                <div className="p-2.5 rounded-lg bg-indigo-50/80 border border-indigo-200 text-xs">
-                                  <div className="text-[10px] font-bold uppercase text-indigo-800">
-                                    #10 All-Time Cut
-                                  </div>
-                                  <div className="font-extrabold text-slate-900 mt-0.5 truncate">
-                                    {top10CutMark ? (
-                                      <>
-                                        <span className="font-mono text-indigo-900">
-                                          {top10CutMark.time}
-                                        </span>{' '}
-                                        — {top10CutMark.swimmerName}
-                                      </>
-                                    ) : (
-                                      <span className="text-slate-500 font-normal">
-                                        {sortedEvBests.length > 0
-                                          ? `Open spot (${sortedEvBests.length}/10 filled)`
-                                          : 'No marks in DB'}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div className="p-2.5 rounded-lg bg-cyan-50/80 border border-cyan-200 text-xs">
-                                  <div className="text-[10px] font-bold uppercase text-cyan-800">
-                                    Freshman (FR) Record
-                                  </div>
-                                  <div className="font-extrabold text-slate-900 mt-0.5 truncate">
-                                    {freshmanRecordMark ? (
-                                      <>
-                                        <span className="font-mono text-cyan-900">
-                                          {freshmanRecordMark.time}
-                                        </span>{' '}
-                                        — {freshmanRecordMark.swimmerName}
-                                      </>
-                                    ) : (
-                                      <span className="text-slate-500 font-normal">
-                                        No FR mark in DB
-                                      </span>
-                                    )}
-                                  </div>
+                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                  {schoolRecordMark ? (
+                                    <>
+                                      <span className="font-mono text-amber-900">
+                                        {schoolRecordMark.time}
+                                      </span>{' '}
+                                      — {schoolRecordMark.swimmerName}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-500 font-normal">No mark in DB</span>
+                                  )}
                                 </div>
                               </div>
 
-                              {matchingStandards.length > 0 && (
-                                <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center gap-2 text-xs">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                                    Event Standards &amp; Pool Records:
-                                  </span>
-                                  {matchingStandards.map((std) => (
-                                    <span
-                                      key={std.id}
-                                      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${getStandardBadgeStyle(
-                                        std.label
-                                      )}`}
-                                    >
-                                      <span>{std.label}:</span>
-                                      <span className="font-mono">{std.time}</span>
-                                    </span>
-                                  ))}
+                              <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-indigo-800">
+                                  #10 All-Time Cut
                                 </div>
-                              )}
+                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                  {tenthMark ? (
+                                    <>
+                                      <span className="font-mono text-indigo-900">
+                                        {tenthMark.time}
+                                      </span>{' '}
+                                      — {tenthMark.swimmerName}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-500 font-normal">
+                                      {sortedEvBests.length > 0
+                                        ? `Open spot (${sortedEvBests.length}/10 swimmers)`
+                                        : 'No marks in DB'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="p-3 rounded-xl bg-cyan-50/70 border border-cyan-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-cyan-800">
+                                  {isRelayEvent ? 'Relay Format' : 'Freshman (FR) Record'}
+                                </div>
+                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                  {isRelayEvent ? (
+                                    <span className="text-cyan-900">4-Leg Relay Event</span>
+                                  ) : freshmanRecordMark ? (
+                                    <>
+                                      <span className="font-mono text-cyan-900">
+                                        {freshmanRecordMark.time}
+                                      </span>{' '}
+                                      — {freshmanRecordMark.swimmerName}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-500 font-normal">No FR mark</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-slate-600">
+                                  Standards &amp; Pool Records
+                                </div>
+                                {matchingStandards.length === 0 ? (
+                                  <div className="text-slate-500 mt-0.5">None defined for event</div>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {matchingStandards.map((std) => (
+                                      <span
+                                        key={std.id}
+                                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getStandardBadgeStyle(
+                                          std.label
+                                        )}`}
+                                      >
+                                        {std.label}: <span className="font-mono">{std.time}</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                             </div>
 
+                            {/* Lanes 1-8 Table */}
                             <div className="overflow-x-auto border border-slate-200 rounded-xl">
                               <table className="w-full text-left text-xs">
                                 <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
                                   <tr>
-                                    <th className="py-2.5 px-3 w-20 text-center">Lane</th>
+                                    <th className="py-2.5 px-3 w-16 text-center">Lane</th>
                                     <th className="py-2.5 px-3">
                                       {isRelayEvent ? 'Relay Squad / Lineup' : 'Swimmer / Team'}
                                     </th>
-                                    <th className="py-2.5 px-3">PB / SB</th>
+                                    <th className="py-2.5 px-3">Seed / PB / SB</th>
                                     <th className="py-2.5 px-3 text-center">Wins</th>
-                                    <th className="py-2.5 px-3">Last Swim in Event</th>
-                                    <th className="py-2.5 px-3">Event Trend</th>
-                                    <th className="py-2.5 px-3">All-Time / Cuts</th>
+                                    <th className="py-2.5 px-3">Last Swim</th>
+                                    <th className="py-2.5 px-3">Trajectory &amp; Form</th>
+                                    <th className="py-2.5 px-3">All-Time &amp; Milestones</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -7471,27 +7490,183 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         ).length;
 
                                     const lastSwim = swEventHistory[0] || null;
-                                    const curSec = timeToSeconds(entry.finalsTime);
-                                    let trendText = '—';
-                                    let trendTone = 'text-slate-500';
-                                    if (curSec !== null && lastSwim) {
-                                      const diff = curSec - lastSwim.seconds;
-                                      if (diff < -0.005) {
-                                        trendText = `${diff.toFixed(2)}s vs last`;
-                                        trendTone = 'text-emerald-700 font-bold';
-                                      } else if (diff > 0.005) {
-                                        trendText = `+${diff.toFixed(2)}s vs last`;
-                                        trendTone = 'text-amber-700 font-semibold';
+                                    const seedSec = timeToSeconds(entry.seedTime);
+                                    const finalsSec = timeToSeconds(entry.finalsTime);
+
+                                    // 1. Trajectory & Form Signals
+                                    const trajectoryNotes = [];
+                                    if (seedSec !== null && pbRec) {
+                                      const vsPb = seedSec - pbRec.seconds;
+                                      if (Math.abs(vsPb) <= 0.02) {
+                                        trajectoryNotes.push({
+                                          text: 'Seeded at PB',
+                                          tone: 'text-indigo-700 font-bold',
+                                        });
+                                      } else if (vsPb < -0.02) {
+                                        trajectoryNotes.push({
+                                          text: `Seeded ${Math.abs(vsPb).toFixed(2)}s faster than PB`,
+                                          tone: 'text-emerald-700 font-bold',
+                                        });
                                       } else {
-                                        trendText = 'Exact last mark';
+                                        trajectoryNotes.push({
+                                          text: `Seeded +${vsPb.toFixed(2)}s off PB`,
+                                          tone: 'text-slate-600',
+                                        });
                                       }
+                                    } else if (seedSec !== null && sbRec) {
+                                      const vsSb = seedSec - sbRec.seconds;
+                                      trajectoryNotes.push({
+                                        text:
+                                          Math.abs(vsSb) <= 0.02
+                                            ? 'Seeded at SB'
+                                            : `Seeded ${vsSb > 0 ? '+' : ''}${vsSb.toFixed(2)}s vs SB`,
+                                        tone: 'text-slate-600',
+                                      });
                                     }
 
+                                    if (swEventHistory.length >= 3) {
+                                      const [s0, s1, s2] = swEventHistory;
+                                      if (s0.seconds < s1.seconds && s1.seconds < s2.seconds) {
+                                        const drop3 = s2.seconds - s0.seconds;
+                                        trajectoryNotes.push({
+                                          text: `Dropping (-${drop3.toFixed(2)}s over last 3)`,
+                                          tone: 'text-emerald-700 font-bold',
+                                        });
+                                      }
+                                    }
+                                    if (
+                                      lastSwim &&
+                                      pbRec &&
+                                      lastSwim.id === pbRec.id &&
+                                      swEventHistory.length > 1
+                                    ) {
+                                      trajectoryNotes.push({
+                                        text: 'Career-best form (PB last swim)',
+                                        tone: 'text-emerald-700 font-semibold',
+                                      });
+                                    } else if (
+                                      lastSwim &&
+                                      sbRec &&
+                                      lastSwim.id === sbRec.id &&
+                                      sbSwims.length > 1
+                                    ) {
+                                      trajectoryNotes.push({
+                                        text: 'Season-best form (SB last swim)',
+                                        tone: 'text-cyan-700 font-semibold',
+                                      });
+                                    }
+
+                                    if (finalsSec !== null && lastSwim) {
+                                      const diff = finalsSec - lastSwim.seconds;
+                                      trajectoryNotes.push({
+                                        text:
+                                          Math.abs(diff) <= 0.005
+                                            ? 'Finals matched last mark'
+                                            : `Finals ${diff < 0 ? '' : '+'}${diff.toFixed(2)}s vs last`,
+                                        tone:
+                                          diff < -0.005
+                                            ? 'text-emerald-700 font-bold'
+                                            : 'text-slate-500',
+                                      });
+                                    }
+
+                                    // 2. All-Time Gap, Barrier Watch, Last Meet Momentum, & Cut Proximity
                                     const rankNum = isRelayEvent
                                       ? isGettysburgEntry
                                         ? allTimeRankBySwimmer.get(swKey)
                                         : undefined
                                       : allTimeRankBySwimmer.get(swKey);
+
+                                    const milestoneBullets = [];
+                                    const refSec =
+                                      pbRec?.seconds ?? (seedSec !== null ? seedSec : null);
+
+                                    if (rankNum && rankNum > 1 && sortedEvBests[rankNum - 2]) {
+                                      const aheadRec = sortedEvBests[rankNum - 2];
+                                      if (refSec !== null && refSec >= aheadRec.seconds) {
+                                        const gap = refSec - aheadRec.seconds;
+                                        milestoneBullets.push(
+                                          `#${rankNum} All-Time (${gap.toFixed(2)}s shy of #${
+                                            rankNum - 1
+                                          })`
+                                        );
+                                      }
+                                    } else if (
+                                      !rankNum &&
+                                      isGettysburgEntry &&
+                                      tenthMark &&
+                                      refSec !== null &&
+                                      refSec > tenthMark.seconds &&
+                                      refSec - tenthMark.seconds <= Math.max(2.5, tenthMark.seconds * 0.03)
+                                    ) {
+                                      milestoneBullets.push(
+                                        `${(refSec - tenthMark.seconds).toFixed(2)}s outside Top-10 (#10: ${tenthMark.time})`
+                                      );
+                                    }
+
+                                    if (pbRec && pbRec.seconds > 15) {
+                                      const pbS = pbRec.seconds;
+                                      let barrierTarget = null;
+                                      if (pbS >= 60) {
+                                        const wholeMin = Math.floor(pbS / 60) * 60;
+                                        const tenSecStep = Math.floor(pbS / 10) * 10;
+                                        const cand =
+                                          pbS - wholeMin <= 2.5 ? wholeMin : tenSecStep;
+                                        if (pbS > cand && pbS - cand <= 2.0) {
+                                          barrierTarget = cand;
+                                        }
+                                      } else {
+                                        const wholeSec = Math.floor(pbS);
+                                        if (pbS > wholeSec && pbS - wholeSec <= 0.75) {
+                                          barrierTarget = wholeSec;
+                                        }
+                                      }
+                                      if (barrierTarget !== null) {
+                                        milestoneBullets.push(
+                                          `Chasing sub-${secondsToTime(barrierTarget)} (-${(
+                                            pbS - barrierTarget
+                                          ).toFixed(2)}s)`
+                                        );
+                                      }
+                                    }
+
+                                    if (!isRelayEvent && isGettysburgEntry) {
+                                      const athAllRows = historicalRecords.filter(
+                                        (r) =>
+                                          normalizeSwimmerKey(
+                                            resolveMasterAthlete(r.swimmerName)?.canonicalName ||
+                                              r.swimmerName
+                                          ) === swKey && r.date
+                                      );
+                                      if (athAllRows.length > 0) {
+                                        const latestDate = athAllRows.reduce(
+                                          (maxD, r) => (r.date > maxD ? r.date : maxD),
+                                          ''
+                                        );
+                                        const winsLastMeet = athAllRows.filter(
+                                          (r) =>
+                                            r.date === latestDate &&
+                                            String(r.place || '').trim() === '1' &&
+                                            String(r.round || 'Finals').toLowerCase() !==
+                                              'prelims' &&
+                                            String(r.round || 'Finals').toLowerCase() !==
+                                              'time trial'
+                                        ).length;
+                                        if (winsLastMeet >= 2) {
+                                          milestoneBullets.push(
+                                            `Won ${winsLastMeet} events last meet (${formatDisplayDateMDY(
+                                              latestDate
+                                            )})`
+                                          );
+                                        } else if (
+                                          lastSwim &&
+                                          String(lastSwim.place || '').trim() === '1'
+                                        ) {
+                                          milestoneBullets.push('Won this event last time out');
+                                        }
+                                      }
+                                    }
+
                                     const hitStandards = evaluateStandardsForSwim(
                                       entry.eventLabel,
                                       entry.finalsTime
@@ -7506,15 +7681,34 @@ const rRowId = `cl2-lo-${entry.id}`;
                                     const displayStandards = Array.from(
                                       combinedStandardsMap.values()
                                     );
+                                    const achievedStdIds = new Set(
+                                      displayStandards.map((s) => s.id)
+                                    );
+
+                                    if (refSec !== null) {
+                                      matchingStandards.forEach((std) => {
+                                        if (achievedStdIds.has(std.id)) return;
+                                        const stdSec = timeToSeconds(std.time);
+                                        if (
+                                          stdSec !== null &&
+                                          refSec > stdSec &&
+                                          refSec - stdSec <= Math.max(1.5, stdSec * 0.025)
+                                        ) {
+                                          milestoneBullets.push(
+                                            `${(refSec - stdSec).toFixed(2)}s from ${std.label} (${std.time})`
+                                          );
+                                        }
+                                      });
+                                    }
 
                                     return (
                                       <tr
                                         key={laneNum}
-                                        className="hover:bg-slate-50/80 transition"
+                                        className="hover:bg-slate-50/80 transition align-top"
                                       >
                                         <td
                                           style={{ backgroundColor: teamHex }}
-                                          className="py-3 px-3 text-center font-mono text-xl sm:text-2xl font-black text-white select-none"
+                                          className="py-3 px-3 text-center font-mono text-xl sm:text-2xl font-black text-white select-none align-middle"
                                         >
                                           {laneNum}
                                         </td>
@@ -7536,24 +7730,24 @@ const rRowId = `cl2-lo-${entry.id}`;
                                               : ''}
                                           </div>
                                           {isRelayEvent && resolvedLegs.length > 0 && (
-                                            <div className="text-[11px] text-slate-700 mt-0.5">
-                                              {resolvedLegs.map((l, idx) => (
-                                                <React.Fragment key={l.legOrder}>
-                                                  {idx > 0 && ' • '}
-                                                  <span>{l.legOrder}) </span>
+                                            <div className="text-[11px] text-slate-700 mt-0.5 flex flex-wrap gap-x-1">
+                                              {resolvedLegs.map((l, lIdx) => (
+                                                <span key={l.legOrder}>
+                                                  {l.legOrder}){' '}
                                                   <button
                                                     type="button"
                                                     onClick={() => openSwimmerProfile(l.name)}
-                                                    className="hover:text-indigo-700 hover:underline cursor-pointer"
+                                                    className="hover:text-indigo-700 hover:underline font-medium cursor-pointer"
                                                   >
                                                     {l.name}
                                                   </button>
                                                   {l.classYear ? ` (${l.classYear})` : ''}
-                                                </React.Fragment>
+                                                  {lIdx < resolvedLegs.length - 1 ? ' •' : ''}
+                                                </span>
                                               ))}
                                             </div>
                                           )}
-                                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
+                                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
                                             <span
                                               className="w-2 h-2 rounded-full inline-block"
                                               style={{ backgroundColor: teamHex }}
@@ -7561,12 +7755,18 @@ const rRowId = `cl2-lo-${entry.id}`;
                                             <span>{entry.teamName}</span>
                                             {entry.finalsTime && entry.finalsTime !== 'NT' && (
                                               <span className="font-mono font-bold text-slate-800 ml-1">
-                                                • {entry.finalsTime}
+                                                • Final: {entry.finalsTime}
                                               </span>
                                             )}
                                           </div>
                                         </td>
-                                        <td className="py-3 px-3 font-mono text-[11px]">
+                                        <td className="py-3 px-3 font-mono text-[11px] space-y-0.5">
+                                          <div>
+                                            Seed:{' '}
+                                            <strong className="text-indigo-900">
+                                              {entry.seedTime || 'NT'}
+                                            </strong>
+                                          </div>
                                           <div>
                                             PB:{' '}
                                             <strong className="text-slate-900">
@@ -7583,19 +7783,36 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         <td className="py-3 px-3 text-[11px]">
                                           {lastSwim ? (
                                             <div>
-                                              <span className="font-mono font-bold text-slate-800">
-                                                {lastSwim.time}
-                                              </span>
-                                              <span className="text-slate-500 ml-1.5">
-                                                ({formatDisplayDateMDY(lastSwim.date)})
-                                              </span>
+                                              <div>
+                                                <span className="font-mono font-bold text-slate-800">
+                                                  {lastSwim.time}
+                                                </span>
+                                                <span className="text-slate-500 ml-1">
+                                                  ({formatDisplayDateMDY(lastSwim.date)})
+                                                </span>
+                                              </div>
+                                              {lastSwim.competition && (
+                                                <div className="text-[10px] text-slate-400 truncate max-w-[160px]">
+                                                  {lastSwim.competition}
+                                                </div>
+                                              )}
                                             </div>
                                           ) : (
                                             <span className="text-slate-400">—</span>
                                           )}
                                         </td>
-                                        <td className={`py-3 px-3 text-[11px] font-mono ${trendTone}`}>
-                                          {trendText}
+                                        <td className="py-3 px-3 text-[11px]">
+                                          {trajectoryNotes.length > 0 ? (
+                                            <div className="space-y-0.5">
+                                              {trajectoryNotes.slice(0, 2).map((note, idx) => (
+                                                <div key={idx} className={note.tone}>
+                                                  {note.text}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-400">—</span>
+                                          )}
                                         </td>
                                         <td className="py-3 px-3">
                                           <div className="flex flex-wrap gap-1">
@@ -7614,10 +7831,21 @@ const rRowId = `cl2-lo-${entry.id}`;
                                                 {std.label}
                                               </span>
                                             ))}
-                                            {!rankNum && displayStandards.length === 0 && (
+                                          </div>
+                                          {milestoneBullets.length > 0 && (
+                                            <ul className="mt-1 space-y-0.5 text-[11px] text-slate-700">
+                                              {milestoneBullets.slice(0, 3).map((b, bIdx) => (
+                                                <li key={bIdx} className="leading-snug">
+                                                  • {b}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          )}
+                                          {!rankNum &&
+                                            displayStandards.length === 0 &&
+                                            milestoneBullets.length === 0 && (
                                               <span className="text-slate-400 text-[11px]">—</span>
                                             )}
-                                          </div>
                                         </td>
                                       </tr>
                                     );
@@ -7632,6 +7860,633 @@ const rRowId = `cl2-lo-${entry.id}`;
                   )}
                 </div>
               )}
+
+              {/* SUB-TAB 1B: DUAL-MEET VIRTUAL SCORE SIMULATOR */}
+              {inMeetSubTab === 'scoresim' && (() => {
+                if (!parsedData) {
+                  return (
+                    <div className="p-5 sm:p-6">
+                      <div className="text-center py-10 space-y-3 border border-dashed border-slate-200 rounded-xl">
+                        <p className="text-sm text-slate-600">
+                          Load a pre-meet psych sheet or meet results `.cl2` file in{' '}
+                          <strong>Section 4 (Import Meet Results)</strong> to simulate dual-meet
+                          team scores and test &quot;What-If&quot; place flips.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA)}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                        >
+                          Load Sample Meet
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const scoringConfig =
+                  simScoringFormat === 'DUAL_6'
+                    ? {
+                        label: '6-Lane Dual (6-4-3-2-1 Ind / 8-4-2 Relay)',
+                        indPts: [6, 4, 3, 2, 1],
+                        relPts: [8, 4, 2],
+                        maxIndPerTeam: 3,
+                        maxRelPerTeam: 2,
+                      }
+                    : {
+                        label: 'Standard Dual (9-4-3-2-1 Ind / 11-4-2 Relay)',
+                        indPts: [9, 4, 3, 2, 1],
+                        relPts: [11, 4, 2],
+                        maxIndPerTeam: 3,
+                        maxRelPerTeam: 2,
+                      };
+
+                const getEntryMetric = (item) => {
+                  const sSec = Number.isFinite(item.seedSeconds)
+                    ? item.seedSeconds
+                    : timeToSeconds(item.seedTime);
+                  const fSec = Number.isFinite(item.timeSeconds)
+                    ? item.timeSeconds
+                    : timeToSeconds(item.finalsTime);
+
+                  if (simTimeBasis === 'SEED') {
+                    return {
+                      sec: sSec !== null && Number.isFinite(sSec) ? sSec : Infinity,
+                      displayTime: item.seedTime && item.seedTime !== 'NT' ? item.seedTime : 'NT',
+                      sourceTag: 'Seed',
+                    };
+                  }
+                  if (simTimeBasis === 'FINALS') {
+                    return {
+                      sec: fSec !== null && Number.isFinite(fSec) ? fSec : Infinity,
+                      displayTime:
+                        item.finalsTime && item.finalsTime !== 'NT' ? item.finalsTime : 'NT',
+                      sourceTag: 'Final',
+                    };
+                  }
+                  // AUTO: prefer Seed Time when present (pre-meet psych sheet), fall back to Finals Time
+                  if (sSec !== null && Number.isFinite(sSec)) {
+                    return { sec: sSec, displayTime: item.seedTime, sourceTag: 'Seed' };
+                  }
+                  if (fSec !== null && Number.isFinite(fSec)) {
+                    return { sec: fSec, displayTime: item.finalsTime, sourceTag: 'Final' };
+                  }
+                  return { sec: Infinity, displayTime: 'NT', sourceTag: '' };
+                };
+
+                // Group all events chronologically by eventNumber
+                const eventGroupsMap = new Map();
+                parsedData.individualResults.forEach((r) => {
+                  const key = `${r.eventNumber}|${r.eventLabel}`;
+                  if (!eventGroupsMap.has(key)) {
+                    eventGroupsMap.set(key, {
+                      key,
+                      eventNumber: Number(r.eventNumber) || 999,
+                      eventLabel: r.eventLabel,
+                      genderLabel: r.genderLabel,
+                      isRelay: false,
+                      entries: [],
+                    });
+                  }
+                  eventGroupsMap.get(key).entries.push(r);
+                });
+                parsedData.relayResults.forEach((r) => {
+                  const key = `${r.eventNumber}|${r.eventLabel}`;
+                  if (!eventGroupsMap.has(key)) {
+                    eventGroupsMap.set(key, {
+                      key,
+                      eventNumber: Number(r.eventNumber) || 999,
+                      eventLabel: r.eventLabel,
+                      genderLabel: r.genderLabel,
+                      isRelay: true,
+                      entries: [],
+                    });
+                  }
+                  eventGroupsMap.get(key).entries.push(r);
+                });
+
+                const allOrderedEvents = Array.from(eventGroupsMap.values()).sort(
+                  (a, b) => a.eventNumber - b.eventNumber
+                );
+
+                // Compute projected scores across the ENTIRE meet (both Women & Men)
+                const teamScoreTotals = new Map();
+                parsedData.teams.forEach((t) => {
+                  teamScoreTotals.set(t.code, {
+                    code: t.code,
+                    name: t.name,
+                    womenPts: 0,
+                    menPts: 0,
+                    totalPts: 0,
+                    eventWins: 0,
+                  });
+                });
+
+                const evaluatedEvents = allOrderedEvents.map((evGrp) => {
+                  const metricById = new Map();
+                  evGrp.entries.forEach((entry) => {
+                    metricById.set(entry.id, getEntryMetric(entry));
+                  });
+
+                  // Default natural order by selected time basis
+                  const naturalSorted = [...evGrp.entries].sort((a, b) => {
+                    const mA = metricById.get(a.id).sec;
+                    const mB = metricById.get(b.id).sec;
+                    if (mA !== mB) return mA - mB;
+                    return (Number(a.lane) || 99) - (Number(b.lane) || 99);
+                  });
+
+                  const customOrderIds = simCustomOrders[evGrp.key];
+                  let orderedEntries = naturalSorted;
+                  if (Array.isArray(customOrderIds) && customOrderIds.length > 0) {
+                    const rankMap = new Map(customOrderIds.map((id, idx) => [id, idx]));
+                    orderedEntries = [...naturalSorted].sort((a, b) => {
+                      const rA = rankMap.has(a.id) ? rankMap.get(a.id) : 9999;
+                      const rB = rankMap.has(b.id) ? rankMap.get(b.id) : 9999;
+                      if (rA !== rB) return rA - rB;
+                      return metricById.get(a.id).sec - metricById.get(b.id).sec;
+                    });
+                  }
+
+                  const ptsScale = evGrp.isRelay ? scoringConfig.relPts : scoringConfig.indPts;
+                  const maxPerTeam = evGrp.isRelay
+                    ? scoringConfig.maxRelPerTeam
+                    : scoringConfig.maxIndPerTeam;
+
+                  let scoringPlaceIdx = 0;
+                  const teamScorerCounts = new Map();
+                  const eventTeamPts = new Map();
+
+                  const scoredRows = orderedEntries.map((entry, idx) => {
+                    const metric = metricById.get(entry.id);
+                    const isScratched = simScratchedIds.has(entry.id);
+                    const hasValidMark =
+                      !isScratched &&
+                      (Number.isFinite(metric.sec) || Array.isArray(customOrderIds));
+
+                    let awardedPts = 0;
+                    let simPlace = null;
+                    let isExhibitionCapped = false;
+
+                    if (!isScratched && (Number.isFinite(metric.sec) || Array.isArray(customOrderIds))) {
+                      simPlace = idx + 1;
+                      const curTeamCount = teamScorerCounts.get(entry.teamCode) || 0;
+                      if (curTeamCount >= maxPerTeam) {
+                        isExhibitionCapped = true;
+                      } else if (scoringPlaceIdx < ptsScale.length) {
+                        awardedPts = ptsScale[scoringPlaceIdx];
+                        scoringPlaceIdx += 1;
+                        teamScorerCounts.set(entry.teamCode, curTeamCount + 1);
+                      } else {
+                        teamScorerCounts.set(entry.teamCode, curTeamCount + 1);
+                      }
+                    }
+
+                    if (awardedPts > 0) {
+                      eventTeamPts.set(
+                        entry.teamCode,
+                        (eventTeamPts.get(entry.teamCode) || 0) + awardedPts
+                      );
+                      if (!teamScoreTotals.has(entry.teamCode)) {
+                        teamScoreTotals.set(entry.teamCode, {
+                          code: entry.teamCode,
+                          name: entry.teamName,
+                          womenPts: 0,
+                          menPts: 0,
+                          totalPts: 0,
+                          eventWins: 0,
+                        });
+                      }
+                      const tRec = teamScoreTotals.get(entry.teamCode);
+                      if (evGrp.genderLabel === 'Women') tRec.womenPts += awardedPts;
+                      else if (evGrp.genderLabel === 'Men') tRec.menPts += awardedPts;
+                      tRec.totalPts += awardedPts;
+                      if (simPlace === 1) tRec.eventWins += 1;
+                    }
+
+                    return {
+                      entry,
+                      metric,
+                      isScratched,
+                      simPlace,
+                      awardedPts,
+                      isExhibitionCapped,
+                    };
+                  });
+
+                  return {
+                    ...evGrp,
+                    hasOverride: Array.isArray(customOrderIds) && customOrderIds.length > 0,
+                    scoredRows,
+                    eventTeamPts,
+                  };
+                });
+
+                const moveSimulatedEntry = (evGroup, rowIndex, delta) => {
+                  const targetIdx = rowIndex + delta;
+                  if (targetIdx < 0 || targetIdx >= evGroup.scoredRows.length) return;
+                  const currentIds = evGroup.scoredRows.map((r) => r.entry.id);
+                  const [moved] = currentIds.splice(rowIndex, 1);
+                  currentIds.splice(targetIdx, 0, moved);
+                  setSimCustomOrders((prev) => ({
+                    ...prev,
+                    [evGroup.key]: currentIds,
+                  }));
+                };
+
+                const womenStandings = Array.from(teamScoreTotals.values()).sort(
+                  (a, b) => b.womenPts - a.womenPts
+                );
+                const menStandings = Array.from(teamScoreTotals.values()).sort(
+                  (a, b) => b.menPts - a.menPts
+                );
+
+                const visibleEvents = evaluatedEvents.filter(
+                  (ev) => simGenderView === 'ALL' || ev.genderLabel === simGenderView
+                );
+                const overrideCount =
+                  Object.keys(simCustomOrders).length + simScratchedIds.size;
+
+                return (
+                  <div className="p-5 sm:p-6 space-y-5">
+                    {/* Simulator Controls Bar */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div>
+                          <span className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                            Time Basis
+                          </span>
+                          <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                            {[
+                              { id: 'AUTO', label: 'Auto (Seed → Final)' },
+                              { id: 'SEED', label: 'Seed Times' },
+                              { id: 'FINALS', label: 'Finals Times' },
+                            ].map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => {
+                                  setSimTimeBasis(opt.id);
+                                  setSimCustomOrders({});
+                                }}
+                                className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                                  simTimeBasis === opt.id
+                                    ? 'bg-white text-slate-900 shadow-xs'
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <span className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                            Dual Scoring Rules
+                          </span>
+                          <select
+                            value={simScoringFormat}
+                            onChange={(e) => setSimScoringFormat(e.target.value)}
+                            className="px-3 py-1.5 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          >
+                            <option value="DUAL_9">
+                              9-4-3-2-1 Ind / 11-4-2 Relay (Max 3 Ind / 2 Rel)
+                            </option>
+                            <option value="DUAL_6">
+                              6-4-3-2-1 Ind / 8-4-2 Relay (6-Lane Pool)
+                            </option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <span className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                            Filter Events
+                          </span>
+                          <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                            {['ALL', 'Women', 'Men'].map((g) => (
+                              <button
+                                key={g}
+                                type="button"
+                                onClick={() => setSimGenderView(g)}
+                                className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                                  simGenderView === g
+                                    ? 'bg-white text-slate-900 shadow-xs'
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                              >
+                                {g === 'ALL' ? 'All' : g}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {overrideCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSimCustomOrders({});
+                            setSimScratchedIds(new Set());
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition cursor-pointer self-start lg:self-end"
+                        >
+                          Reset All &quot;What-If&quot; Flips ({overrideCount})
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Live Projected Women's & Men's Scoreboards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Women's Projected Scoreboard */}
+                      <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-5 space-y-3 shadow-sm">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                          <span className="text-xs font-extrabold uppercase tracking-wider text-cyan-300 flex items-center gap-1.5">
+                            <Trophy className="w-4 h-4 text-amber-400" />
+                            Projected Women&apos;s Dual Score
+                          </span>
+                          {womenStandings.length >= 2 && (
+                            <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-white/10 text-slate-200">
+                              Margin: {Math.abs(womenStandings[0].womenPts - womenStandings[1].womenPts)} pts
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          {womenStandings.map((t, idx) => {
+                            const hex = getTeamHexColor(t.code, t.name);
+                            return (
+                              <div
+                                key={`sim-w-${t.code}`}
+                                className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl ${
+                                  idx === 0 && t.womenPts > 0
+                                    ? 'bg-white/15 border border-cyan-400/40'
+                                    : 'bg-white/5 border border-white/10'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <span
+                                    className="w-3 h-6 rounded-xs shrink-0"
+                                    style={{ backgroundColor: hex }}
+                                  />
+                                  <span className="font-bold text-sm truncate">{t.name}</span>
+                                </div>
+                                <span className="font-mono text-xl font-black text-white tabular-nums">
+                                  {t.womenPts}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Men's Projected Scoreboard */}
+                      <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-5 space-y-3 shadow-sm">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                          <span className="text-xs font-extrabold uppercase tracking-wider text-cyan-300 flex items-center gap-1.5">
+                            <Trophy className="w-4 h-4 text-amber-400" />
+                            Projected Men&apos;s Dual Score
+                          </span>
+                          {menStandings.length >= 2 && (
+                            <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-white/10 text-slate-200">
+                              Margin: {Math.abs(menStandings[0].menPts - menStandings[1].menPts)} pts
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          {menStandings.map((t, idx) => {
+                            const hex = getTeamHexColor(t.code, t.name);
+                            return (
+                              <div
+                                key={`sim-m-${t.code}`}
+                                className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl ${
+                                  idx === 0 && t.menPts > 0
+                                    ? 'bg-white/15 border border-cyan-400/40'
+                                    : 'bg-white/5 border border-white/10'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <span
+                                    className="w-3 h-6 rounded-xs shrink-0"
+                                    style={{ backgroundColor: hex }}
+                                  />
+                                  <span className="font-bold text-sm truncate">{t.name}</span>
+                                </div>
+                                <span className="font-mono text-xl font-black text-white tabular-nums">
+                                  {t.menPts}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Event-by-Event Interactive What-If Breakdown */}
+                    <div className="space-y-4">
+                      {visibleEvents.map((evGrp) => (
+                        <div
+                          key={evGrp.key}
+                          className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs"
+                        >
+                          <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded bg-slate-900 text-white font-mono text-[11px] font-bold">
+                                #{evGrp.eventNumber}
+                              </span>
+                              <span className="font-extrabold text-xs sm:text-sm text-slate-900">
+                                {evGrp.eventLabel}
+                              </span>
+                              {evGrp.hasOverride && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                  Custom Order Active
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              {parsedData.teams.map((t) => {
+                                const pts = evGrp.eventTeamPts.get(t.code) || 0;
+                                const hex = getTeamHexColor(t.code, t.name);
+                                return (
+                                  <span
+                                    key={t.code}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white border border-slate-200 font-mono text-[11px] font-bold text-slate-800"
+                                  >
+                                    <span
+                                      className="w-2 h-2 rounded-full"
+                                      style={{ backgroundColor: hex }}
+                                    />
+                                    <span>{t.code}:</span>
+                                    <span className="text-indigo-700">+{pts}</span>
+                                  </span>
+                                );
+                              })}
+                              {evGrp.hasOverride && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setSimCustomOrders((prev) => {
+                                      const next = { ...prev };
+                                      delete next[evGrp.key];
+                                      return next;
+                                    })
+                                  }
+                                  className="text-[11px] font-bold text-indigo-700 hover:underline ml-1 cursor-pointer"
+                                >
+                                  Reset Event
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-100">
+                                <tr>
+                                  <th className="py-2 px-3 w-16 text-center">Sim Place</th>
+                                  <th className="py-2 px-3">
+                                    {evGrp.isRelay ? 'Relay Squad' : 'Swimmer'}
+                                  </th>
+                                  <th className="py-2 px-3">Team</th>
+                                  <th className="py-2 px-3 text-right">Time Basis</th>
+                                  <th className="py-2 px-3 text-center w-20">Points</th>
+                                  <th className="py-2 px-3 text-right w-36">What-If Controls</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {evGrp.scoredRows.map((rowObj, rIdx) => {
+                                  const {
+                                    entry,
+                                    metric,
+                                    isScratched,
+                                    simPlace,
+                                    awardedPts,
+                                    isExhibitionCapped,
+                                  } = rowObj;
+                                  const teamHex = getTeamHexColor(entry.teamCode, entry.teamName);
+                                  const labelName = evGrp.isRelay
+                                    ? entry.relayTitle ||
+                                      `${entry.teamName} "${entry.relayLetter || 'A'}"`
+                                    : formatSwimmerDisplay(
+                                        entry.swimmerName,
+                                        entry.preferredFirst
+                                      );
+
+                                  return (
+                                    <tr
+                                      key={entry.id}
+                                      style={{ boxShadow: `inset 4px 0 0 ${teamHex}` }}
+                                      className={
+                                        isScratched
+                                          ? 'bg-slate-50 text-slate-400 line-through'
+                                          : 'hover:bg-slate-50/70'
+                                      }
+                                    >
+                                      <td className="py-2 px-3 text-center font-mono font-black text-slate-800">
+                                        {simPlace ? `#${simPlace}` : '—'}
+                                      </td>
+                                      <td className="py-2 px-3 font-bold text-slate-900">
+                                        {evGrp.isRelay ? (
+                                          labelName
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              openSwimmerProfile(
+                                                labelName,
+                                                normalizeEventKey(evGrp.eventLabel)
+                                              )
+                                            }
+                                            className="text-left hover:text-indigo-700 hover:underline cursor-pointer"
+                                          >
+                                            {labelName}
+                                          </button>
+                                        )}
+                                        {!evGrp.isRelay && entry.classYear
+                                          ? ` (${entry.classYear})`
+                                          : ''}
+                                      </td>
+                                      <td className="py-2 px-3 text-slate-600">{entry.teamName}</td>
+                                      <td className="py-2 px-3 text-right font-mono">
+                                        <span className="font-bold text-slate-900">
+                                          {metric.displayTime}
+                                        </span>
+                                        {metric.sourceTag && (
+                                          <span className="ml-1 text-[10px] font-sans text-slate-400">
+                                            ({metric.sourceTag})
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="py-2 px-3 text-center font-mono">
+                                        {awardedPts > 0 ? (
+                                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 font-black">
+                                            +{awardedPts}
+                                          </span>
+                                        ) : isExhibitionCapped ? (
+                                          <span
+                                            title="Max scoring entries per team reached"
+                                            className="text-[10px] font-sans font-semibold text-slate-400"
+                                          >
+                                            Exh (0)
+                                          </span>
+                                        ) : (
+                                          <span className="text-slate-400">0</span>
+                                        )}
+                                      </td>
+                                      <td className="py-2 px-3 text-right">
+                                        <div className="inline-flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            disabled={rIdx === 0 || isScratched}
+                                            onClick={() => moveSimulatedEntry(evGrp, rIdx, -1)}
+                                            title="Move up 1 place"
+                                            className="p-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-30 text-slate-700 cursor-pointer"
+                                          >
+                                            <ChevronUp className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={
+                                              rIdx === evGrp.scoredRows.length - 1 || isScratched
+                                            }
+                                            onClick={() => moveSimulatedEntry(evGrp, rIdx, 1)}
+                                            title="Move down 1 place"
+                                            className="p-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-30 text-slate-700 cursor-pointer"
+                                          >
+                                            <ChevronDown className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setSimScratchedIds((prev) => {
+                                                const next = new Set(prev);
+                                                if (next.has(entry.id)) next.delete(entry.id);
+                                                else next.add(entry.id);
+                                                return next;
+                                              });
+                                            }}
+                                            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
+                                              isScratched
+                                                ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                                : 'bg-white text-slate-500 border-slate-200 hover:text-red-600 hover:border-red-200'
+                                            }`}
+                                          >
+                                            {isScratched ? 'Restore' : 'DQ / Scr'}
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* SUB-TAB 2: ACTIVE ROSTER OVERVIEW */}
               {inMeetSubTab === 'roster' && (() => {
