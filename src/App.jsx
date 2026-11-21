@@ -3245,16 +3245,6 @@ const rRowId = `cl2-lo-${entry.id}`;
       pushLiveMeetToCloud(rawFileContent, parsedData, teamColors, nextList, false);
     }
   };
-
-  const updateQualStandardsList = (nextList) => {
-    setQualStandards(nextList);
-    try {
-      localStorage.setItem('swimmeet_qual_standards_v1', JSON.stringify(nextList));
-    } catch {}
-    if (liveMeetSyncEnabled && parsedData) {
-      pushLiveMeetToCloud(parsedData, teamColors, nextList, false);
-    }
-  };
   
   const evaluateStandardsForSwim = (eventLabel, timeStr) => {
     const sec = timeToSeconds(timeStr);
