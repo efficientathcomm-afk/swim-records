@@ -4416,10 +4416,6 @@ const rRowId = `cl2-lo-${entry.id}`;
     const meetTitle = parsedData.meetInfo.name || 'Swim Meet Results';
     const meetDate = parsedData.meetInfo.startDate || '';
     const meetLoc = [parsedData.meetInfo.city, parsedData.meetInfo.state].filter(Boolean).join(', ');
-    const primaryTeamObj =
-      selectedTeam !== 'ALL'
-        ? parsedData.teams.find((t) => t.code === selectedTeam)
-        : parsedData.teams.find((t) => String(t.name || '').toLowerCase().includes('gettysburg'));
 
     // Build chronological event list (Individual + Relay)
     const eventMap = new Map();
@@ -4481,31 +4477,138 @@ const rRowId = `cl2-lo-${entry.id}`;
         })
         .join('');
 
-    // Multi-Win Leaders HTML
+    // Per-Team Event Winners Cards (Color-Outlined with Color-Coordinated Win Count Badges)
+    const teamWinnersData = parsedData.teams.map((t) => {
+      const hex = getTeamHexColor(t.code, t.name);
+      const athMap = new Map();
+      let teamTotalWins = 0;
+
+      parsedData.individualResults.forEach((r) => {
+        if (r.teamCode !== t.code || Number(r.place) !== 1) return;
+        teamTotalWins += 1;
+        const name = formatSwimmerDisplay(r.swimmerName, r.preferredFirst);
+        if (!athMap.has(name)) {
+          athMap.set(name, { name, indWins: 0, relWins: 0, entries: [] });
+        }
+        const rec = athMap.get(name);
+        rec.indWins += 1;
+        rec.entries.push({
+          text: `${r.eventLabel} (${r.finalsTime})`,
+          gender: r.genderLabel || '',
+          isRelay: false,
+        });
+      });
+
+      parsedData.relayResults.forEach((rel) => {
+        if (rel.teamCode !== t.code || Number(rel.place) !== 1) return;
+        teamTotalWins += 1;
+        (rel.legs || []).forEach((leg) => {
+          const name = formatSwimmerDisplay(leg.swimmerName, leg.preferredFirst);
+          if (!athMap.has(name)) {
+            athMap.set(name, { name, indWins: 0, relWins: 0, entries: [] });
+          }
+          const rec = athMap.get(name);
+          rec.relWins += 1;
+          rec.entries.push({
+            text: `${rel.eventLabel} — Leg ${leg.legOrder} (${rel.finalsTime})`,
+            gender: rel.genderLabel || '',
+            isRelay: true,
+          });
+        });
+      });
+
+      const athletes = Array.from(athMap.values()).sort(
+        (a, b) => b.indWins + b.relWins - (a.indWins + a.relWins)
+      );
+
+      return {
+        code: t.code,
+        name: t.name,
+        hex,
+        teamTotalWins,
+        athletes,
+      };
+    });
+
     const winsHtml =
-      winSummary.athletes.length > 0
-        ? `<section class="card">
+      teamWinnersData.some((tw) => tw.teamTotalWins > 0)
+        ? `<section id="eventWinnersSection" class="card">
             <div class="card-head">
-              <h2>Event Winners &amp; Multi-Win Leaders</h2>
-              <span class="pill">${escapeHtml(
-                primaryTeamObj ? primaryTeamObj.name : 'All Teams'
-              )} • ${winSummary.totalWins} Wins</span>
+              <h2>Event Winners</h2>
+              <div class="team-win-pills">
+                ${teamWinnersData
+                  .map(
+                    (tw) => `<span class="pill team-win-pill" data-team="${escapeHtml(
+                      tw.code
+                    )}" style="background:${escapeHtml(tw.hex)}18;color:${escapeHtml(
+                      tw.hex
+                    )};border:1px solid ${escapeHtml(tw.hex)}55">
+                      <span class="team-dot" style="background:${escapeHtml(
+                        tw.hex
+                      )}"></span>
+                      ${escapeHtml(tw.name)} • ${tw.teamTotalWins} Win${
+                      tw.teamTotalWins === 1 ? '' : 's'
+                    }
+                    </span>`
+                  )
+                  .join('')}
+              </div>
             </div>
-            <div class="wins-grid">
-              ${winSummary.athletes
-                .map((ath) => {
-                  const total = ath.indWins + ath.relWins;
-                  return `<div class="win-card">
-                    <div class="win-top">
-                      <div>
-                        <div class="win-name">${escapeHtml(ath.name)}</div>
-                        <div class="win-team">${escapeHtml(ath.teamName)}</div>
+            <div class="team-winners-grid">
+              ${teamWinnersData
+                .map((tw) => {
+                  const athletesHtml =
+                    tw.athletes.length === 0
+                      ? '<p class="muted" style="margin:6px 0 0;">No 1st-place finishes recorded.</p>'
+                      : `<div class="wins-grid inner-wins-grid">
+                          ${tw.athletes
+                            .map((ath) => {
+                              const total = ath.indWins + ath.relWins;
+                              return `<div class="win-card" data-athlete="${escapeHtml(
+                                ath.name.toLowerCase()
+                              )}">
+                                <div class="win-top">
+                                  <div class="win-name">${escapeHtml(ath.name)}</div>
+                                  <div class="win-badge" style="background:${escapeHtml(
+                                    tw.hex
+                                  )}18;color:${escapeHtml(
+                                tw.hex
+                              )};border:1px solid ${escapeHtml(tw.hex)}44">${total} Win${
+                                total > 1 ? 's' : ''
+                              } (${ath.indWins}I / ${ath.relWins}R)</div>
+                                </div>
+                                <ul class="win-events">
+                                  ${ath.entries
+                                    .map(
+                                      (ev) =>
+                                        `<li data-gender="${escapeHtml(ev.gender)}">${escapeHtml(
+                                          ev.text
+                                        )}</li>`
+                                    )
+                                    .join('')}
+                                </ul>
+                              </div>`;
+                            })
+                            .join('')}
+                        </div>`;
+
+                  return `<div class="team-win-box" data-team="${escapeHtml(
+                    tw.code
+                  )}" style="border:2px solid ${escapeHtml(tw.hex)}">
+                    <div class="team-win-box-head" style="background:${escapeHtml(
+                      tw.hex
+                    )}10;border-bottom:1px solid ${escapeHtml(tw.hex)}33">
+                      <div class="score-team">
+                        <span class="team-dot" style="background:${escapeHtml(tw.hex)}"></span>
+                        <strong>${escapeHtml(tw.name)}</strong>
                       </div>
-                      <div class="win-badge">${total} Win${total > 1 ? 's' : ''} (${ath.indWins}I / ${ath.relWins}R)</div>
+                      <span class="pill" style="background:${escapeHtml(
+                        tw.hex
+                      )};color:#ffffff">${tw.teamTotalWins} Win${
+                    tw.teamTotalWins === 1 ? '' : 's'
+                  }</span>
                     </div>
-                    <ul class="win-events">
-                      ${ath.events.map((ev) => `<li>${escapeHtml(ev)}</li>`).join('')}
-                    </ul>
+                    <div class="team-win-box-body">${athletesHtml}</div>
                   </div>`;
                 })
                 .join('')}
@@ -4536,7 +4639,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                 : Infinity;
             const behindLabel = Number.isFinite(behindSec)
               ? behindSec < 0.005
-                ? '<span class="tag-leader">Leader</span>'
+                ? '<span class="tag-winner">Winner</span>'
                 : `+${behindSec.toFixed(2)}s`
               : '—';
 
@@ -4877,14 +4980,20 @@ const rRowId = `cl2-lo-${entry.id}`;
       padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px;
     }
     .card-head h2 { margin: 0; font-size: 0.98rem; font-weight: 800; }
-    .pill { font-size: 0.75rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--cyan-soft); color: #075985; }
+    .pill { font-size: 0.75rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--cyan-soft); color: #075985; display: inline-flex; align-items: center; gap: 6px; }
+    .team-win-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .team-winners-grid { padding: 14px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+    .team-win-box { border-radius: 14px; background: #ffffff; overflow: hidden; }
+    .team-win-box-head { padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.9rem; }
+    .team-win-box-body { padding: 12px 14px; }
     .wins-grid { padding: 14px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-    .win-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: #f8fafc; }
+    .inner-wins-grid { padding: 0; grid-template-columns: 1fr; gap: 10px; }
+    .win-card { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: #f8fafc; }
     .win-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-    .win-name { font-weight: 800; font-size: 0.9rem; }
+    .win-name { font-weight: 800; font-size: 0.88rem; }
     .win-team { font-size: 0.72rem; color: var(--muted); }
-    .win-badge { font-size: 0.72rem; font-weight: 800; color: #0369a1; background: #e0f2fe; padding: 2px 8px; border-radius: 8px; white-space: nowrap; }
-    .win-events { margin: 8px 0 0; padding-left: 16px; font-size: 0.78rem; color: #334155; }
+    .win-badge { font-size: 0.72rem; font-weight: 800; padding: 2px 8px; border-radius: 8px; white-space: nowrap; }
+    .win-events { margin: 6px 0 0; padding-left: 16px; font-size: 0.78rem; color: #334155; }
     .event-head {
       background: var(--navy); color: #fff; padding: 12px 18px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px;
     }
@@ -4922,7 +5031,7 @@ const rRowId = `cl2-lo-${entry.id}`;
     .place-badge.p-1 { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
     .place-badge.p-2 { background: #e2e8f0; color: #1e293b; border: 1px solid #cbd5e1; }
     .place-badge.p-3 { background: #ffedd5; color: #9a3412; border: 1px solid #fdba74; }
-    .tag-leader {
+    .tag-winner {
       display: inline-block; padding: 2px 7px; border-radius: 6px; background: #ecfdf5; color: #047857;
       font-family: inherit; font-weight: 700; font-size: 0.72rem; border: 1px solid #a7f3d0;
     }
@@ -4989,8 +5098,6 @@ const rRowId = `cl2-lo-${entry.id}`;
         : ''
     }
 
-    ${winsHtml}
-
     <div class="toolbar">
       <div class="toolbar-left">
         <input type="text" id="searchBox" placeholder="Search swimmer, relay, or team..." oninput="applyFilters()" />
@@ -5009,6 +5116,8 @@ const rRowId = `cl2-lo-${entry.id}`;
         <button type="button" class="btn" onclick="toggleAllSplits(false)">Collapse All Splits</button>
       </div>
     </div>
+
+    ${winsHtml}
 
     ${eventsHtml}
 
@@ -5042,6 +5151,42 @@ const rRowId = `cl2-lo-${entry.id}`;
       var team = document.getElementById('teamFilter').value;
       var gender = document.getElementById('genderFilter').value;
 
+      // Filter Event Winners team boxes & entries
+      var winnersSection = document.getElementById('eventWinnersSection');
+      if (winnersSection) {
+        var visibleBoxes = 0;
+        winnersSection.querySelectorAll('.team-win-pill').forEach(function(pill) {
+          var pTeam = pill.getAttribute('data-team') || '';
+          pill.style.display = (team === 'ALL' || pTeam === team) ? '' : 'none';
+        });
+        winnersSection.querySelectorAll('.team-win-box').forEach(function(box) {
+          var bTeam = box.getAttribute('data-team') || '';
+          var teamOk = (team === 'ALL' || bTeam === team);
+          var visibleAthletes = 0;
+
+          box.querySelectorAll('.win-card').forEach(function(wCard) {
+            var athName = wCard.getAttribute('data-athlete') || '';
+            var visibleItems = 0;
+            wCard.querySelectorAll('.win-events li').forEach(function(li) {
+              var evG = li.getAttribute('data-gender') || '';
+              var gOk = (gender === 'ALL' || evG === gender);
+              var qOk = (!q || athName.indexOf(q) !== -1 || li.textContent.toLowerCase().indexOf(q) !== -1);
+              var showLi = gOk && qOk;
+              li.style.display = showLi ? '' : 'none';
+              if (showLi) visibleItems++;
+            });
+            wCard.style.display = visibleItems > 0 ? '' : 'none';
+            if (visibleItems > 0) visibleAthletes++;
+          });
+
+          var showBox = teamOk && (visibleAthletes > 0 || (!q && gender === 'ALL'));
+          box.style.display = showBox ? '' : 'none';
+          if (showBox) visibleBoxes++;
+        });
+        winnersSection.style.display = visibleBoxes > 0 ? '' : 'none';
+      }
+
+      // Filter Event Cards
       document.querySelectorAll('.event-card').forEach(function(card) {
         var evGender = card.getAttribute('data-gender') || '';
         var genderOk = (gender === 'ALL' || evGender === gender);
