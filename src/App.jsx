@@ -40,7 +40,8 @@ import {
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
-getFirestore,
+import {
+  getFirestore,
   collection,
   doc,
   setDoc,
@@ -1429,6 +1430,7 @@ export default function App() {
   // File Input Refs
   const fileInputRef = useRef(null);
   const historyCsvInputRef = useRef(null);
+  const lastAppliedCloudMeetStampRef = useRef('');
 
   // Live Multi-Browser Meet Sync & Saved Meet Repository State
   const [liveMeetSyncEnabled, setLiveMeetSyncEnabled] = useState(true);
@@ -1441,40 +1443,24 @@ export default function App() {
   const [cloudSyncStatus, setCloudSyncStatus] = useState('connecting');
   const [cloudErrorMsg, setCloudErrorMsg] = useState('');
 
-  // Serialize/Deserialize parsedData for Firestore (converting Infinity <-> null)
-  const serializeParsedMeetForCloud = (meetObj) => {
-    if (!meetObj) return null;
-    return JSON.parse(
-      JSON.stringify(meetObj, (key, val) => {
-        if (val === Infinity) return '__INF__';
-        if (val === -Infinity) return '__NINF__';
-        return val;
-      })
-    );
-  };
-
-  const deserializeParsedMeetFromCloud = (rawObj) => {
-    if (!rawObj) return null;
-    return JSON.parse(
-      JSON.stringify(rawObj),
-      (key, val) => {
-        if (val === '__INF__') return Infinity;
-        if (val === '__NINF__') return -Infinity;
-        return val;
-      }
-    );
-  };
-
+  // Push compact raw .CL2/.SD3 text + colors + standards to Firestore (avoids 1MB parsed-JSON limit)
   const pushLiveMeetToCloud = async (
+    rawCl2Text,
     meetObj,
     nextTeamColors = teamColors,
     nextQualStandards = qualStandards,
     alsoArchive = true
   ) => {
-    if (!cloudUser || !meetObj) return;
+    if (!rawCl2Text || !meetObj) return;
+    if (!cloudUser) {
+      setBenchmarkStatusMsg(
+        'Loaded locally — waiting for Firebase Cloud connection before syncing to other browsers.'
+      );
+      return;
+    }
     try {
-      const serializedMeet = serializeParsedMeetForCloud(meetObj);
       const updatedAt = new Date().toISOString();
+      lastAppliedCloudMeetStampRef.current = updatedAt;
       const meta = {
         meetName: meetObj.meetInfo?.name || 'Swim Meet',
         startDate: meetObj.meetInfo?.startDate || '',
@@ -1488,7 +1474,7 @@ export default function App() {
 
       await setDoc(doc(db, 'live_meet', 'current'), {
         ...meta,
-        meetData: serializedMeet,
+        rawCl2Text,
         teamColors: nextTeamColors || {},
         qualStandards: nextQualStandards || [],
       });
@@ -1505,15 +1491,19 @@ export default function App() {
         await setDoc(doc(db, 'saved_meets', archiveId), {
           id: archiveId,
           ...meta,
-          meetData: serializedMeet,
+          rawCl2Text,
           teamColors: nextTeamColors || {},
         });
       }
+      setBenchmarkStatusMsg(
+        `Synced "${meta.meetName}" live to Firestore (${meta.totalSwims} swims) — available on all connected browsers.`
+      );
     } catch (err) {
-      setCloudErrorMsg(err?.code || err?.message || 'live-meet-sync-failed');
+      const msg = err?.code || err?.message || 'live-meet-sync-failed';
+      setCloudErrorMsg(msg);
+      setBenchmarkStatusMsg(`Live Meet Sync error: ${msg}`);
     }
-  };
-  
+  };  
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
@@ -1584,60 +1574,88 @@ export default function App() {
     });
     
     // Live Meet Session Listener (syncs active .cl2 meet, team colors, and standards across browsers)
-    const unsubLiveMeet = onSnapshot(doc(db, 'live_meet', 'current'), (docSnap) => {
-      if (!docSnap.exists()) return;
-      const payload = docSnap.data();
-      setLiveMeetMeta({
-        meetName: payload.meetName || 'Swim Meet',
-        startDate: payload.startDate || '',
-        isoDate: payload.isoDate || '',
-        totalSwims: payload.totalSwims || 0,
-        teamsSummary: payload.teamsSummary || '',
-        updatedAt: payload.updatedAt || '',
-      });
+    const unsubLiveMeet = onSnapshot(
+      doc(db, 'live_meet', 'current'),
+      (docSnap) => {
+        if (!docSnap.exists()) return;
+        const payload = docSnap.data();
+        setLiveMeetMeta({
+          meetName: payload.meetName || 'Swim Meet',
+          startDate: payload.startDate || '',
+          isoDate: payload.isoDate || '',
+          totalSwims: payload.totalSwims || 0,
+          teamsSummary: payload.teamsSummary || '',
+          updatedAt: payload.updatedAt || '',
+        });
 
-      if (!liveMeetSyncEnabled) return;
+        if (!liveMeetSyncEnabled) return;
 
-      if (payload.teamColors && typeof payload.teamColors === 'object') {
-        setTeamColors(payload.teamColors);
-        try {
-          localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(payload.teamColors));
-        } catch {}
-      }
-      if (Array.isArray(payload.qualStandards)) {
-        setQualStandards(payload.qualStandards);
-        try {
-          localStorage.setItem(
-            'swimmeet_qual_standards_v1',
-            JSON.stringify(payload.qualStandards)
-          );
-        } catch {}
-      }
-      if (payload.meetData) {
-        const hydrated = deserializeParsedMeetFromCloud(payload.meetData);
-        setParsedData(hydrated);
-        if (hydrated?.teams?.length > 0) {
-          const gett = hydrated.teams.find((t) =>
-            String(t.name || '').toLowerCase().includes('gettysburg')
-          );
-          if (gett) {
-            setSelectedTeam(gett.code);
+        if (payload.teamColors && typeof payload.teamColors === 'object') {
+          setTeamColors(payload.teamColors);
+          try {
+            localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(payload.teamColors));
+          } catch {}
+        }
+        if (Array.isArray(payload.qualStandards)) {
+          setQualStandards(payload.qualStandards);
+          try {
+            localStorage.setItem(
+              'swimmeet_qual_standards_v1',
+              JSON.stringify(payload.qualStandards)
+            );
+          } catch {}
+        }
+
+        if (
+          payload.rawCl2Text &&
+          payload.updatedAt &&
+          payload.updatedAt !== lastAppliedCloudMeetStampRef.current
+        ) {
+          lastAppliedCloudMeetStampRef.current = payload.updatedAt;
+          try {
+            const hydrated = parseHyTekMeetFile(payload.rawCl2Text);
+            setRawFileContent(payload.rawCl2Text);
+            setParsedData(hydrated);
+            const allEvSorted = [
+              ...(hydrated?.individualResults || []),
+              ...(hydrated?.relayResults || []),
+            ].sort((a, b) => (Number(a.eventNumber) || 999) - (Number(b.eventNumber) || 999));
+            setSelectedHeatEventLabel((prev) => prev || allEvSorted[0]?.eventLabel || '');
+            if (hydrated?.teams?.length > 0) {
+              const gett = hydrated.teams.find((t) =>
+                String(t.name || '').toLowerCase().includes('gettysburg')
+              );
+              if (gett) {
+                setSelectedTeam(gett.code);
+              }
+            }
+          } catch (e) {
+            setCloudErrorMsg(e?.message || 'live-meet-parse-error');
           }
         }
+      },
+      (err) => {
+        setCloudErrorMsg(err?.code || err?.message || 'live-meet-listen-error');
       }
-    });
+    );
 
     // Saved Meets Repository Listener
-    const unsubSavedMeets = onSnapshot(collection(db, 'saved_meets'), (snap) => {
-      const list = snap.docs
-        .map((d) => ({ ...d.data(), id: d.id }))
-        .sort((a, b) =>
-          String(b.isoDate || b.updatedAt || '').localeCompare(
-            String(a.isoDate || a.updatedAt || '')
-          )
-        );
-      setSavedMeetsRepo(list);
-    });
+    const unsubSavedMeets = onSnapshot(
+      collection(db, 'saved_meets'),
+      (snap) => {
+        const list = snap.docs
+          .map((d) => ({ ...d.data(), id: d.id }))
+          .sort((a, b) =>
+            String(b.isoDate || b.updatedAt || '').localeCompare(
+              String(a.isoDate || a.updatedAt || '')
+            )
+          );
+        setSavedMeetsRepo(list);
+      },
+      (err) => {
+        setCloudErrorMsg(err?.code || err?.message || 'saved-meets-listen-error');
+      }
+    );
 
     return () => {
       unsubPerf();
@@ -3137,9 +3155,8 @@ const rRowId = `cl2-lo-${entry.id}`;
         localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(nextTeamColors));
       } catch {}
 
-      // Broadcast live meet update + archive to Firestore repository
       if (liveMeetSyncEnabled) {
-        pushLiveMeetToCloud(parsed, nextTeamColors, qualStandards, true);
+        pushLiveMeetToCloud(text, parsed, nextTeamColors, qualStandards, true);
       }
 
       const allEvSorted = [...parsed.individualResults, ...parsed.relayResults].sort(
@@ -3215,8 +3232,18 @@ const rRowId = `cl2-lo-${entry.id}`;
     try {
       localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(next));
     } catch {}
-    if (liveMeetSyncEnabled && parsedData) {
-      pushLiveMeetToCloud(parsedData, next, qualStandards, false);
+    if (liveMeetSyncEnabled && parsedData && rawFileContent) {
+      pushLiveMeetToCloud(rawFileContent, parsedData, next, qualStandards, false);
+    }
+  };
+
+  const updateQualStandardsList = (nextList) => {
+    setQualStandards(nextList);
+    try {
+      localStorage.setItem('swimmeet_qual_standards_v1', JSON.stringify(nextList));
+    } catch {}
+    if (liveMeetSyncEnabled && parsedData && rawFileContent) {
+      pushLiveMeetToCloud(rawFileContent, parsedData, teamColors, nextList, false);
     }
   };
 
@@ -8469,8 +8496,14 @@ const rRowId = `cl2-lo-${entry.id}`;
                   onClick={() => {
                     const nextVal = !liveMeetSyncEnabled;
                     setLiveMeetSyncEnabled(nextVal);
-                    if (nextVal && parsedData) {
-                      pushLiveMeetToCloud(parsedData, teamColors, qualStandards, false);
+                    if (nextVal && parsedData && rawFileContent) {
+                      pushLiveMeetToCloud(
+                        rawFileContent,
+                        parsedData,
+                        teamColors,
+                        qualStandards,
+                        false
+                      );
                     }
                   }}
                   title="When enabled, uploading or updating a .CL2 broadcasts live to all open browsers"
@@ -8560,8 +8593,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                           <button
                             type="button"
                             onClick={() => {
-                              if (!item.meetData) return;
-                              const hydrated = deserializeParsedMeetFromCloud(item.meetData);
+                              if (!item.rawCl2Text) return;
+                              const hydrated = parseHyTekMeetFile(item.rawCl2Text);
+                              setRawFileContent(item.rawCl2Text);
                               setParsedData(hydrated);
                               if (item.teamColors) {
                                 setTeamColors(item.teamColors);
@@ -8579,6 +8613,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                               setBenchmarkStatusMsg(`Loaded past meet "${item.meetName}".`);
                               if (liveMeetSyncEnabled) {
                                 pushLiveMeetToCloud(
+                                  item.rawCl2Text,
                                   hydrated,
                                   item.teamColors || teamColors,
                                   qualStandards,
@@ -8609,7 +8644,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                 )}
               </div>
             )}
-
+            
             {/* Error Alert */}
             {meetErrorMsg && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start justify-between gap-3 text-red-800 shadow-sm">
