@@ -1379,6 +1379,13 @@ export default function App() {
   const [newStdEventKey, setNewStdEventKey] = useState('women 50 freestyle');
   const [newStdTime, setNewStdTime] = useState('');
   const [newStdType, setNewStdType] = useState('STANDARD'); // 'STANDARD' | 'POOL_RECORD'
+  const [editingStdId, setEditingStdId] = useState(null);
+  const [editStdDraft, setEditStdDraft] = useState({
+    type: 'STANDARD',
+    label: '',
+    eventKey: 'women 50 freestyle',
+    time: '',
+  });
 
   // Section 2 (Records & Top-10), Section 3 (In-Meet Tools), & Profile Modal State
   const [recordBookSubTab, setRecordBookSubTab] = useState('top10'); // 'top10' | 'wins'
@@ -3079,6 +3086,32 @@ const rRowId = `cl2-lo-${entry.id}`;
     } catch {}
   };
 
+  const handleSaveQualStandardEdit = (stdId) => {
+    const cleanLbl = String(editStdDraft.label || '').trim();
+    const secVal = timeToSeconds(editStdDraft.time);
+    if (!cleanLbl || secVal === null || secVal <= 0) {
+      setBenchmarkStatusMsg('Please enter a valid Badge Label and Time (e.g., 23.15 or 1:52.40).');
+      return;
+    }
+
+    const updatedList = qualStandards.map((item) =>
+      item.id === stdId
+        ? {
+            ...item,
+            type: editStdDraft.type,
+            label: cleanLbl,
+            eventKey: editStdDraft.eventKey,
+            eventLabel: toTitleEventLabel(editStdDraft.eventKey),
+            time: String(editStdDraft.time).trim(),
+            seconds: secVal,
+          }
+        : item
+    );
+    updateQualStandardsList(updatedList);
+    setEditingStdId(null);
+    setBenchmarkStatusMsg(`Updated "${cleanLbl}" (${toTitleEventLabel(editStdDraft.eventKey)}: ${String(editStdDraft.time).trim()}).`);
+  };
+  
   const evaluateStandardsForSwim = (eventLabel, timeStr) => {
     const sec = timeToSeconds(timeStr);
     const evKey = normalizeEventKey(eventLabel);
@@ -9719,55 +9752,158 @@ const rRowId = `cl2-lo-${entry.id}`;
                             <th className="py-2.5 px-4">Badge</th>
                             <th className="py-2.5 px-4">Event</th>
                             <th className="py-2.5 px-4">Standard Time</th>
-                            <th className="py-2.5 px-4 text-center">Remove</th>
+                            <th className="py-2.5 px-4 text-center w-32">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {qualStandards.map((std) => (
-                            <tr key={std.id} className="hover:bg-slate-50">
-                              <td className="py-2.5 px-4 text-slate-600">
-                                {std.type === 'POOL_RECORD' ? 'Pool Record' : 'Qualifying Cut'}
-                              </td>
-                              <td className="py-2.5 px-4">
-                                <span
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getStandardBadgeStyle(
-                                    std.label
-                                  )}`}
-                                >
-                                  {std.label}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-4 font-bold text-slate-900">
-                                {std.eventLabel}
-                              </td>
-                              <td className="py-2.5 px-4 font-mono font-bold text-indigo-800">
-                                {std.time}
-                              </td>
-                              <td className="py-2.5 px-4 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    updateQualStandardsList(
-                                      qualStandards.filter((item) => item.id !== std.id)
-                                    )
-                                  }
-                                  className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
+                          {qualStandards.map((std) => {
+                            const isEditingStd = editingStdId === std.id;
+                            if (isEditingStd) {
+                              return (
+                                <tr key={std.id} className="bg-indigo-50/70">
+                                  <td className="py-2.5 px-4">
+                                    <select
+                                      value={editStdDraft.type}
+                                      onChange={(e) =>
+                                        setEditStdDraft((prev) => ({
+                                          ...prev,
+                                          type: e.target.value,
+                                        }))
+                                      }
+                                      className="px-2 py-1.5 text-xs font-bold bg-white border border-indigo-300 rounded-lg"
+                                    >
+                                      <option value="STANDARD">Qualifying Cut</option>
+                                      <option value="POOL_RECORD">Pool Record</option>
+                                    </select>
+                                  </td>
+                                  <td className="py-2.5 px-4">
+                                    <input
+                                      type="text"
+                                      value={editStdDraft.label}
+                                      onChange={(e) =>
+                                        setEditStdDraft((prev) => ({
+                                          ...prev,
+                                          label: e.target.value,
+                                        }))
+                                      }
+                                      className="w-32 px-2.5 py-1.5 text-xs font-bold bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                  </td>
+                                  <td className="py-2.5 px-4">
+                                    <select
+                                      value={editStdDraft.eventKey}
+                                      onChange={(e) =>
+                                        setEditStdDraft((prev) => ({
+                                          ...prev,
+                                          eventKey: e.target.value,
+                                        }))
+                                      }
+                                      className="w-full min-w-[180px] px-2.5 py-1.5 text-xs font-bold bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    >
+                                      {CANONICAL_EVENTS.map((ev) => (
+                                        <option key={ev} value={ev.toLowerCase()}>
+                                          {ev}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td className="py-2.5 px-4">
+                                    <input
+                                      type="text"
+                                      value={editStdDraft.time}
+                                      onChange={(e) =>
+                                        setEditStdDraft((prev) => ({
+                                          ...prev,
+                                          time: e.target.value,
+                                        }))
+                                      }
+                                      className="w-24 px-2.5 py-1.5 text-xs font-mono font-bold bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                  </td>
+                                  <td className="py-2.5 px-4 text-center">
+                                    <div className="inline-flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSaveQualStandardEdit(std.id)}
+                                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingStdId(null)}
+                                        className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            }
+
+                            return (
+                              <tr key={std.id} className="hover:bg-slate-50">
+                                <td className="py-2.5 px-4 text-slate-600">
+                                  {std.type === 'POOL_RECORD' ? 'Pool Record' : 'Qualifying Cut'}
+                                </td>
+                                <td className="py-2.5 px-4">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getStandardBadgeStyle(
+                                      std.label
+                                    )}`}
+                                  >
+                                    {std.label}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-4 font-bold text-slate-900">
+                                  {std.eventLabel}
+                                </td>
+                                <td className="py-2.5 px-4 font-mono font-bold text-indigo-800">
+                                  {std.time}
+                                </td>
+                                <td className="py-2.5 px-4 text-center">
+                                  <div className="inline-flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingStdId(std.id);
+                                        setEditStdDraft({
+                                          type: std.type || 'STANDARD',
+                                          label: std.label || '',
+                                          eventKey: std.eventKey || 'women 50 freestyle',
+                                          time: std.time || '',
+                                        });
+                                      }}
+                                      className="px-2 py-1 rounded text-[11px] font-bold text-indigo-700 hover:bg-indigo-50 border border-indigo-200 cursor-pointer"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (editingStdId === std.id) setEditingStdId(null);
+                                        updateQualStandardsList(
+                                          qualStandards.filter((item) => item.id !== std.id)
+                                        );
+                                      }}
+                                      title="Delete standard or record"
+                                      className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
                   )}
                 </div>
               )}
-            </div>
-          </div>
-        )}
-
+              
         {/* ==================================================================== */}
         {/* SECTION 4: IMPORT MEET RESULTS (EXACT ORIGINAL PARSER & LAYOUT)      */}
         {/* ==================================================================== */}
