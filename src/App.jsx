@@ -1381,7 +1381,10 @@ export default function App() {
   const [winsActiveOnly, setWinsActiveOnly] = useState(false);
   const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
 
-  const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'relayopt' | 'standards'
+const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'relayopt' | 'standards'
+  const [inMeetSearch, setInMeetSearch] = useState('');
+  const [inMeetGenderFilter, setInMeetGenderFilter] = useState('ALL');
+  const [inMeetTargetEventKey, setInMeetTargetEventKey] = useState('women 50 freestyle');
   const [teamColors, setTeamColors] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('swimmeet_team_colors_v1') || '{}');
@@ -7625,7 +7628,7 @@ const rRowId = `cl2-lo-${entry.id}`;
               )}
 
               {/* SUB-TAB 2B: RELAY LINEUP OPTIMIZER & SPLIT FORECASTER */}
-              {inMeetSubTab === 'relayopt' && (() => {
+                {inMeetSubTab === 'relayopt' && (() => {
                 const relayEventSpecs = {
                   'women 200 freestyle relay': {
                     gender: 'Women',
@@ -8329,6 +8332,316 @@ const rRowId = `cl2-lo-${entry.id}`;
                 );
               })()}
 
+              {/* SUB-TAB 2: ACTIVE ROSTER OVERVIEW */}
+              {inMeetSubTab === 'roster' && (() => {
+                const activeAthletes = masterRoster
+                  .filter((a) => a.isActive)
+                  .filter((a) => {
+                    if (inMeetGenderFilter !== 'ALL' && a.gender !== inMeetGenderFilter) return false;
+                    if (inMeetSearch.trim() !== '') {
+                      const q = inMeetSearch.toLowerCase();
+                      const hay = `${a.canonicalName} ${(a.aliases || []).join(' ')}`.toLowerCase();
+                      if (!hay.includes(q)) return false;
+                    }
+                    return true;
+                  })
+                  .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName));
+
+                const targetPool = (benchmarkIndex.byEvent[inMeetTargetEventKey] || []).slice();
+                const bestByTargetAth = new Map();
+                targetPool.forEach((rec) => {
+                  if (!bestByTargetAth.has(rec.swimmerKey) || rec.seconds < bestByTargetAth.get(rec.swimmerKey).seconds) {
+                    bestByTargetAth.set(rec.swimmerKey, rec);
+                  }
+                });
+                const sortedTargetBests = Array.from(bestByTargetAth.values()).sort(
+                  (a, b) => a.seconds - b.seconds
+                );
+                const targetRecord = sortedTargetBests[0] || null;
+                const targetTop10Cut = sortedTargetBests[9] || null;
+                const targetFrRecord =
+                  targetPool
+                    .filter((r) => normalizeClass(r.classYear) === 'FR')
+                    .sort((a, b) => a.seconds - b.seconds)[0] || null;
+
+                const seasonStart = getCurrentSeasonStart();
+
+                return (
+                  <div className="p-5 sm:p-6 space-y-5">
+                    {/* Search, Gender Filter, & Target Event Cut Strip */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                        <div className="md:col-span-5 relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={inMeetSearch}
+                            onChange={(e) => setInMeetSearch(e.target.value)}
+                            placeholder="Search active swimmer..."
+                            className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+
+                        <div className="md:col-span-3 flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                          {['ALL', 'Women', 'Men'].map((g) => (
+                            <button
+                              key={g}
+                              type="button"
+                              onClick={() => {
+                                setInMeetGenderFilter(g);
+                                if (g === 'Men' && inMeetTargetEventKey.startsWith('women')) {
+                                  setInMeetTargetEventKey('men 50 freestyle');
+                                } else if (g === 'Women' && inMeetTargetEventKey.startsWith('men')) {
+                                  setInMeetTargetEventKey('women 50 freestyle');
+                                }
+                              }}
+                              className={`flex-1 py-1.5 rounded-md transition cursor-pointer ${
+                                inMeetGenderFilter === g
+                                  ? 'bg-white text-slate-900 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              {g === 'ALL' ? 'All' : g}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="md:col-span-4">
+                          <select
+                            value={inMeetTargetEventKey}
+                            onChange={(e) => setInMeetTargetEventKey(e.target.value)}
+                            className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          >
+                            {CANONICAL_EVENTS.filter((ev) => !ev.toLowerCase().includes('relay')).map(
+                              (ev) => (
+                                <option key={ev} value={ev.toLowerCase()}>
+                                  Target Cuts: {ev}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
+                        <div className="bg-white border border-amber-200 rounded-lg px-3 py-2">
+                          <span className="text-[10px] font-bold uppercase text-amber-800 block">
+                            #1 Program Record
+                          </span>
+                          <span className="font-bold text-slate-900">
+                            {targetRecord
+                              ? `${targetRecord.time} — ${targetRecord.swimmerName}`
+                              : 'No mark in DB'}
+                          </span>
+                        </div>
+                        <div className="bg-white border border-indigo-200 rounded-lg px-3 py-2">
+                          <span className="text-[10px] font-bold uppercase text-indigo-800 block">
+                            #10 All-Time Cut
+                          </span>
+                          <span className="font-bold text-slate-900">
+                            {targetTop10Cut
+                              ? `${targetTop10Cut.time} — ${targetTop10Cut.swimmerName}`
+                              : `Open spot (${sortedTargetBests.length}/10)`}
+                          </span>
+                        </div>
+                        <div className="bg-white border border-cyan-200 rounded-lg px-3 py-2">
+                          <span className="text-[10px] font-bold uppercase text-cyan-800 block">
+                            Freshman (FR) Record
+                          </span>
+                          <span className="font-bold text-slate-900">
+                            {targetFrRecord
+                              ? `${targetFrRecord.time} — ${targetFrRecord.swimmerName}`
+                              : 'No FR mark in DB'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {activeAthletes.length === 0 ? (
+                      <div className="text-center py-10 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                        No active swimmers match the current filter. Manage active athletes in{' '}
+                        <strong>Section 1 → Master Roster</strong>.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {activeAthletes.map((ath) => {
+                          const swKey = normalizeSwimmerKey(ath.canonicalName);
+                          const athOfficial = historicalRecords.filter((r) => {
+                            if (r.isOfficial === false) return false;
+                            const m = resolveMasterAthlete(r.swimmerName);
+                            return normalizeSwimmerKey(m ? m.canonicalName : r.swimmerName) === swKey;
+                          });
+
+                          const isSplit = (r) =>
+                            r.swimType === 'INTERMEDIATE_SPLIT' ||
+                            String(r.place || '').toUpperCase() === 'S';
+
+                          const bestByEv = new Map();
+                          athOfficial
+                            .filter((r) => !isSplit(r) && r.eventKey)
+                            .forEach((r) => {
+                              const prev = bestByEv.get(r.eventKey);
+                              if (!prev || r.seconds < prev.pb.seconds) {
+                                bestByEv.set(r.eventKey, {
+                                  eventKey: r.eventKey,
+                                  eventLabel: r.eventLabel || toTitleEventLabel(r.eventKey),
+                                  pb: r,
+                                  sb: null,
+                                });
+                              }
+                            });
+
+                          athOfficial
+                            .filter(
+                              (r) =>
+                                !isSplit(r) &&
+                                r.eventKey &&
+                                r.dateObj &&
+                                r.dateObj >= seasonStart
+                            )
+                            .forEach((r) => {
+                              const entry = bestByEv.get(r.eventKey);
+                              if (entry && (!entry.sb || r.seconds < entry.sb.seconds)) {
+                                entry.sb = r;
+                              }
+                            });
+
+                          const topEvents = Array.from(bestByEv.values()).slice(0, 5);
+
+                          const splitBestsMap = new Map();
+                          athOfficial
+                            .filter((r) => isSplit(r) && r.eventKey)
+                            .forEach((r) => {
+                              if (
+                                !splitBestsMap.has(r.eventKey) ||
+                                r.seconds < splitBestsMap.get(r.eventKey).seconds
+                              ) {
+                                splitBestsMap.set(r.eventKey, r);
+                              }
+                            });
+                          const splitBests = Array.from(splitBestsMap.values()).slice(0, 3);
+
+                          const meetSwims = parsedData
+                            ? parsedData.individualResults.filter((entry) => {
+                                const disp = formatSwimmerDisplay(
+                                  entry.swimmerName,
+                                  entry.preferredFirst
+                                );
+                                const m = resolveMasterAthlete(disp);
+                                return (
+                                  normalizeSwimmerKey(m ? m.canonicalName : disp) === swKey
+                                );
+                              })
+                            : [];
+
+                          return (
+                            <div
+                              key={ath.id}
+                              className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs hover:border-indigo-300 transition flex flex-col justify-between space-y-3"
+                            >
+                              <div className="space-y-2.5">
+                                <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
+                                  <div>
+                                    <button
+                                      type="button"
+                                      onClick={() => openSwimmerProfile(ath.canonicalName)}
+                                      className="font-extrabold text-sm text-slate-900 hover:text-indigo-700 hover:underline text-left cursor-pointer"
+                                    >
+                                      {ath.canonicalName}
+                                    </button>
+                                    <div className="text-[11px] text-slate-500">
+                                      {ath.gender} • Active Roster
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => openSwimmerProfile(ath.canonicalName)}
+                                    className="text-[11px] font-bold text-indigo-700 hover:underline shrink-0 cursor-pointer"
+                                  >
+                                    Profile →
+                                  </button>
+                                </div>
+
+                                {topEvents.length === 0 ? (
+                                  <div className="text-xs text-slate-400 italic py-2">
+                                    No committed individual times in DB yet.
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1.5 text-xs">
+                                    {topEvents.map((ev) => (
+                                      <div
+                                        key={ev.eventKey}
+                                        className="flex items-center justify-between gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5"
+                                      >
+                                        <span className="font-semibold text-slate-800 truncate">
+                                          {ev.eventLabel.replace(/^(Women|Men)\s+/i, '')}
+                                        </span>
+                                        <div className="font-mono text-[11px] shrink-0 text-right">
+                                          <span className="font-bold text-slate-900">
+                                            PB {ev.pb.time}
+                                          </span>
+                                          {ev.sb && (
+                                            <span className="text-cyan-700 ml-1.5">
+                                              SB {ev.sb.time}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {splitBests.length > 0 && (
+                                  <div className="pt-1 border-t border-slate-100">
+                                    <div className="text-[10px] font-bold uppercase text-amber-800 mb-1">
+                                      Opening Split Bests (S)
+                                    </div>
+                                    <div className="flex flex-wrap gap-1">
+                                      {splitBests.map((sp) => (
+                                        <span
+                                          key={sp.id}
+                                          className="px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-900 font-mono text-[10px] font-semibold"
+                                        >
+                                          {sp.eventLabel.replace(/^(Women|Men)\s+/i, '')}:{' '}
+                                          {sp.time}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {meetSwims.length > 0 && (
+                                <div className="pt-2 border-t border-slate-100 space-y-1">
+                                  <div className="text-[10px] font-bold uppercase text-indigo-700">
+                                    Loaded Meet Swims
+                                  </div>
+                                  {meetSwims.map((ms) => (
+                                    <div
+                                      key={ms.id}
+                                      className="flex items-center justify-between text-[11px] text-slate-700"
+                                    >
+                                      <span className="truncate">
+                                        {ms.eventLabel.replace(/^(Women|Men)\s+/i, '')}
+                                      </span>
+                                      <span className="font-mono font-bold text-indigo-900">
+                                        {ms.finalsTime !== 'NT'
+                                          ? ms.finalsTime
+                                          : ms.seedTime || 'NT'}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              
               {/* SUB-TAB 3: QUALIFYING STANDARDS & POOL RECORDS */}
               {inMeetSubTab === 'standards' && (
                 <div className="p-5 sm:p-6 space-y-5">
