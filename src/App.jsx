@@ -40,10 +40,9 @@ import {
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
-getFirestore,
+  getFirestore,
   collection,
   doc,
-  setDoc,
   onSnapshot,
   writeBatch,
   deleteDoc,
@@ -1430,90 +1429,11 @@ export default function App() {
   const fileInputRef = useRef(null);
   const historyCsvInputRef = useRef(null);
 
-  // Live Multi-Browser Meet Sync & Saved Meet Repository State
-  const [liveMeetSyncEnabled, setLiveMeetSyncEnabled] = useState(true);
-  const [liveMeetMeta, setLiveMeetMeta] = useState(null);
-  const [savedMeetsRepo, setSavedMeetsRepo] = useState([]);
-  const [showSavedMeetsDrawer, setShowSavedMeetsDrawer] = useState(false);
-
   // Firebase Cloud Sync State
   const [cloudUser, setCloudUser] = useState(null);
   const [cloudSyncStatus, setCloudSyncStatus] = useState('connecting');
   const [cloudErrorMsg, setCloudErrorMsg] = useState('');
 
-  // Serialize/Deserialize parsedData for Firestore (converting Infinity <-> null)
-  const serializeParsedMeetForCloud = (meetObj) => {
-    if (!meetObj) return null;
-    return JSON.parse(
-      JSON.stringify(meetObj, (key, val) => {
-        if (val === Infinity) return '__INF__';
-        if (val === -Infinity) return '__NINF__';
-        return val;
-      })
-    );
-  };
-
-  const deserializeParsedMeetFromCloud = (rawObj) => {
-    if (!rawObj) return null;
-    return JSON.parse(
-      JSON.stringify(rawObj),
-      (key, val) => {
-        if (val === '__INF__') return Infinity;
-        if (val === '__NINF__') return -Infinity;
-        return val;
-      }
-    );
-  };
-
-  const pushLiveMeetToCloud = async (
-    meetObj,
-    nextTeamColors = teamColors,
-    nextQualStandards = qualStandards,
-    alsoArchive = true
-  ) => {
-    if (!cloudUser || !meetObj) return;
-    try {
-      const serializedMeet = serializeParsedMeetForCloud(meetObj);
-      const updatedAt = new Date().toISOString();
-      const meta = {
-        meetName: meetObj.meetInfo?.name || 'Swim Meet',
-        startDate: meetObj.meetInfo?.startDate || '',
-        isoDate: meetObj.meetInfo?.isoDate || '',
-        city: meetObj.meetInfo?.city || '',
-        state: meetObj.meetInfo?.state || '',
-        totalSwims: meetObj.stats?.totalSwims || 0,
-        teamsSummary: (meetObj.teams || []).map((t) => t.name).join(' vs '),
-        updatedAt,
-      };
-
-      await setDoc(doc(db, 'live_meet', 'current'), {
-        ...meta,
-        meetData: serializedMeet,
-        teamColors: nextTeamColors || {},
-        qualStandards: nextQualStandards || [],
-      });
-      setLiveMeetMeta(meta);
-
-      if (alsoArchive) {
-        const slug = `${(meetObj.meetInfo?.isoDate || 'undated')}_${(
-          meetObj.meetInfo?.name || 'meet'
-        )
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-|-$/g, '')}`.slice(0, 90);
-        const archiveId = slug || `meet-${Date.now()}`;
-        await setDoc(doc(db, 'saved_meets', archiveId), {
-          id: archiveId,
-          ...meta,
-          meetData: serializedMeet,
-          teamColors: nextTeamColors || {},
-        });
-      }
-    } catch (err) {
-      setCloudErrorMsg(err?.code || err?.message || 'live-meet-sync-failed');
-    }
-  };
-  
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
@@ -1583,72 +1503,14 @@ export default function App() {
       }
     });
 
-    // Live Meet Session Listener (syncs active .cl2 meet, team colors, and standards across browsers)
-    const unsubLiveMeet = onSnapshot(doc(db, 'live_meet', 'current'), (docSnap) => {
-      if (!docSnap.exists()) return;
-      const payload = docSnap.data();
-      setLiveMeetMeta({
-        meetName: payload.meetName || 'Swim Meet',
-        startDate: payload.startDate || '',
-        isoDate: payload.isoDate || '',
-        totalSwims: payload.totalSwims || 0,
-        teamsSummary: payload.teamsSummary || '',
-        updatedAt: payload.updatedAt || '',
-      });
-
-      if (!liveMeetSyncEnabled) return;
-
-      if (payload.teamColors && typeof payload.teamColors === 'object') {
-        setTeamColors(payload.teamColors);
-        try {
-          localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(payload.teamColors));
-        } catch {}
-      }
-      if (Array.isArray(payload.qualStandards)) {
-        setQualStandards(payload.qualStandards);
-        try {
-          localStorage.setItem(
-            'swimmeet_qual_standards_v1',
-            JSON.stringify(payload.qualStandards)
-          );
-        } catch {}
-      }
-      if (payload.meetData) {
-        const hydrated = deserializeParsedMeetFromCloud(payload.meetData);
-        setParsedData(hydrated);
-        if (hydrated?.teams?.length > 0) {
-          const gett = hydrated.teams.find((t) =>
-            String(t.name || '').toLowerCase().includes('gettysburg')
-          );
-          if (gett) {
-            setSelectedTeam(gett.code);
-          }
-        }
-      }
-    });
-
-    // Saved Meets Repository Listener
-    const unsubSavedMeets = onSnapshot(collection(db, 'saved_meets'), (snap) => {
-      const list = snap.docs
-        .map((d) => ({ ...d.data(), id: d.id }))
-        .sort((a, b) =>
-          String(b.isoDate || b.updatedAt || '').localeCompare(
-            String(a.isoDate || a.updatedAt || '')
-          )
-        );
-      setSavedMeetsRepo(list);
-    });
-
     return () => {
       unsubPerf();
       unsubRoster();
       unsubComps();
       unsubEvents();
-      unsubLiveMeet();
-      unsubSavedMeets();
     };
-  }, [cloudUser, liveMeetSyncEnabled]);
-  
+  }, [cloudUser]);
+
   const syncCollectionToCloud = async (colName, items, replaceAll = false) => {
     if (!cloudUser) return;
     try {
@@ -3124,31 +2986,25 @@ const rRowId = `cl2-lo-${entry.id}`;
         '#4f46e5',
         '#ca8a04',
       ];
-      const nextTeamColors = { ...teamColors };
-      parsed.teams.forEach((t, idx) => {
-        if (!nextTeamColors[t.code]) {
-          nextTeamColors[t.code] = t.name.toLowerCase().includes('gettysburg')
-            ? '#0284c7'
-            : palette[idx % palette.length];
-        }
+      setTeamColors((prev) => {
+        const next = { ...prev };
+        parsed.teams.forEach((t, idx) => {
+          if (!next[t.code]) {
+            next[t.code] = t.name.toLowerCase().includes('gettysburg')
+              ? '#0284c7'
+              : palette[idx % palette.length];
+          }
+        });
+        try {
+          localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(next));
+        } catch {}
+        return next;
       });
-      setTeamColors(nextTeamColors);
-      try {
-        localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(nextTeamColors));
-      } catch {}
 
-      // Broadcast live meet update + archive to Firestore repository
-      if (liveMeetSyncEnabled) {
-        pushLiveMeetToCloud(parsed, nextTeamColors, qualStandards, true);
-      }
-
-      const allEvSorted = [...parsed.individualResults, ...parsed.relayResults].sort(
-        (a, b) => (Number(a.eventNumber) || 999) - (Number(b.eventNumber) || 999)
-      );
-      const firstEv = allEvSorted[0]?.eventLabel || '';
+      const firstEv = parsed.individualResults[0]?.eventLabel || '';
       setSelectedHeatEventLabel(firstEv);
       setSelectedHeatNum('ALL');
-      
+
       if (parsed.teams.length > 0) {
         const gettysburgTeam = parsed.teams.find((t) =>
           t.name.toLowerCase().includes('gettysburg')
@@ -3210,14 +3066,13 @@ const rRowId = `cl2-lo-${entry.id}`;
 
   const handleSetTeamHexColor = (teamCode, hex) => {
     const cleanHex = String(hex || '').trim();
-    const next = { ...teamColors, [teamCode]: cleanHex };
-    setTeamColors(next);
-    try {
-      localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(next));
-    } catch {}
-    if (liveMeetSyncEnabled && parsedData) {
-      pushLiveMeetToCloud(parsedData, next, qualStandards, false);
-    }
+    setTeamColors((prev) => {
+      const next = { ...prev, [teamCode]: cleanHex };
+      try {
+        localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   };
 
   const updateQualStandardsList = (nextList) => {
@@ -3225,11 +3080,8 @@ const rRowId = `cl2-lo-${entry.id}`;
     try {
       localStorage.setItem('swimmeet_qual_standards_v1', JSON.stringify(nextList));
     } catch {}
-    if (liveMeetSyncEnabled && parsedData) {
-      pushLiveMeetToCloud(parsedData, teamColors, nextList, false);
-    }
   };
-  
+
   const evaluateStandardsForSwim = (eventLabel, timeStr) => {
     const sec = timeToSeconds(timeStr);
     const evKey = normalizeEventKey(eventLabel);
@@ -8465,33 +8317,6 @@ const rRowId = `cl2-lo-${entry.id}`;
 
               <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                 <button
-                  type="button"
-                  onClick={() => {
-                    const nextVal = !liveMeetSyncEnabled;
-                    setLiveMeetSyncEnabled(nextVal);
-                    if (nextVal && parsedData) {
-                      pushLiveMeetToCloud(parsedData, teamColors, qualStandards, false);
-                    }
-                  }}
-                  title="When enabled, uploading or updating a .CL2 broadcasts live to all open browsers"
-                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl font-semibold text-xs border transition cursor-pointer ${
-                    liveMeetSyncEnabled
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                      : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-                  }`}
-                >
-                  <Cloud className="w-3.5 h-3.5" />
-                  <span>{liveMeetSyncEnabled ? 'Live Sync: ON' : 'Live Sync: OFF'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowSavedMeetsDrawer((v) => !v)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 font-semibold text-xs transition cursor-pointer"
-                >
-                  <Database className="w-3.5 h-3.5" />
-                  <span>Load Past Meet ({savedMeetsRepo.length})</span>
-                </button>
-                <button
                   onClick={() => fileInputRef.current?.click()}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs shadow-sm transition cursor-pointer"
                 >
@@ -8507,108 +8332,6 @@ const rRowId = `cl2-lo-${entry.id}`;
                 </button>
               </div>
             </div>
-
-            {/* Saved Meet Repository Drawer ("Load Past Meet") */}
-            {showSavedMeetsDrawer && (
-              <div className="bg-white rounded-2xl border border-indigo-200 shadow-sm p-4 sm:p-5 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
-                      <Database className="w-4 h-4 text-indigo-600" />
-                      Cloud Saved Meet Repository ({savedMeetsRepo.length})
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Load any previously uploaded `.cl2` / `.sd3` meet from Firestore across any
-                      browser or computer.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowSavedMeetsDrawer(false)}
-                    className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {savedMeetsRepo.length === 0 ? (
-                  <div className="text-center py-6 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                    No saved meets in Firestore yet. Upload a `.cl2` / `.sd3` file above and it will
-                    automatically archive here.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-72 overflow-y-auto">
-                    {savedMeetsRepo.map((item) => (
-                      <div
-                        key={item.id}
-                        className="border border-slate-200 rounded-xl p-3 bg-slate-50/70 flex flex-col justify-between gap-2"
-                      >
-                        <div>
-                          <div className="font-bold text-xs text-slate-900 truncate">
-                            {item.meetName}
-                          </div>
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            {item.startDate || item.isoDate || 'Undated'} • {item.totalSwims} swims
-                          </div>
-                          {item.teamsSummary && (
-                            <div className="text-[11px] text-slate-600 truncate mt-0.5">
-                              {item.teamsSummary}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/70">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!item.meetData) return;
-                              const hydrated = deserializeParsedMeetFromCloud(item.meetData);
-                              setParsedData(hydrated);
-                              if (item.teamColors) {
-                                setTeamColors(item.teamColors);
-                              }
-                              const allEvSorted = [
-                                ...(hydrated.individualResults || []),
-                                ...(hydrated.relayResults || []),
-                              ].sort(
-                                (a, b) =>
-                                  (Number(a.eventNumber) || 999) - (Number(b.eventNumber) || 999)
-                              );
-                              setSelectedHeatEventLabel(allEvSorted[0]?.eventLabel || '');
-                              setSelectedHeatNum('ALL');
-                              setShowSavedMeetsDrawer(false);
-                              setBenchmarkStatusMsg(`Loaded past meet "${item.meetName}".`);
-                              if (liveMeetSyncEnabled) {
-                                pushLiveMeetToCloud(
-                                  hydrated,
-                                  item.teamColors || teamColors,
-                                  qualStandards,
-                                  false
-                                );
-                              }
-                            }}
-                            className="px-3 py-1 rounded-lg text-[11px] font-bold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
-                          >
-                            Load Meet
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (cloudUser) {
-                                deleteDoc(doc(db, 'saved_meets', item.id)).catch(() => {});
-                              }
-                            }}
-                            title="Delete saved meet from cloud repository"
-                            className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Error Alert */}
             {meetErrorMsg && (
