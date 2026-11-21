@@ -40,7 +40,6 @@ import {
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
-import {
   getFirestore,
   collection,
   doc,
