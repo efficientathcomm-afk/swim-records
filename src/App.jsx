@@ -3774,14 +3774,14 @@ const rRowId = `cl2-lo-${entry.id}`;
     const map = new Map();
     list.forEach((item) => {
       if (!map.has(item.eventLabel)) {
-        map.set(item.eventLabel, item.eventNumber);
+        map.set(item.eventLabel, Number(item.eventNumber) || 999);
       }
     });
     return Array.from(map.entries())
       .sort((a, b) => a[1] - b[1])
       .map(([label, num]) => ({ label, num }));
   }, [parsedData, meetSubTab]);
-
+  
   // Filtered & Sorted Individual Results for Section 4
   const filteredMeetIndividuals = useMemo(() => {
     if (!parsedData) return [];
