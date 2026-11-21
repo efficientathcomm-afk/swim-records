@@ -546,15 +546,15 @@ function parseSDIFContent(content) {
     } else if (recType === 'D0') {
       const rawTeamSlice = sliceCol(line, 4, 9);
       let teamCode = currentTeamContext || rawTeamSlice || 'UNAT';
-      if (rawTeamSlice) {
+      if (!currentTeamContext && rawTeamSlice) {
         for (const [registeredCode] of teamsMap.entries()) {
-          if (registeredCode.startsWith(rawTeamSlice) || rawTeamSlice === registeredCode) {
+          if (registeredCode === rawTeamSlice || registeredCode.startsWith(rawTeamSlice)) {
             teamCode = registeredCode;
             break;
           }
         }
       }
-
+      
       const classYear = sliceCol(line, 8, 9);
       const swimmerName = sliceCol(line, 12, 39);
       // Exact 1-based SDIF D0 column layout:
@@ -3382,6 +3382,11 @@ const rRowId = `cl2-lo-${entry.id}`;
         }
       });
 
+      const prevSortedTop10 = Array.from(athleteBestMap.entries())
+        .filter(([, bestSec]) => Number.isFinite(bestSec) && bestSec > 0)
+        .sort((a, b) => a[1] - b[1]);
+      const prevRankIdx = prevSortedTop10.findIndex(([k]) => k === swKey);
+
       const existingBestForSwimmer = athleteBestMap.get(swKey);
       const effectiveBestForSwimmer =
         existingBestForSwimmer === undefined ? sec : Math.min(existingBestForSwimmer, sec);
@@ -3392,7 +3397,14 @@ const rRowId = `cl2-lo-${entry.id}`;
         .sort((a, b) => a[1] - b[1]);
 
       const rankIdx = sortedTop10.findIndex(([k]) => k === swKey);
-      if (rankIdx >= 0 && rankIdx < 10) {
+      const improvedRank =
+        rankIdx >= 0 &&
+        rankIdx < 10 &&
+        (prevRankIdx === -1 ||
+          rankIdx < prevRankIdx ||
+          (rankIdx === 0 && sec < (prevSortedTop10[0]?.[1] ?? Infinity) - 0.005));
+
+      if (improvedRank) {
         const isRecordHolder =
           rankIdx === 0 ||
           (sortedTop10[0] && sec <= sortedTop10[0][1] + 0.005);
@@ -8043,18 +8055,29 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       row.swimmerName,
                                       row.preferredFirst
                                     );
-                                    const tags = benchmarkIndex.evaluateSwim(
-                                      displaySwimmer,
-                                      row.eventLabel,
-                                      row.finalsTime,
-                                      row.classYear
-                                    );
+                                    const isPrimaryProgramRow =
+                                      selectedTeam !== 'ALL'
+                                        ? row.teamCode === selectedTeam
+                                        : String(row.teamName || '')
+                                            .toLowerCase()
+                                            .includes('gettysburg') ||
+                                          String(row.teamCode || '')
+                                            .toLowerCase()
+                                            .includes('gett');
+                                    const tags = isPrimaryProgramRow
+                                      ? benchmarkIndex.evaluateSwim(
+                                          displaySwimmer,
+                                          row.eventLabel,
+                                          row.finalsTime,
+                                          row.classYear
+                                        )
+                                      : [];
                                     const hitStds = evaluateStandardsForSwim(
                                       row.eventLabel,
                                       row.finalsTime
                                     );
                                     const teamHex = getTeamHexColor(row.teamCode, row.teamName);
-
+                            
                                     return (
                                       <React.Fragment key={row.id}>
                                         <tr
