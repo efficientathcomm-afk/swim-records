@@ -575,12 +575,11 @@ function parseSDIFContent(content) {
       const distance = sliceCol(line, 68, 71);
       const strokeCode = sliceCol(line, 72, 72);
       const eventNumber = sliceCol(line, 73, 76);
-const rawSwimDate = sliceCol(line, 95, 102);
+      const rawSwimDate = sliceCol(line, 95, 102);
       const swimIsoDate =
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
-      const seedTimeRaw = sliceCol(line, 103, 110);
       const finalsTimeRaw = sliceCol(line, 116, 123);
       const courseCode = sliceCol(line, 124, 124);
 
@@ -596,7 +595,6 @@ const rawSwimDate = sliceCol(line, 95, 102);
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
       const parsedSec = timeToSeconds(finalsTimeRaw);
-      const parsedSeedSec = timeToSeconds(seedTimeRaw);
 
       const record = {
         id: `ind-${i}-${swimmerName}-${eventNumber}`,
@@ -614,8 +612,6 @@ const rawSwimDate = sliceCol(line, 95, 102);
         eventNumber: parseInt(eventNumber, 10) || eventNumber,
         eventLabel,
         swimDate: swimIsoDate || meetInfo.isoDate || '',
-        seedTime: seedTimeRaw || '',
-        seedSeconds: parsedSeedSec === null ? Infinity : parsedSeedSec,
         finalsTime: finalsTimeRaw || 'NT',
         timeSeconds: parsedSec === null ? Infinity : parsedSec,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
@@ -628,7 +624,7 @@ const rawSwimDate = sliceCol(line, 95, 102);
         splitPages: [],
         splits: [],
       };
-      
+
       individualResults.push(record);
       lastD0 = record;
       lastRecordType = 'D0';
@@ -663,14 +659,13 @@ const rawSwimDate = sliceCol(line, 95, 102);
           roster.get(lastD0.swimmerName).preferredFirst = prefFirst;
         }
       }
-} else if (recType === 'E0') {
+    } else if (recType === 'E0') {
       const relayLetter = sliceCol(line, 12, 12) || 'A';
       const teamCode = sliceCol(line, 13, 18) || currentTeamContext || 'UNAT';
       const genderCode = sliceCol(line, 21, 21);
       const distance = sliceCol(line, 23, 25);
       const strokeCode = sliceCol(line, 26, 26);
       const eventNumber = sliceCol(line, 27, 30);
-      const seedTimeRaw = sliceCol(line, 59, 67);
       const finalsTimeRaw = sliceCol(line, 72, 80);
       const courseCode = sliceCol(line, 81, 81);
 
@@ -686,7 +681,6 @@ const rawSwimDate = sliceCol(line, 95, 102);
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
       const parsedSec = timeToSeconds(finalsTimeRaw);
-      const parsedSeedSec = timeToSeconds(seedTimeRaw);
 
       const relayObj = {
         id: `rel-${i}-${teamCode}-${relayLetter}-${eventNumber}`,
@@ -702,8 +696,6 @@ const rawSwimDate = sliceCol(line, 95, 102);
         strokeName,
         eventNumber: parseInt(eventNumber, 10) || eventNumber,
         eventLabel,
-        seedTime: seedTimeRaw || '',
-        seedSeconds: parsedSeedSec === null ? Infinity : parsedSeedSec,
         finalsTime: finalsTimeRaw || 'NT',
         timeSeconds: parsedSec === null ? Infinity : parsedSec,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
@@ -717,7 +709,7 @@ const rawSwimDate = sliceCol(line, 95, 102);
         legs: [],
         splits: [],
       };
-      
+
       relayResults.push(relayObj);
       lastE0 = relayObj;
       lastRecordType = 'E0';
@@ -1367,6 +1359,8 @@ export default function App() {
   const [inMeetTargetEventKey, setInMeetTargetEventKey] = useState('women 50 freestyle');
   const [selectedHeatEventLabel, setSelectedHeatEventLabel] = useState('');
   const [selectedHeatNum, setSelectedHeatNum] = useState('ALL');
+  const [broadcastGraphicTheme, setBroadcastGraphicTheme] = useState('slate'); // 'slate' | 'transparent'
+  const [isExportingAllGraphics, setIsExportingAllGraphics] = useState(false);
   const [teamColors, setTeamColors] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('swimmeet_team_colors_v1') || '{}');
@@ -2969,6 +2963,351 @@ const rRowId = `cl2-lo-${entry.id}`;
       hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
     }
     return palettes[hash % palettes.length];
+  };
+
+  // Render a 1920x1080 Broadcast Heat Graphic PNG for any Event + Heat
+  const renderBroadcastHeatGraphicPng = (eventObj, heatLabel, laneEntriesMap, themeMode = 'slate') => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1920;
+    canvas.height = 1080;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    const roundRectPath = (x, y, w, h, r) => {
+      const radius = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.arcTo(x + w, y, x + w, y + h, radius);
+      ctx.arcTo(x + w, y + h, x, y + h, radius);
+      ctx.arcTo(x, y + h, x, y, radius);
+      ctx.arcTo(x, y, x + w, y, radius);
+      ctx.closePath();
+    };
+
+    ctx.clearRect(0, 0, 1920, 1080);
+
+    if (themeMode === 'slate') {
+      const bgGrad = ctx.createLinearGradient(0, 0, 1920, 1080);
+      bgGrad.addColorStop(0, '#090d16');
+      bgGrad.addColorStop(0.55, '#0f172a');
+      bgGrad.addColorStop(1, '#082f49');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, 1920, 1080);
+
+      // Subtle top accent bar
+      const topBarGrad = ctx.createLinearGradient(0, 0, 1920, 0);
+      topBarGrad.addColorStop(0, '#0284c7');
+      topBarGrad.addColorStop(0.5, '#38bdf8');
+      topBarGrad.addColorStop(1, '#f59e0b');
+      ctx.fillStyle = topBarGrad;
+      ctx.fillRect(0, 0, 1920, 8);
+    }
+
+    const marginX = 76;
+    const contentW = 1920 - marginX * 2;
+
+    // Header Card
+    roundRectPath(marginX, 36, contentW, 134, 18);
+    ctx.fillStyle = themeMode === 'transparent' ? 'rgba(15, 23, 42, 0.94)' : 'rgba(15, 23, 42, 0.88)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
+    ctx.stroke();
+
+    // Event Pill
+    roundRectPath(marginX + 28, 60, 168, 42, 10);
+    ctx.fillStyle = '#0284c7';
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 22px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`EVENT ${eventObj.num}`, marginX + 28 + 84, 81);
+
+    // Meet Name Subtitle
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '700 20px system-ui, -apple-system, sans-serif';
+    const meetTitle = (parsedData?.meetInfo?.name || 'SWIM MEET').toUpperCase();
+    ctx.fillText(meetTitle, marginX + 214, 81);
+
+    // Event Name + Heat Title
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 42px system-ui, -apple-system, sans-serif';
+    const heatDisplay =
+      heatLabel && heatLabel !== 'ALL' ? ` — HEAT ${heatLabel}` : '';
+    ctx.fillText(`${eventObj.label.toUpperCase()}${heatDisplay}`, marginX + 28, 134);
+
+    // Right side Program Record / Pool Record Reference
+    const activeEvKey = normalizeEventKey(eventObj.label);
+    const officialEvPool = historicalRecords.filter(
+      (r) => r.isOfficial !== false && r.eventKey === activeEvKey
+    );
+    const bestBySw = new Map();
+    officialEvPool.forEach((r) => {
+      if (!bestBySw.has(r.swimmerKey) || r.seconds < bestBySw.get(r.swimmerKey).seconds) {
+        bestBySw.set(r.swimmerKey, r);
+      }
+    });
+    const sortedEvBests = Array.from(bestBySw.values()).sort((a, b) => a.seconds - b.seconds);
+    const schoolRec = sortedEvBests[0] || null;
+    const poolRec = qualStandards.find(
+      (s) => s.eventKey === activeEvKey && s.type === 'POOL_RECORD'
+    );
+
+    ctx.textAlign = 'right';
+    if (schoolRec) {
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = '800 18px system-ui, -apple-system, sans-serif';
+      ctx.fillText('PROGRAM RECORD', marginX + contentW - 32, 74);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 24px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.fillText(
+        `${schoolRec.time}  (${schoolRec.swimmerName})`,
+        marginX + contentW - 32,
+        104
+      );
+    }
+    if (poolRec) {
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = '700 18px system-ui, -apple-system, sans-serif';
+      ctx.fillText(
+        `${poolRec.label.toUpperCase()}: ${poolRec.time}`,
+        marginX + contentW - 32,
+        138
+      );
+    }
+
+    // All-Time Rank Lookup for Callout Pills
+    const rankBySwimmer = new Map();
+    sortedEvBests.forEach((rec, idx) => {
+      if (idx < 10) rankBySwimmer.set(rec.swimmerKey, idx + 1);
+    });
+
+    // Lanes 1 to 8 Rows
+    const startY = 192;
+    const rowH = 96;
+    const rowGap = 11;
+
+    for (let laneNum = 1; laneNum <= 8; laneNum++) {
+      const y = startY + (laneNum - 1) * (rowH + rowGap);
+      const entry = laneEntriesMap.get(laneNum);
+
+      roundRectPath(marginX, y, contentW, rowH, 14);
+      ctx.fillStyle = entry
+        ? themeMode === 'transparent'
+          ? 'rgba(15, 23, 42, 0.90)'
+          : 'rgba(30, 41, 59, 0.88)'
+        : themeMode === 'transparent'
+        ? 'rgba(15, 23, 42, 0.55)'
+        : 'rgba(15, 23, 42, 0.50)';
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = entry ? 'rgba(148, 163, 184, 0.25)' : 'rgba(148, 163, 184, 0.12)';
+      ctx.stroke();
+
+      const teamHex = entry ? getTeamHexColor(entry.teamCode, entry.teamName) : '#334155';
+
+      // Left Team Color Lane Block
+      ctx.save();
+      roundRectPath(marginX, y, 104, rowH, 14);
+      ctx.clip();
+      ctx.fillStyle = teamHex;
+      ctx.fillRect(marginX, y, 104, rowH);
+      ctx.restore();
+
+      // Right Team Color End Accent Bar
+      if (entry) {
+        ctx.save();
+        roundRectPath(marginX + contentW - 16, y, 16, rowH, 8);
+        ctx.clip();
+        ctx.fillStyle = teamHex;
+        ctx.fillRect(marginX + contentW - 16, y, 16, rowH);
+        ctx.restore();
+      }
+
+      // Lane Number
+      ctx.fillStyle = entry ? '#ffffff' : '#64748b';
+      ctx.font = '900 44px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(laneNum), marginX + 52, y + rowH / 2 + 2);
+
+      if (!entry) {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#64748b';
+        ctx.font = 'italic 600 24px system-ui, -apple-system, sans-serif';
+        ctx.fillText('OPEN LANE', marginX + 136, y + rowH / 2);
+        continue;
+      }
+
+      const isRelay = Boolean(eventObj.isRelay);
+      const resolvedLegs = isRelay
+        ? (entry.legs || []).map((l) => {
+            const disp = formatSwimmerDisplay(l.swimmerName, l.preferredFirst);
+            const m = resolveMasterAthlete(disp);
+            return m ? m.canonicalName : disp;
+          })
+        : [];
+
+      const displaySw = isRelay
+        ? entry.relayTitle || `${entry.teamName} "${entry.relayLetter || 'A'}"`
+        : formatSwimmerDisplay(entry.swimmerName, entry.preferredFirst);
+      const resolvedAth = !isRelay ? resolveMasterAthlete(displaySw) : null;
+      const canonicalName = resolvedAth ? resolvedAth.canonicalName : displaySw;
+      const swKey = isRelay
+        ? normalizeSwimmerKey(resolvedLegs.join(', '))
+        : normalizeSwimmerKey(canonicalName);
+
+      // Swimmer / Relay Title
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 32px system-ui, -apple-system, sans-serif';
+      const titleLine =
+        !isRelay && entry.classYear ? `${canonicalName}  (${entry.classYear})` : canonicalName;
+      ctx.fillText(titleLine, marginX + 134, y + 36);
+
+      // Team Name + Relay Lineup Subtitle
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '600 20px system-ui, -apple-system, sans-serif';
+      const subLine =
+        isRelay && resolvedLegs.length > 0
+          ? `${entry.teamName}  •  ${resolvedLegs.join(' • ')}`
+          : entry.teamName;
+      ctx.fillText(subLine, marginX + 134, y + 70);
+
+      // Rank / Standard Callout Pill (if applicable)
+      const rankNum = rankBySwimmer.get(swKey);
+      const swHist = officialEvPool.filter((r) => r.swimmerKey === swKey);
+      const pbRec =
+        swHist.length > 0
+          ? swHist.reduce((best, cur) => (cur.seconds < best.seconds ? cur : best))
+          : null;
+
+      let rightPillOffset = 0;
+      if (rankNum) {
+        const badgeText = rankNum === 1 ? 'SCHOOL RECORD' : `#${rankNum} ALL-TIME`;
+        const badgeW = rankNum === 1 ? 215 : 185;
+        const badgeX = marginX + contentW - 260 - badgeW;
+        roundRectPath(badgeX, y + 26, badgeW, 44, 10);
+        ctx.fillStyle = rankNum === 1 ? '#f59e0b' : 'rgba(245, 158, 11, 0.22)';
+        ctx.fill();
+        ctx.fillStyle = rankNum === 1 ? '#0f172a' : '#fcd34d';
+        ctx.font = '800 18px system-ui, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(badgeText, badgeX + badgeW / 2, y + 48);
+        rightPillOffset = badgeW + 24;
+      }
+
+      // Seed Time & PB on Right
+      const seedDisplay =
+        entry.seedTime && entry.seedTime !== 'NT'
+          ? entry.seedTime
+          : entry.finalsTime && entry.finalsTime !== 'NT'
+          ? entry.finalsTime
+          : 'NT';
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '700 16px system-ui, -apple-system, sans-serif';
+      ctx.fillText(
+        entry.seedTime && entry.seedTime !== 'NT' ? 'SEED TIME' : 'ENTRY TIME',
+        marginX + contentW - 36,
+        y + 28
+      );
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = '900 32px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.fillText(seedDisplay, marginX + contentW - 36, y + 60);
+
+      if (pbRec && !rightPillOffset) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '700 17px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.fillText(`PB ${pbRec.time}`, marginX + contentW - 235, y + 50);
+      }
+    }
+
+    return canvas.toDataURL('image/png');
+  };
+
+  const triggerPngDownload = (dataUrl, filename) => {
+    if (!dataUrl) return;
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportAllMeetGraphics = async () => {
+    if (!parsedData || isExportingAllGraphics) return;
+    setIsExportingAllGraphics(true);
+
+    try {
+      const eventOptionMap = new Map();
+      parsedData.individualResults.forEach((r) => {
+        if (!eventOptionMap.has(r.eventLabel)) {
+          eventOptionMap.set(r.eventLabel, {
+            label: r.eventLabel,
+            num: r.eventNumber,
+            isRelay: false,
+          });
+        }
+      });
+      parsedData.relayResults.forEach((r) => {
+        if (!eventOptionMap.has(r.eventLabel)) {
+          eventOptionMap.set(r.eventLabel, {
+            label: r.eventLabel,
+            num: r.eventNumber,
+            isRelay: true,
+          });
+        }
+      });
+
+      const orderedEvents = Array.from(eventOptionMap.values()).sort((a, b) => a.num - b.num);
+      let exportedCount = 0;
+
+      for (const evObj of orderedEvents) {
+        const evSwims = evObj.isRelay
+          ? parsedData.relayResults.filter((r) => r.eventLabel === evObj.label)
+          : parsedData.individualResults.filter((r) => r.eventLabel === evObj.label);
+
+        const heats = Array.from(new Set(evSwims.map((r) => r.heat).filter(Boolean))).sort(
+          (a, b) => Number(a) - Number(b)
+        );
+        const heatTargets = heats.length > 0 ? heats : ['1'];
+
+        for (const hNum of heatTargets) {
+          const subset =
+            heats.length > 0
+              ? evSwims.filter((r) => String(r.heat) === String(hNum))
+              : evSwims;
+          const lMap = new Map();
+          subset.forEach((sw) => {
+            const ln = parseInt(sw.lane, 10);
+            if (ln >= 1 && ln <= 8 && !lMap.has(ln)) {
+              lMap.set(ln, sw);
+            }
+          });
+          if (lMap.size === 0) continue;
+
+          const safeEv = evObj.label.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '');
+          const evPad = String(evObj.num).padStart(2, '0');
+          const fileName = `Ev${evPad}_${safeEv}_Heat${hNum}.png`;
+          const url = renderBroadcastHeatGraphicPng(evObj, hNum, lMap, broadcastGraphicTheme);
+          triggerPngDownload(url, fileName);
+          exportedCount++;
+          await new Promise((res) => setTimeout(res, 160));
+        }
+      }
+
+      setBenchmarkStatusMsg(
+        `Exported ${exportedCount} full-screen broadcast heat graphic PNGs (1920×1080).`
+      );
+    } finally {
+      setIsExportingAllGraphics(false);
+    }
   };
 
   // Benchmark Evaluation Engine (Dual Full-Distance vs Split PB/SB, All-Time Top-10, Freshman Record)
@@ -6202,36 +6541,103 @@ const rRowId = `cl2-lo-${entry.id}`;
 
                         return (
                           <div className="space-y-4">
-                            <div className="flex flex-wrap items-center gap-3">
-                              <select
-                                value={activeEvLabel}
-                                onChange={(e) => {
-                                  setSelectedHeatEventLabel(e.target.value);
-                                  setSelectedHeatNum('ALL');
-                                }}
-                                className="flex-1 min-w-[220px] px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                              >
-                                {eventOptions.map((ev) => (
-                                  <option key={ev.label} value={ev.label}>
-                                    #{ev.num} — {ev.label}
-                                  </option>
-                                ))}
-                              </select>
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex flex-wrap items-center gap-3 flex-1">
+                                <select
+                                  value={activeEvLabel}
+                                  onChange={(e) => {
+                                    setSelectedHeatEventLabel(e.target.value);
+                                    setSelectedHeatNum('ALL');
+                                  }}
+                                  className="flex-1 min-w-[220px] px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                >
+                                  {eventOptions.map((ev) => (
+                                    <option key={ev.label} value={ev.label}>
+                                      #{ev.num} — {ev.label}
+                                    </option>
+                                  ))}
+                                </select>
 
-                              <select
-                                value={selectedHeatNum}
-                                onChange={(e) => setSelectedHeatNum(e.target.value)}
-                                className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                              >
-                                <option value="ALL">
-                                  All Heats ({evSwims.length} {isRelayEvent ? 'relays' : 'swims'})
-                                </option>
-                                {heatOptions.map((h) => (
-                                  <option key={h} value={h}>
-                                    Heat {h}
+                                <select
+                                  value={selectedHeatNum}
+                                  onChange={(e) => setSelectedHeatNum(e.target.value)}
+                                  className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                >
+                                  <option value="ALL">
+                                    All Heats ({evSwims.length} {isRelayEvent ? 'relays' : 'swims'})
                                   </option>
-                                ))}
-                              </select>
+                                  {heatOptions.map((h) => (
+                                    <option key={h} value={h}>
+                                      Heat {h}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              {/* Broadcast 1920x1080 PNG Graphic Controls */}
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-[11px] font-bold">
+                                  <button
+                                    type="button"
+                                    onClick={() => setBroadcastGraphicTheme('slate')}
+                                    className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                                      broadcastGraphicTheme === 'slate'
+                                        ? 'bg-slate-900 text-white shadow-xs'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                  >
+                                    Full Slate
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setBroadcastGraphicTheme('transparent')}
+                                    className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                                      broadcastGraphicTheme === 'transparent'
+                                        ? 'bg-slate-900 text-white shadow-xs'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                  >
+                                    Transparent Key
+                                  </button>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  disabled={!activeEvObj || laneMap.size === 0}
+                                  onClick={() => {
+                                    if (!activeEvObj) return;
+                                    const safeEv = activeEvObj.label
+                                      .replace(/[^a-z0-9]+/gi, '_')
+                                      .replace(/^_|_$/g, '');
+                                    const evPad = String(activeEvObj.num).padStart(2, '0');
+                                    const hTag =
+                                      selectedHeatNum !== 'ALL' ? `_Heat${selectedHeatNum}` : '';
+                                    const url = renderBroadcastHeatGraphicPng(
+                                      activeEvObj,
+                                      selectedHeatNum,
+                                      laneMap,
+                                      broadcastGraphicTheme
+                                    );
+                                    triggerPngDownload(url, `Ev${evPad}_${safeEv}${hTag}.png`);
+                                  }}
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white shadow-xs transition cursor-pointer"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  Export Heat PNG
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={isExportingAllGraphics}
+                                  onClick={handleExportAllMeetGraphics}
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white shadow-xs transition cursor-pointer"
+                                >
+                                  <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                                  {isExportingAllGraphics
+                                    ? 'Exporting...'
+                                    : 'Export All Heats (1080p)'}
+                                </button>
+                              </div>
                             </div>
 
                             {/* Top Event Cuts & Defined Standards Strip */}
@@ -6322,19 +6728,19 @@ const rRowId = `cl2-lo-${entry.id}`;
                               </div>
                             </div>
 
-<div className="overflow-x-auto border border-slate-200 rounded-xl">
+                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
                               <table className="w-full text-left text-xs">
                                 <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
                                   <tr>
-                                    <th className="py-2.5 px-3 w-16 text-center">Lane</th>
+                                    <th className="py-2.5 px-3 w-20 text-center">Lane</th>
                                     <th className="py-2.5 px-3">
                                       {isRelayEvent ? 'Relay Squad / Lineup' : 'Swimmer / Team'}
                                     </th>
-                                    <th className="py-2.5 px-3">Seed / PB / SB</th>
+                                    <th className="py-2.5 px-3">PB / SB</th>
                                     <th className="py-2.5 px-3 text-center">Wins</th>
-                                    <th className="py-2.5 px-3">Last Swim</th>
-                                    <th className="py-2.5 px-3">Trajectory & Form</th>
-                                    <th className="py-2.5 px-3">All-Time & Milestones</th>
+                                    <th className="py-2.5 px-3">Last Swim in Event</th>
+                                    <th className="py-2.5 px-3">Event Trend</th>
+                                    <th className="py-2.5 px-3">All-Time / Cuts</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -6472,186 +6878,27 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         ).length;
 
                                     const lastSwim = swEventHistory[0] || null;
-                                    const seedSec = timeToSeconds(entry.seedTime);
-                                    const finalsSec = timeToSeconds(entry.finalsTime);
-
-                                    // 1. Trajectory & Form Signals (Pre-Meet Seed vs PB/SB + Recent Arc)
-                                    const trajectoryNotes = [];
-                                    if (seedSec !== null && pbRec) {
-                                      const vsPb = seedSec - pbRec.seconds;
-                                      if (Math.abs(vsPb) <= 0.02) {
-                                        trajectoryNotes.push({
-                                          text: 'Seeded at PB',
-                                          tone: 'text-indigo-700 font-bold',
-                                        });
-                                      } else if (vsPb < -0.02) {
-                                        trajectoryNotes.push({
-                                          text: `Seeded ${Math.abs(vsPb).toFixed(2)}s faster than PB`,
-                                          tone: 'text-emerald-700 font-bold',
-                                        });
+                                    const curSec = timeToSeconds(entry.finalsTime);
+                                    let trendText = '—';
+                                    let trendTone = 'text-slate-500';
+                                    if (curSec !== null && lastSwim) {
+                                      const diff = curSec - lastSwim.seconds;
+                                      if (diff < -0.005) {
+                                        trendText = `${diff.toFixed(2)}s vs last`;
+                                        trendTone = 'text-emerald-700 font-bold';
+                                      } else if (diff > 0.005) {
+                                        trendText = `+${diff.toFixed(2)}s vs last`;
+                                        trendTone = 'text-amber-700 font-semibold';
                                       } else {
-                                        trajectoryNotes.push({
-                                          text: `Seeded +${vsPb.toFixed(2)}s off PB`,
-                                          tone: 'text-slate-600',
-                                        });
-                                      }
-                                    } else if (seedSec !== null && sbRec) {
-                                      const vsSb = seedSec - sbRec.seconds;
-                                      trajectoryNotes.push({
-                                        text:
-                                          Math.abs(vsSb) <= 0.02
-                                            ? 'Seeded at SB'
-                                            : `Seeded ${vsSb > 0 ? '+' : ''}${vsSb.toFixed(2)}s vs SB`,
-                                        tone: 'text-slate-600',
-                                      });
-                                    }
-
-                                    // Recent Arc across last 2-3 swims in this event
-                                    if (swEventHistory.length >= 3) {
-                                      const [s0, s1, s2] = swEventHistory;
-                                      if (s0.seconds < s1.seconds && s1.seconds < s2.seconds) {
-                                        const drop3 = s2.seconds - s0.seconds;
-                                        trajectoryNotes.push({
-                                          text: `Dropping (-${drop3.toFixed(2)}s over last 3)`,
-                                          tone: 'text-emerald-700 font-bold',
-                                        });
+                                        trendText = 'Exact last mark';
                                       }
                                     }
-                                    if (
-                                      lastSwim &&
-                                      pbRec &&
-                                      lastSwim.id === pbRec.id &&
-                                      swEventHistory.length > 1
-                                    ) {
-                                      trajectoryNotes.push({
-                                        text: 'Career-best form (PB last swim)',
-                                        tone: 'text-emerald-700 font-semibold',
-                                      });
-                                    } else if (
-                                      lastSwim &&
-                                      sbRec &&
-                                      lastSwim.id === sbRec.id &&
-                                      sbSwims.length > 1
-                                    ) {
-                                      trajectoryNotes.push({
-                                        text: 'Season-best form (SB last swim)',
-                                        tone: 'text-cyan-700 font-semibold',
-                                      });
-                                    }
 
-                                    if (finalsSec !== null && lastSwim) {
-                                      const diff = finalsSec - lastSwim.seconds;
-                                      trajectoryNotes.push({
-                                        text:
-                                          Math.abs(diff) <= 0.005
-                                            ? 'Finals matched last mark'
-                                            : `Finals ${diff < 0 ? '' : '+'}${diff.toFixed(2)}s vs last`,
-                                        tone:
-                                          diff < -0.005
-                                            ? 'text-emerald-700 font-bold'
-                                            : 'text-slate-500',
-                                      });
-                                    }
-
-                                    // 2. All-Time Gap, Barrier Watch, Last Meet Momentum, & Cut Proximity
                                     const rankNum = isRelayEvent
                                       ? isGettysburgEntry
                                         ? allTimeRankBySwimmer.get(swKey)
                                         : undefined
                                       : allTimeRankBySwimmer.get(swKey);
-
-                                    const milestoneBullets = [];
-                                    const refSec =
-                                      pbRec?.seconds ?? (seedSec !== null ? seedSec : null);
-
-                                    if (rankNum && rankNum > 1 && sortedEvBests[rankNum - 2]) {
-                                      const aheadRec = sortedEvBests[rankNum - 2];
-                                      if (refSec !== null && refSec >= aheadRec.seconds) {
-                                        const gap = refSec - aheadRec.seconds;
-                                        milestoneBullets.push(
-                                          `#${rankNum} All-Time (${gap.toFixed(2)}s shy of #${
-                                            rankNum - 1
-                                          })`
-                                        );
-                                      }
-                                    } else if (
-                                      !rankNum &&
-                                      isGettysburgEntry &&
-                                      tenthMark &&
-                                      refSec !== null &&
-                                      refSec > tenthMark.seconds &&
-                                      refSec - tenthMark.seconds <= Math.max(2.5, tenthMark.seconds * 0.03)
-                                    ) {
-                                      milestoneBullets.push(
-                                        `${(refSec - tenthMark.seconds).toFixed(2)}s outside Top-10 (#10: ${tenthMark.time})`
-                                      );
-                                    }
-
-                                    // Barrier / Milestone Watch (next round second or round minute below PB)
-                                    if (pbRec && pbRec.seconds > 15) {
-                                      const pbS = pbRec.seconds;
-                                      let barrierTarget = null;
-                                      if (pbS >= 60) {
-                                        const wholeMin = Math.floor(pbS / 60) * 60;
-                                        const tenSecStep = Math.floor(pbS / 10) * 10;
-                                        const cand =
-                                          pbS - wholeMin <= 2.5 ? wholeMin : tenSecStep;
-                                        if (pbS > cand && pbS - cand <= 2.0) {
-                                          barrierTarget = cand;
-                                        }
-                                      } else {
-                                        const wholeSec = Math.floor(pbS);
-                                        if (pbS > wholeSec && pbS - wholeSec <= 0.75) {
-                                          barrierTarget = wholeSec;
-                                        }
-                                      }
-                                      if (barrierTarget !== null) {
-                                        milestoneBullets.push(
-                                          `Chasing sub-${secondsToTime(barrierTarget)} (-${(
-                                            pbS - barrierTarget
-                                          ).toFixed(2)}s)`
-                                        );
-                                      }
-                                    }
-
-                                    // Recent Meet Momentum (wins at most recent meet in DB)
-                                    if (!isRelayEvent && isGettysburgEntry) {
-                                      const athAllRows = historicalRecords.filter(
-                                        (r) =>
-                                          normalizeSwimmerKey(
-                                            resolveMasterAthlete(r.swimmerName)?.canonicalName ||
-                                              r.swimmerName
-                                          ) === swKey && r.date
-                                      );
-                                      if (athAllRows.length > 0) {
-                                        const latestDate = athAllRows.reduce(
-                                          (maxD, r) => (r.date > maxD ? r.date : maxD),
-                                          ''
-                                        );
-                                        const winsLastMeet = athAllRows.filter(
-                                          (r) =>
-                                            r.date === latestDate &&
-                                            String(r.place || '').trim() === '1' &&
-                                            String(r.round || 'Finals').toLowerCase() !==
-                                              'prelims' &&
-                                            String(r.round || 'Finals').toLowerCase() !==
-                                              'time trial'
-                                        ).length;
-                                        if (winsLastMeet >= 2) {
-                                          milestoneBullets.push(
-                                            `Won ${winsLastMeet} events last meet (${formatDisplayDateMDY(
-                                              latestDate
-                                            )})`
-                                          );
-                                        } else if (
-                                          lastSwim &&
-                                          String(lastSwim.place || '').trim() === '1'
-                                        ) {
-                                          milestoneBullets.push('Won this event last time out');
-                                        }
-                                      }
-                                    }
-
                                     const hitStandards = evaluateStandardsForSwim(
                                       entry.eventLabel,
                                       entry.finalsTime
@@ -6666,35 +6913,15 @@ const rRowId = `cl2-lo-${entry.id}`;
                                     const displayStandards = Array.from(
                                       combinedStandardsMap.values()
                                     );
-                                    const achievedStdIds = new Set(
-                                      displayStandards.map((s) => s.id)
-                                    );
-
-                                    // Cut Proximity for standards not yet hit
-                                    if (refSec !== null) {
-                                      matchingStandards.forEach((std) => {
-                                        if (achievedStdIds.has(std.id)) return;
-                                        const stdSec = timeToSeconds(std.time);
-                                        if (
-                                          stdSec !== null &&
-                                          refSec > stdSec &&
-                                          refSec - stdSec <= Math.max(1.5, stdSec * 0.025)
-                                        ) {
-                                          milestoneBullets.push(
-                                            `${(refSec - stdSec).toFixed(2)}s from ${std.label} (${std.time})`
-                                          );
-                                        }
-                                      });
-                                    }
 
                                     return (
                                       <tr
                                         key={laneNum}
-                                        className="hover:bg-slate-50/80 transition align-top"
+                                        className="hover:bg-slate-50/80 transition"
                                       >
                                         <td
                                           style={{ backgroundColor: teamHex }}
-                                          className="py-3 px-3 text-center font-mono text-xl sm:text-2xl font-black text-white select-none align-middle"
+                                          className="py-3 px-3 text-center font-mono text-xl sm:text-2xl font-black text-white select-none"
                                         >
                                           {laneNum}
                                         </td>
@@ -6717,7 +6944,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                                                 .join(' • ')}
                                             </div>
                                           )}
-                                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
+                                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
                                             <span
                                               className="w-2 h-2 rounded-full inline-block"
                                               style={{ backgroundColor: teamHex }}
@@ -6725,18 +6952,12 @@ const rRowId = `cl2-lo-${entry.id}`;
                                             <span>{entry.teamName}</span>
                                             {entry.finalsTime && entry.finalsTime !== 'NT' && (
                                               <span className="font-mono font-bold text-slate-800 ml-1">
-                                                • Final: {entry.finalsTime}
+                                                • {entry.finalsTime}
                                               </span>
                                             )}
                                           </div>
                                         </td>
-                                        <td className="py-3 px-3 font-mono text-[11px] space-y-0.5">
-                                          <div>
-                                            Seed:{' '}
-                                            <strong className="text-indigo-900">
-                                              {entry.seedTime || 'NT'}
-                                            </strong>
-                                          </div>
+                                        <td className="py-3 px-3 font-mono text-[11px]">
                                           <div>
                                             PB:{' '}
                                             <strong className="text-slate-900">
@@ -6753,36 +6974,19 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         <td className="py-3 px-3 text-[11px]">
                                           {lastSwim ? (
                                             <div>
-                                              <div>
-                                                <span className="font-mono font-bold text-slate-800">
-                                                  {lastSwim.time}
-                                                </span>
-                                                <span className="text-slate-500 ml-1">
-                                                  ({formatDisplayDateMDY(lastSwim.date)})
-                                                </span>
-                                              </div>
-                                              {lastSwim.competition && (
-                                                <div className="text-[10px] text-slate-400 truncate max-w-[160px]">
-                                                  {lastSwim.competition}
-                                                </div>
-                                              )}
+                                              <span className="font-mono font-bold text-slate-800">
+                                                {lastSwim.time}
+                                              </span>
+                                              <span className="text-slate-500 ml-1.5">
+                                                ({formatDisplayDateMDY(lastSwim.date)})
+                                              </span>
                                             </div>
                                           ) : (
                                             <span className="text-slate-400">—</span>
                                           )}
                                         </td>
-                                        <td className="py-3 px-3 text-[11px]">
-                                          {trajectoryNotes.length > 0 ? (
-                                            <div className="space-y-0.5">
-                                              {trajectoryNotes.slice(0, 2).map((note, idx) => (
-                                                <div key={idx} className={note.tone}>
-                                                  {note.text}
-                                                </div>
-                                              ))}
-                                            </div>
-                                          ) : (
-                                            <span className="text-slate-400">—</span>
-                                          )}
+                                        <td className={`py-3 px-3 text-[11px] font-mono ${trendTone}`}>
+                                          {trendText}
                                         </td>
                                         <td className="py-3 px-3">
                                           <div className="flex flex-wrap gap-1">
@@ -6801,21 +7005,10 @@ const rRowId = `cl2-lo-${entry.id}`;
                                                 {std.label}
                                               </span>
                                             ))}
-                                          </div>
-                                          {milestoneBullets.length > 0 && (
-                                            <ul className="mt-1 space-y-0.5 text-[11px] text-slate-700">
-                                              {milestoneBullets.slice(0, 3).map((b, bIdx) => (
-                                                <li key={bIdx} className="leading-snug">
-                                                  • {b}
-                                                </li>
-                                              ))}
-                                            </ul>
-                                          )}
-                                          {!rankNum &&
-                                            displayStandards.length === 0 &&
-                                            milestoneBullets.length === 0 && (
+                                            {!rankNum && displayStandards.length === 0 && (
                                               <span className="text-slate-400 text-[11px]">—</span>
                                             )}
+                                          </div>
                                         </td>
                                       </tr>
                                     );
@@ -6830,7 +7023,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                   )}
                 </div>
               )}
-              
+
               {/* SUB-TAB 2: ACTIVE ROSTER OVERVIEW */}
               {inMeetSubTab === 'roster' && (
                 <div className="p-5 sm:p-6 space-y-5">
