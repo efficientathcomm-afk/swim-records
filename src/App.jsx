@@ -1582,7 +1582,7 @@ export default function App() {
         } catch {}
       }
     });
-
+    
     // Live Meet Session Listener (syncs active .cl2 meet, team colors, and standards across browsers)
     const unsubLiveMeet = onSnapshot(doc(db, 'live_meet', 'current'), (docSnap) => {
       if (!docSnap.exists()) return;
