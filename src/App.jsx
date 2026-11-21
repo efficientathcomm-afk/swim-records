@@ -1380,12 +1380,16 @@ export default function App() {
   const [newStdEventKey, setNewStdEventKey] = useState('women 50 freestyle');
   const [newStdTime, setNewStdTime] = useState('');
   const [newStdType, setNewStdType] = useState('STANDARD'); // 'STANDARD' | 'POOL_RECORD'
+  const [newStdHolder, setNewStdHolder] = useState('');
+  const [newStdDate, setNewStdDate] = useState('');
   const [editingStdId, setEditingStdId] = useState(null);
   const [editStdDraft, setEditStdDraft] = useState({
     type: 'STANDARD',
     label: '',
     eventKey: 'women 50 freestyle',
     time: '',
+    holder: '',
+    date: '',
   });
 
   // Section 2 (Records & Top-10), Section 3 (In-Meet Tools), & Profile Modal State
@@ -3206,6 +3210,8 @@ const rRowId = `cl2-lo-${entry.id}`;
             eventLabel: toTitleEventLabel(editStdDraft.eventKey),
             time: String(editStdDraft.time).trim(),
             seconds: secVal,
+            holder: String(editStdDraft.holder || '').trim(),
+            date: normalizeDateIso(editStdDraft.date || ''),
           }
         : item
     );
@@ -3367,9 +3373,10 @@ const rRowId = `cl2-lo-${entry.id}`;
     eventStandards.forEach((std) => {
       const markKey = `STD_${std.id}`;
       if (activeMarkSet.has(markKey)) {
+        const holderPart = std.holder ? `  (${std.holder})` : '';
         headerMarkItems.push({
           label: String(std.label || 'STANDARD').toUpperCase(),
-          value: std.time,
+          value: `${std.time}${holderPart}`,
           accent: '#38bdf8',
         });
       }
@@ -7455,7 +7462,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                                   : []),
                                 ...matchingStandards.map((std) => ({
                                   key: `STD_${std.id}`,
-                                  label: `${std.label} (${std.time})`,
+                                  label: `${std.label} (${std.time}${
+                                    std.holder ? ` — ${std.holder}` : ''
+                                  })`,
                                   disabled: false,
                                 })),
                               ].map((chk) => {
@@ -9866,55 +9875,81 @@ const rRowId = `cl2-lo-${entry.id}`;
               {/* SUB-TAB 3: QUALIFYING STANDARDS & POOL RECORDS */}
               {inMeetSubTab === 'standards' && (
                 <div className="p-5 sm:p-6 space-y-5">
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                        Category
-                      </label>
-                      <select
-                        value={newStdType}
-                        onChange={(e) => setNewStdType(e.target.value)}
-                        className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
-                      >
-                        <option value="STANDARD">Qualifying Cut</option>
-                        <option value="POOL_RECORD">Pool Record</option>
-                      </select>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                          Category
+                        </label>
+                        <select
+                          value={newStdType}
+                          onChange={(e) => setNewStdType(e.target.value)}
+                          className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                        >
+                          <option value="STANDARD">Qualifying Cut</option>
+                          <option value="POOL_RECORD">Pool Record</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                          Badge Label
+                        </label>
+                        <input
+                          type="text"
+                          value={newStdLabel}
+                          onChange={(e) => setNewStdLabel(e.target.value)}
+                          placeholder="e.g., Pool Record"
+                          className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                        />
+                      </div>
+                      <div className="lg:col-span-2">
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                          Event
+                        </label>
+                        <select
+                          value={newStdEventKey}
+                          onChange={(e) => setNewStdEventKey(e.target.value)}
+                          className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                        >
+                          {CANONICAL_EVENTS.map((ev) => (
+                            <option key={ev} value={ev.toLowerCase()}>
+                              {ev}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                          Record Holder
+                        </label>
+                        <input
+                          type="text"
+                          value={newStdHolder}
+                          onChange={(e) => setNewStdHolder(e.target.value)}
+                          placeholder="Optional (e.g., Jane Doe)"
+                          className="w-full px-2.5 py-2 text-xs bg-white border border-slate-200 rounded-lg"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                          Date
+                        </label>
+                        <input
+                          type="date"
+                          value={newStdDate}
+                          onChange={(e) => setNewStdDate(e.target.value)}
+                          className="w-full px-2.5 py-2 text-xs font-mono bg-white border border-slate-200 rounded-lg"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                        Badge Label
-                      </label>
-                      <input
-                        type="text"
-                        value={newStdLabel}
-                        onChange={(e) => setNewStdLabel(e.target.value)}
-                        placeholder="e.g., NCAA B"
-                        className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
-                      />
-                    </div>
-                    <div className="lg:col-span-2">
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                        Event
-                      </label>
-                      <select
-                        value={newStdEventKey}
-                        onChange={(e) => setNewStdEventKey(e.target.value)}
-                        className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
-                      >
-                        {CANONICAL_EVENTS.map((ev) => (
-                          <option key={ev} value={ev.toLowerCase()}>
-                            {ev}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex gap-2">
+
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       <input
                         type="text"
                         value={newStdTime}
                         onChange={(e) => setNewStdTime(e.target.value)}
                         placeholder="Time (e.g., 23.15)"
-                        className="flex-1 min-w-0 px-2.5 py-2 text-xs font-mono font-bold bg-white border border-slate-200 rounded-lg"
+                        className="w-40 px-2.5 py-2 text-xs font-mono font-bold bg-white border border-slate-200 rounded-lg"
                       />
                       <button
                         type="button"
@@ -9930,13 +9965,17 @@ const rRowId = `cl2-lo-${entry.id}`;
                             eventLabel: toTitleEventLabel(newStdEventKey),
                             time: newStdTime.trim(),
                             seconds: secVal,
+                            holder: newStdHolder.trim(),
+                            date: normalizeDateIso(newStdDate),
                           };
                           updateQualStandardsList([...qualStandards, created]);
                           setNewStdTime('');
+                          setNewStdHolder('');
+                          setNewStdDate('');
                         }}
-                        className="px-3.5 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shrink-0"
+                        className="px-4 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shrink-0"
                       >
-                        Add
+                        Add Standard / Record
                       </button>
                     </div>
                   </div>
@@ -9954,7 +9993,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                             <th className="py-2.5 px-4">Type</th>
                             <th className="py-2.5 px-4">Badge</th>
                             <th className="py-2.5 px-4">Event</th>
-                            <th className="py-2.5 px-4">Standard Time</th>
+                            <th className="py-2.5 px-4">Time</th>
+                            <th className="py-2.5 px-4">Record Holder</th>
+                            <th className="py-2.5 px-4">Date</th>
                             <th className="py-2.5 px-4 text-center w-32">Actions</th>
                           </tr>
                         </thead>
@@ -9989,7 +10030,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                                           label: e.target.value,
                                         }))
                                       }
-                                      className="w-32 px-2.5 py-1.5 text-xs font-bold bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                      className="w-28 px-2.5 py-1.5 text-xs font-bold bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     />
                                   </td>
                                   <td className="py-2.5 px-4">
@@ -10001,7 +10042,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                                           eventKey: e.target.value,
                                         }))
                                       }
-                                      className="w-full min-w-[180px] px-2.5 py-1.5 text-xs font-bold bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                      className="w-full min-w-[170px] px-2.5 py-1.5 text-xs font-bold bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     >
                                       {CANONICAL_EVENTS.map((ev) => (
                                         <option key={ev} value={ev.toLowerCase()}>
@@ -10021,6 +10062,33 @@ const rRowId = `cl2-lo-${entry.id}`;
                                         }))
                                       }
                                       className="w-24 px-2.5 py-1.5 text-xs font-mono font-bold bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                  </td>
+                                  <td className="py-2.5 px-4">
+                                    <input
+                                      type="text"
+                                      value={editStdDraft.holder}
+                                      onChange={(e) =>
+                                        setEditStdDraft((prev) => ({
+                                          ...prev,
+                                          holder: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="Holder name..."
+                                      className="w-36 px-2.5 py-1.5 text-xs bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                  </td>
+                                  <td className="py-2.5 px-4">
+                                    <input
+                                      type="date"
+                                      value={editStdDraft.date}
+                                      onChange={(e) =>
+                                        setEditStdDraft((prev) => ({
+                                          ...prev,
+                                          date: e.target.value,
+                                        }))
+                                      }
+                                      className="px-2 py-1.5 text-xs font-mono bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     />
                                   </td>
                                   <td className="py-2.5 px-4 text-center">
@@ -10065,6 +10133,12 @@ const rRowId = `cl2-lo-${entry.id}`;
                                 <td className="py-2.5 px-4 font-mono font-bold text-indigo-800">
                                   {std.time}
                                 </td>
+                                <td className="py-2.5 px-4 text-slate-700 font-medium">
+                                  {std.holder || <span className="text-slate-400">—</span>}
+                                </td>
+                                <td className="py-2.5 px-4 font-mono text-slate-500">
+                                  {std.date ? formatDisplayDateMDY(std.date) : '—'}
+                                </td>
                                 <td className="py-2.5 px-4 text-center">
                                   <div className="inline-flex items-center gap-1.5">
                                     <button
@@ -10076,6 +10150,8 @@ const rRowId = `cl2-lo-${entry.id}`;
                                           label: std.label || '',
                                           eventKey: std.eventKey || 'women 50 freestyle',
                                           time: std.time || '',
+                                          holder: std.holder || '',
+                                          date: normalizeDateIso(std.date || ''),
                                         });
                                       }}
                                       className="px-2 py-1 rounded text-[11px] font-bold text-indigo-700 hover:bg-indigo-50 border border-indigo-200 cursor-pointer"
