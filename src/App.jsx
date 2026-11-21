@@ -1323,6 +1323,14 @@ export default function App() {
   const [rosterSearchQuery, setRosterSearchQuery] = useState('');
   const [rosterFilterGender, setRosterFilterGender] = useState('ALL');
   const [rosterFilterActive, setRosterFilterActive] = useState('ALL');
+  const [editingRosterId, setEditingRosterId] = useState(null);
+  const [editRosterDraft, setEditRosterDraft] = useState({
+    canonicalName: '',
+    gender: 'Women',
+    isActive: true,
+    aliasesText: '',
+    propagateToDb: true,
+  });
   const [bulkRosterText, setBulkRosterText] = useState('');
   const [newCompName, setNewCompName] = useState('');
   const [newCompDate, setNewCompDate] = useState('');
@@ -1342,44 +1350,14 @@ export default function App() {
   const [dbPageSize, setDbPageSize] = useState(100);
   const [selectedDbIds, setSelectedDbIds] = useState(new Set());
   const [pendingDbDeleteIds, setPendingDbDeleteIds] = useState(null);
-
-  // Record Book & All-Time Wins State
-  const [recordBookSubTab, setRecordBookSubTab] = useState('top10');
-  const [recordBookGender, setRecordBookGender] = useState('Women');
-  const [recordBookEventKey, setRecordBookEventKey] = useState('women 50 freestyle');
-  const [eventWinsActiveOnly, setEventWinsActiveOnly] = useState(false);
-  const [winsActiveOnly, setWinsActiveOnly] = useState(false);
-  const [winsCompetitionFilter, setWinsCompetitionFilter] = useState('ALL');
-  const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
-
-  // Section 3: In-Meet Deck & Broadcast Console State
-  const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'relayopt' | 'standards'
-  const [inMeetSearch, setInMeetSearch] = useState('');
-  const [inMeetGender, setInMeetGender] = useState('ALL');
-  const [inMeetTargetEventKey, setInMeetTargetEventKey] = useState('women 50 freestyle');
-  const [selectedHeatEventLabel, setSelectedHeatEventLabel] = useState('');
-  const [selectedHeatNum, setSelectedHeatNum] = useState('ALL');
-  const [broadcastGraphicTheme, setBroadcastGraphicTheme] = useState('slate'); // 'slate' | 'transparent'
-  const [isExportingAllGraphics, setIsExportingAllGraphics] = useState(false);
-
-  // Relay Lineup Optimizer & Split Forecaster State
-  const [relayOptEventKey, setRelayOptEventKey] = useState('women 200 medley relay');
-  const [relayOptBasis, setRelayOptBasis] = useState('PB'); // 'PB' | 'SB'
-  const [relayOptExchangeDelta, setRelayOptExchangeDelta] = useState(-0.45);
-  const [relayOptExcludedKeys, setRelayOptExcludedKeys] = useState(new Set());
-  const [relayOptManualA, setRelayOptManualA] = useState(['', '', '', '']);
-  const [relayOptManualB, setRelayOptManualB] = useState(['', '', '', '']);
-
-  // Swimmer Career Profile Modal State
-  const [profileSwimmerName, setProfileSwimmerName] = useState(null);
-  const [profileChartEventKey, setProfileChartEventKey] = useState('');
-
-  const [teamColors, setTeamColors] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('swimmeet_team_colors_v1') || '{}');
-    } catch {
-      return {};
-    }
+  const [editingDbRowId, setEditingDbRowId] = useState(null);
+  const [editDbDraft, setEditDbDraft] = useState({
+    swimmerName: '',
+    classYear: '',
+    eventLabel: '',
+    time: '',
+    competition: '',
+    date: '',
   });
   const [qualStandards, setQualStandards] = useState(() => {
     try {
@@ -1393,6 +1371,38 @@ export default function App() {
   const [newStdEventKey, setNewStdEventKey] = useState('women 50 freestyle');
   const [newStdTime, setNewStdTime] = useState('');
   const [newStdType, setNewStdType] = useState('STANDARD'); // 'STANDARD' | 'POOL_RECORD'
+
+  // Section 2 (Records & Top-10), Section 3 (In-Meet Tools), & Profile Modal State
+  const [recordBookSubTab, setRecordBookSubTab] = useState('top10'); // 'top10' | 'wins'
+  const [recordBookGender, setRecordBookGender] = useState('Women');
+  const [recordBookEventKey, setRecordBookEventKey] = useState('women 50 freestyle');
+  const [eventWinsActiveOnly, setEventWinsActiveOnly] = useState(false);
+  const [winsCompetitionFilter, setWinsCompetitionFilter] = useState('ALL');
+  const [winsActiveOnly, setWinsActiveOnly] = useState(false);
+  const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
+
+  const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'relayopt' | 'standards'
+  const [teamColors, setTeamColors] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('swimmeet_team_colors_v1') || '{}');
+    } catch {
+      return {};
+    }
+  });
+  const [selectedHeatEventLabel, setSelectedHeatEventLabel] = useState('');
+  const [selectedHeatNum, setSelectedHeatNum] = useState('ALL');
+  const [broadcastGraphicTheme, setBroadcastGraphicTheme] = useState('slate');
+  const [isExportingAllGraphics, setIsExportingAllGraphics] = useState(false);
+
+  const [relayOptEventKey, setRelayOptEventKey] = useState('women 200 medley relay');
+  const [relayOptBasis, setRelayOptBasis] = useState('PB'); // 'PB' | 'SB'
+  const [relayOptExchangeDelta, setRelayOptExchangeDelta] = useState(-0.45);
+  const [relayOptManualA, setRelayOptManualA] = useState(['', '', '', '']);
+  const [relayOptManualB, setRelayOptManualB] = useState(['', '', '', '']);
+  const [relayOptExcludedKeys, setRelayOptExcludedKeys] = useState(new Set());
+
+  const [profileSwimmerName, setProfileSwimmerName] = useState(null);
+  const [profileChartEventKey, setProfileChartEventKey] = useState('');
 
   // File Input Refs
   const fileInputRef = useRef(null);
@@ -1541,6 +1551,109 @@ export default function App() {
     setBenchmarkStatusMsg(
       `Deleted ${idsToDelete.length} record${idsToDelete.length === 1 ? '' : 's'} from database.`
     );
+  };
+
+  // Save inline edits to a Master Roster athlete (and optionally propagate name changes to Committed DB)
+  const handleSaveMasterRosterEdit = (ath) => {
+    const cleanName = String(editRosterDraft.canonicalName || '').trim();
+    if (!cleanName) return;
+
+    const parsedAliases = Array.from(
+      new Set(
+        String(editRosterDraft.aliasesText || '')
+          .split(/[;,]/)
+          .map((a) => a.trim())
+          .filter((a) => a && normalizeSwimmerKey(a) !== normalizeSwimmerKey(cleanName))
+      )
+    );
+
+    const updatedAth = {
+      ...ath,
+      canonicalName: cleanName,
+      gender: editRosterDraft.gender,
+      isActive: Boolean(editRosterDraft.isActive),
+      aliases: parsedAliases,
+    };
+
+    const nextRoster = masterRoster.map((item) => (item.id === ath.id ? updatedAth : item));
+    updateMasterRoster(nextRoster, [updatedAth]);
+
+    let updatedDbCount = 0;
+    if (editRosterDraft.propagateToDb) {
+      const matchKeys = new Set(
+        [ath.canonicalName, cleanName, ...(ath.aliases || []), ...parsedAliases]
+          .map((n) => normalizeSwimmerKey(n))
+          .filter(Boolean)
+      );
+      const changedDbRows = [];
+      const nextHist = historicalRecords.map((r) => {
+        if (matchKeys.has(r.swimmerKey) && r.swimmerName !== cleanName) {
+          const updatedRow = {
+            ...r,
+            swimmerName: cleanName,
+            swimmerKey: normalizeSwimmerKey(cleanName),
+          };
+          changedDbRows.push(updatedRow);
+          return updatedRow;
+        }
+        return r;
+      });
+
+      if (changedDbRows.length > 0) {
+        updatedDbCount = changedDbRows.length;
+        updateHistoricalRecords(nextHist, changedDbRows, false);
+      }
+    }
+
+    setEditingRosterId(null);
+    setBenchmarkStatusMsg(
+      `Updated Master Roster entry for "${cleanName}"${
+        updatedDbCount > 0 ? ` and updated ${updatedDbCount} matching DB record(s).` : '.'
+      }`
+    );
+  };
+
+  // Save inline edits to a single Committed DB record
+  const handleSaveDbRecordEdit = (rec) => {
+    const cleanName = String(editDbDraft.swimmerName || '').trim();
+    const cleanEvent = String(editDbDraft.eventLabel || '').trim();
+    const cleanTime = String(editDbDraft.time || '').trim();
+    const parsedSec = timeToSeconds(cleanTime);
+    if (!cleanName || !cleanEvent || parsedSec === null || parsedSec <= 0) {
+      setBenchmarkStatusMsg(
+        'Please enter a valid Athlete Name, Event, and Time (e.g., 58.90 or 1:54.32).'
+      );
+      return;
+    }
+
+    const genderHint =
+      swimmerGenderLookup[normalizeSwimmerKey(cleanName)] ||
+      (cleanEvent.toLowerCase().startsWith('men') ? 'Men' : 'Women');
+    const resolvedEv = resolveMasterEvent(cleanEvent, genderHint);
+    const nextEvKey = resolvedEv
+      ? resolvedEv.eventKey
+      : normalizeEventKey(cleanEvent, genderHint) || rec.eventKey;
+    const nextEvLabel = resolvedEv ? resolvedEv.canonicalName : cleanEvent;
+    const nextDate = normalizeDateIso(editDbDraft.date);
+
+    const updatedRec = {
+      ...rec,
+      swimmerName: cleanName,
+      swimmerKey: normalizeSwimmerKey(cleanName),
+      classYear: normalizeClass(editDbDraft.classYear),
+      eventKey: nextEvKey,
+      eventLabel: nextEvLabel,
+      time: cleanTime,
+      seconds: parsedSec,
+      competition: String(editDbDraft.competition || '').trim(),
+      date: nextDate,
+      dateObj: parseFlexibleDate(nextDate),
+    };
+
+    const nextHist = historicalRecords.map((item) => (item.id === rec.id ? updatedRec : item));
+    updateHistoricalRecords(nextHist, [updatedRec], false);
+    setEditingDbRowId(null);
+    setBenchmarkStatusMsg(`Saved changes to ${cleanName} — ${nextEvLabel} (${cleanTime}).`);
   };
 
   // Master List Lookups (must be defined before useMemo hooks that invoke them)
@@ -5267,70 +5380,190 @@ const rRowId = `cl2-lo-${entry.id}`;
                                     <th className="py-2.5 px-4">Gender</th>
                                     <th className="py-2.5 px-4 text-center">Status</th>
                                     <th className="py-2.5 px-4">Saved Aliases</th>
-                                    <th className="py-2.5 px-4 text-center">Remove</th>
+                                    <th className="py-2.5 px-4 text-center">Actions</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                  {filteredRoster.map((ath) => (
-                                    <tr key={ath.id} className="hover:bg-slate-50">
-                                      <td className="py-2.5 px-4 font-bold text-slate-900">
-                                        {ath.canonicalName}
-                                      </td>
-                                      <td className="py-2.5 px-4 text-slate-600">{ath.gender}</td>
-                                      <td className="py-2.5 px-4 text-center">
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            const updatedItem = { ...ath, isActive: !ath.isActive };
-                                            updateMasterRoster(
-                                              masterRoster.map((item) =>
-                                                item.id === ath.id ? updatedItem : item
-                                              ),
-                                              [updatedItem]
-                                            );
-                                          }}
-                                          title="Click to toggle Active / Inactive status"
-                                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold transition cursor-pointer ${
-                                            ath.isActive
-                                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                                              : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                                          }`}
-                                        >
-                                          {ath.isActive ? 'Active' : 'Inactive'}
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-4 text-slate-500">
-                                        {(ath.aliases || []).length > 0 ? (
-                                          <div className="flex flex-wrap gap-1">
-                                            {ath.aliases.map((al) => (
-                                              <span
-                                                key={al}
-                                                className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
+                                  {filteredRoster.map((ath) => {
+                                    const isEditingAth = editingRosterId === ath.id;
+                                    if (isEditingAth) {
+                                      return (
+                                        <tr key={ath.id} className="bg-cyan-50/70">
+                                          <td className="py-2.5 px-4">
+                                            <input
+                                              type="text"
+                                              value={editRosterDraft.canonicalName}
+                                              onChange={(e) =>
+                                                setEditRosterDraft((prev) => ({
+                                                  ...prev,
+                                                  canonicalName: e.target.value,
+                                                }))
+                                              }
+                                              className="w-full px-2.5 py-1.5 text-xs font-bold bg-white border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                            />
+                                            <label className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan-900 cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={editRosterDraft.propagateToDb}
+                                                onChange={(e) =>
+                                                  setEditRosterDraft((prev) => ({
+                                                    ...prev,
+                                                    propagateToDb: e.target.checked,
+                                                  }))
+                                                }
+                                                className="rounded text-cyan-600"
+                                              />
+                                              Update matching DB rows
+                                            </label>
+                                          </td>
+                                          <td className="py-2.5 px-4 align-top">
+                                            <select
+                                              value={editRosterDraft.gender}
+                                              onChange={(e) =>
+                                                setEditRosterDraft((prev) => ({
+                                                  ...prev,
+                                                  gender: e.target.value,
+                                                }))
+                                              }
+                                              className="px-2 py-1.5 text-xs bg-white border border-cyan-300 rounded-lg"
+                                            >
+                                              <option value="Women">Women</option>
+                                              <option value="Men">Men</option>
+                                            </select>
+                                          </td>
+                                          <td className="py-2.5 px-4 text-center align-top">
+                                            <label className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 bg-white border border-cyan-300 px-2 py-1 rounded-lg cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={editRosterDraft.isActive}
+                                                onChange={(e) =>
+                                                  setEditRosterDraft((prev) => ({
+                                                    ...prev,
+                                                    isActive: e.target.checked,
+                                                  }))
+                                                }
+                                                className="rounded text-cyan-600"
+                                              />
+                                              Active
+                                            </label>
+                                          </td>
+                                          <td className="py-2.5 px-4 align-top">
+                                            <input
+                                              type="text"
+                                              value={editRosterDraft.aliasesText}
+                                              onChange={(e) =>
+                                                setEditRosterDraft((prev) => ({
+                                                  ...prev,
+                                                  aliasesText: e.target.value,
+                                                }))
+                                              }
+                                              placeholder="Semicolon or comma separated aliases..."
+                                              className="w-full px-2.5 py-1.5 text-xs bg-white border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                            />
+                                          </td>
+                                          <td className="py-2.5 px-4 text-center align-top">
+                                            <div className="inline-flex items-center gap-1">
+                                              <button
+                                                type="button"
+                                                onClick={() => handleSaveMasterRosterEdit(ath)}
+                                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
                                               >
-                                                {al}
-                                              </span>
-                                            ))}
+                                                Save
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditingRosterId(null)}
+                                                className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                                              >
+                                                Cancel
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      );
+                                    }
+
+                                    return (
+                                      <tr key={ath.id} className="hover:bg-slate-50">
+                                        <td className="py-2.5 px-4 font-bold text-slate-900">
+                                          {ath.canonicalName}
+                                        </td>
+                                        <td className="py-2.5 px-4 text-slate-600">{ath.gender}</td>
+                                        <td className="py-2.5 px-4 text-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updatedItem = { ...ath, isActive: !ath.isActive };
+                                              updateMasterRoster(
+                                                masterRoster.map((item) =>
+                                                  item.id === ath.id ? updatedItem : item
+                                                ),
+                                                [updatedItem]
+                                              );
+                                            }}
+                                            title="Click to toggle Active / Inactive status"
+                                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold transition cursor-pointer ${
+                                              ath.isActive
+                                                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                                : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                                            }`}
+                                          >
+                                            {ath.isActive ? 'Active' : 'Inactive'}
+                                          </button>
+                                        </td>
+                                        <td className="py-2.5 px-4 text-slate-500">
+                                          {(ath.aliases || []).length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                              {ath.aliases.map((al) => (
+                                                <span
+                                                  key={al}
+                                                  className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
+                                                >
+                                                  {al}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-400 italic">None</span>
+                                          )}
+                                        </td>
+                                        <td className="py-2.5 px-4 text-center">
+                                          <div className="inline-flex items-center gap-1.5">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setEditingRosterId(ath.id);
+                                                setEditRosterDraft({
+                                                  canonicalName: ath.canonicalName || '',
+                                                  gender: ath.gender || 'Women',
+                                                  isActive: Boolean(ath.isActive),
+                                                  aliasesText: (ath.aliases || []).join('; '),
+                                                  propagateToDb: true,
+                                                });
+                                              }}
+                                              className="px-2 py-1 rounded text-[11px] font-bold text-cyan-700 hover:bg-cyan-50 border border-cyan-200 cursor-pointer"
+                                            >
+                                              Edit
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateMasterRoster(
+                                                  masterRoster.filter((item) => item.id !== ath.id),
+                                                  null,
+                                                  ath.id
+                                                )
+                                              }
+                                              title="Remove athlete from Master Roster"
+                                              className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
                                           </div>
-                                        ) : (
-                                          <span className="text-slate-400 italic">None</span>
-                                        )}
-                                      </td>
-                                      <td className="py-2.5 px-4 text-center">
-                                        <button
-                                          onClick={() =>
-                                            updateMasterRoster(
-                                              masterRoster.filter((item) => item.id !== ath.id),
-                                              null,
-                                              ath.id
-                                            )
-                                          }
-                                          className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  ))}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </div>
@@ -5921,12 +6154,154 @@ const rRowId = `cl2-lo-${entry.id}`;
                                   <ArrowUpDown className="w-3 h-3 text-slate-400" />
                                 </div>
                               </th>
-                              <th className="py-2.5 px-3 text-center w-14">Delete</th>
+                              <th className="py-2.5 px-3 text-center w-24">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {paginatedDbRecords.map((r) => {
                               const isChecked = selectedDbIds.has(r.id);
+                              const isEditingRow = editingDbRowId === r.id;
+
+                              if (isEditingRow) {
+                                return (
+                                  <tr key={r.id} className="bg-cyan-50/75">
+                                    <td className="py-2 px-3">
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => {
+                                          const checked = e.target.checked;
+                                          setSelectedDbIds((prev) => {
+                                            const next = new Set(prev);
+                                            if (checked) next.add(r.id);
+                                            else next.delete(r.id);
+                                            return next;
+                                          });
+                                        }}
+                                        className="rounded text-cyan-600 cursor-pointer"
+                                      />
+                                    </td>
+                                    <td className="py-2 px-3">
+                                      <input
+                                        type="text"
+                                        list="master-roster-datalist"
+                                        value={editDbDraft.swimmerName}
+                                        onChange={(e) =>
+                                          setEditDbDraft((prev) => ({
+                                            ...prev,
+                                            swimmerName: e.target.value,
+                                          }))
+                                        }
+                                        className="w-full min-w-[140px] px-2 py-1 text-xs font-bold bg-white border border-cyan-300 rounded"
+                                      />
+                                    </td>
+                                    <td className="py-2 px-3">
+                                      <select
+                                        value={editDbDraft.classYear}
+                                        onChange={(e) =>
+                                          setEditDbDraft((prev) => ({
+                                            ...prev,
+                                            classYear: e.target.value,
+                                          }))
+                                        }
+                                        className="px-1.5 py-1 text-xs bg-white border border-cyan-300 rounded"
+                                      >
+                                        <option value="">—</option>
+                                        <option value="FR">FR</option>
+                                        <option value="SO">SO</option>
+                                        <option value="JR">JR</option>
+                                        <option value="SR">SR</option>
+                                        <option value="GR">GR</option>
+                                      </select>
+                                    </td>
+                                    <td className="py-2 px-3">
+                                      <select
+                                        value={editDbDraft.eventLabel}
+                                        onChange={(e) =>
+                                          setEditDbDraft((prev) => ({
+                                            ...prev,
+                                            eventLabel: e.target.value,
+                                          }))
+                                        }
+                                        className="w-full min-w-[165px] px-2 py-1 text-xs bg-white border border-cyan-300 rounded"
+                                      >
+                                        {!CANONICAL_EVENTS.includes(editDbDraft.eventLabel) &&
+                                          editDbDraft.eventLabel && (
+                                            <option value={editDbDraft.eventLabel}>
+                                              {editDbDraft.eventLabel}
+                                            </option>
+                                          )}
+                                        {CANONICAL_EVENTS.map((ev) => (
+                                          <option key={ev} value={ev}>
+                                            {ev}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </td>
+                                    <td className="py-2 px-3">
+                                      <input
+                                        type="text"
+                                        value={editDbDraft.time}
+                                        onChange={(e) =>
+                                          setEditDbDraft((prev) => ({
+                                            ...prev,
+                                            time: e.target.value,
+                                          }))
+                                        }
+                                        className="w-24 px-2 py-1 text-xs font-mono font-bold bg-white border border-cyan-300 rounded"
+                                      />
+                                    </td>
+                                    <td className="py-2 px-3">
+                                      <input
+                                        type="text"
+                                        value={editDbDraft.competition}
+                                        onChange={(e) =>
+                                          setEditDbDraft((prev) => ({
+                                            ...prev,
+                                            competition: e.target.value,
+                                          }))
+                                        }
+                                        className="w-full min-w-[140px] px-2 py-1 text-xs bg-white border border-cyan-300 rounded"
+                                      />
+                                    </td>
+                                    <td className="py-2 px-3">
+                                      <input
+                                        type="date"
+                                        value={editDbDraft.date}
+                                        onChange={(e) =>
+                                          setEditDbDraft((prev) => ({
+                                            ...prev,
+                                            date: e.target.value,
+                                          }))
+                                        }
+                                        className="px-2 py-1 text-xs font-mono bg-white border border-cyan-300 rounded"
+                                      />
+                                    </td>
+                                    <td className="py-2 px-3 text-slate-500 text-[11px]">
+                                      {r.swimType || 'OFFICIAL'}
+                                    </td>
+                                    <td className="py-2 px-3 text-center">
+                                      <div className="inline-flex items-center gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSaveDbRecordEdit(r)}
+                                          className="px-2 py-1 rounded text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                                        >
+                                          Save
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingDbRowId(null)}
+                                          className="px-1.5 py-1 rounded text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              }
+
                               return (
                                 <tr
                                   key={r.id}
@@ -6007,13 +6382,33 @@ const rRowId = `cl2-lo-${entry.id}`;
                                     )}
                                   </td>
                                   <td className="py-2 px-3 text-center">
-                                    <button
-                                      onClick={() => handleDeleteDbRecords([r.id])}
-                                      title="Delete this record"
-                                      className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
+                                    <div className="inline-flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingDbRowId(r.id);
+                                          setEditDbDraft({
+                                            swimmerName: r.swimmerName || '',
+                                            classYear: r.classYear || '',
+                                            eventLabel: r.eventLabel || '',
+                                            time: r.time || '',
+                                            competition: r.competition || '',
+                                            date: normalizeDateIso(r.date || ''),
+                                          });
+                                        }}
+                                        className="px-2 py-1 rounded text-[11px] font-bold text-cyan-700 hover:bg-cyan-50 border border-cyan-200 cursor-pointer"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteDbRecords([r.id])}
+                                        title="Delete this record"
+                                        className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -6021,6 +6416,15 @@ const rRowId = `cl2-lo-${entry.id}`;
                           </tbody>
                         </table>
                       </div>
+
+                      <datalist id="master-roster-datalist">
+                        {masterRoster
+                          .slice()
+                          .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
+                          .map((ath) => (
+                            <option key={ath.id} value={ath.canonicalName} />
+                          ))}
+                      </datalist>
 
                       {/* Pagination Bar */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 text-xs text-slate-600">
