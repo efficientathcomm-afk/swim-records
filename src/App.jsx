@@ -1533,12 +1533,30 @@ export default function App() {
       } catch {}
     });
 
+    const unsubStandards = onSnapshot(collection(db, 'qual_standards'), (snap) => {
+      if (!snap.empty) {
+        const rows = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+        setQualStandards(rows);
+        try {
+          localStorage.setItem('swimmeet_qual_standards_v1', JSON.stringify(rows));
+        } catch {}
+      } else {
+        try {
+          const cached = JSON.parse(localStorage.getItem('swimmeet_qual_standards_v1') || '[]');
+          if (Array.isArray(cached) && cached.length > 0) {
+            syncCollectionToCloud('qual_standards', cached, false);
+          }
+        } catch {}
+      }
+    });
+
     return () => {
       unsubPerf();
       unsubRoster();
       unsubComps();
       unsubEvents();
       unsubSavedMeets();
+      unsubStandards();
     };
   }, [cloudUser]);
 
@@ -3175,9 +3193,8 @@ const rRowId = `cl2-lo-${entry.id}`;
   };
 
   const handleSetTeamHexColor = (teamCode, hex) => {
-    const cleanHex = String(hex || '').trim();
     setTeamColors((prev) => {
-      const next = { ...prev, [teamCode]: cleanHex };
+      const next = { ...prev, [teamCode]: hex };
       try {
         localStorage.setItem('swimmeet_team_colors_v1', JSON.stringify(next));
       } catch {}
@@ -3185,11 +3202,20 @@ const rRowId = `cl2-lo-${entry.id}`;
     });
   };
 
-  const updateQualStandardsList = (nextList) => {
+  const updateQualStandardsList = (nextList, changedItem = null, deletedId = null) => {
     setQualStandards(nextList);
     try {
       localStorage.setItem('swimmeet_qual_standards_v1', JSON.stringify(nextList));
     } catch {}
+    if (cloudUser) {
+      if (deletedId) {
+        deleteDoc(doc(db, 'qual_standards', String(deletedId))).catch(() => {});
+      } else if (changedItem) {
+        syncCollectionToCloud('qual_standards', [changedItem], false);
+      } else {
+        syncCollectionToCloud('qual_standards', nextList, false);
+      }
+    }
   };
 
   const handleSaveQualStandardEdit = (stdId) => {
@@ -3200,22 +3226,23 @@ const rRowId = `cl2-lo-${entry.id}`;
       return;
     }
 
-    const updatedList = qualStandards.map((item) =>
-      item.id === stdId
-        ? {
-            ...item,
-            type: editStdDraft.type,
-            label: cleanLbl,
-            eventKey: editStdDraft.eventKey,
-            eventLabel: toTitleEventLabel(editStdDraft.eventKey),
-            time: String(editStdDraft.time).trim(),
-            seconds: secVal,
-            holder: String(editStdDraft.holder || '').trim(),
-            date: normalizeDateIso(editStdDraft.date || ''),
-          }
-        : item
-    );
-    updateQualStandardsList(updatedList);
+    let updatedItem = null;
+    const updatedList = qualStandards.map((item) => {
+      if (item.id !== stdId) return item;
+      updatedItem = {
+        ...item,
+        type: editStdDraft.type,
+        label: cleanLbl,
+        eventKey: editStdDraft.eventKey,
+        eventLabel: toTitleEventLabel(editStdDraft.eventKey),
+        time: String(editStdDraft.time).trim(),
+        seconds: secVal,
+        holder: String(editStdDraft.holder || '').trim(),
+        date: normalizeDateIso(editStdDraft.date || ''),
+      };
+      return updatedItem;
+    });
+    updateQualStandardsList(updatedList, updatedItem);
     setEditingStdId(null);
     setBenchmarkStatusMsg(`Updated "${cleanLbl}" (${toTitleEventLabel(editStdDraft.eventKey)}: ${String(editStdDraft.time).trim()}).`);
   };
@@ -9968,7 +9995,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                             holder: newStdHolder.trim(),
                             date: normalizeDateIso(newStdDate),
                           };
-                          updateQualStandardsList([...qualStandards, created]);
+                          updateQualStandardsList([...qualStandards, created], created);
                           setNewStdTime('');
                           setNewStdHolder('');
                           setNewStdDate('');
@@ -10163,7 +10190,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       onClick={() => {
                                         if (editingStdId === std.id) setEditingStdId(null);
                                         updateQualStandardsList(
-                                          qualStandards.filter((item) => item.id !== std.id)
+                                          qualStandards.filter((item) => item.id !== std.id),
+                                          null,
+                                          std.id
                                         );
                                       }}
                                       title="Delete standard or record"
