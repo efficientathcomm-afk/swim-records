@@ -43,6 +43,7 @@ import {
   getFirestore,
   collection,
   doc,
+  setDoc,
   onSnapshot,
   writeBatch,
   deleteDoc,
@@ -1434,6 +1435,16 @@ export default function App() {
   const fileInputRef = useRef(null);
   const historyCsvInputRef = useRef(null);
 
+  // Saved Meet Repository ("Load Past Meet") State
+  const [savedMeets, setSavedMeets] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('swimmeet_saved_meets_v1') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [selectedSavedMeetId, setSelectedSavedMeetId] = useState('');
+
   // Firebase Cloud Sync State
   const [cloudUser, setCloudUser] = useState(null);
   const [cloudSyncStatus, setCloudSyncStatus] = useState('connecting');
@@ -1508,11 +1519,22 @@ export default function App() {
       }
     });
 
+    const unsubSavedMeets = onSnapshot(collection(db, 'saved_meets'), (snap) => {
+      const rows = snap.docs
+        .map((d) => ({ ...d.data(), id: d.id }))
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+      setSavedMeets(rows);
+      try {
+        localStorage.setItem('swimmeet_saved_meets_v1', JSON.stringify(rows));
+      } catch {}
+    });
+
     return () => {
       unsubPerf();
       unsubRoster();
       unsubComps();
       unsubEvents();
+      unsubSavedMeets();
     };
   }, [cloudUser]);
 
@@ -2959,12 +2981,87 @@ const rRowId = `cl2-lo-${entry.id}`;
     URL.revokeObjectURL(url);
   };
 
+  // Persist a parsed .cl2 / .sd3 meet into the Saved Meet Repository ("Load Past Meet")
+  const saveMeetToRepository = async (rawText, parsedObj) => {
+    if (!rawText || !parsedObj) return;
+    const meetName = (parsedObj.meetInfo?.name || 'Swim Meet').trim();
+    const meetDate = parsedObj.meetInfo?.isoDate || parsedObj.meetInfo?.startDate || '';
+    const slugBase = `${meetName}_${meetDate}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+    const meetId = slugBase || `meet_${Date.now()}`;
+
+    const entry = {
+      id: meetId,
+      name: meetName,
+      startDate: parsedObj.meetInfo?.startDate || '',
+      isoDate: meetDate,
+      city: parsedObj.meetInfo?.city || '',
+      state: parsedObj.meetInfo?.state || '',
+      teamsLabel: (parsedObj.teams || []).map((t) => t.name).join(' vs. '),
+      swimCount: parsedObj.stats?.totalSwims || 0,
+      updatedAt: new Date().toISOString(),
+      rawCl2: rawText,
+    };
+
+    setSelectedSavedMeetId(meetId);
+    setSavedMeets((prev) => {
+      const filtered = prev.filter((m) => m.id !== meetId);
+      const next = [entry, ...filtered];
+      try {
+        localStorage.setItem('swimmeet_saved_meets_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    if (cloudUser) {
+      try {
+        await setDoc(doc(db, 'saved_meets', meetId), entry);
+      } catch {}
+    }
+  };
+
+  const handleLoadSavedMeet = (meetId) => {
+    setSelectedSavedMeetId(meetId);
+    if (!meetId) return;
+    const found = savedMeets.find((m) => m.id === meetId);
+    if (!found || !found.rawCl2) {
+      setMeetErrorMsg('Saved meet file content could not be found.');
+      return;
+    }
+    handleProcessMeetText(found.rawCl2, { autoSave: false, preserveId: meetId });
+    setBenchmarkStatusMsg(
+      `Loaded saved meet "${found.name}"${found.startDate ? ` (${found.startDate})` : ''}.`
+    );
+  };
+
+  const handleDeleteSavedMeet = async (meetId) => {
+    if (!meetId) return;
+    setSavedMeets((prev) => {
+      const next = prev.filter((m) => m.id !== meetId);
+      try {
+        localStorage.setItem('swimmeet_saved_meets_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    if (selectedSavedMeetId === meetId) setSelectedSavedMeetId('');
+    if (cloudUser) {
+      try {
+        await deleteDoc(doc(db, 'saved_meets', meetId));
+      } catch {}
+    }
+    setBenchmarkStatusMsg('Removed meet from Saved Meet Repository.');
+  };
+
   // Process uploaded or sample CL2/SD3 text
-  const handleProcessMeetText = (rawText) => {
+  const handleProcessMeetText = (rawText, options = {}) => {
+    const { autoSave = true, preserveId = null } = options;
     try {
       setMeetErrorMsg('');
       const parsed = parseSDIFContent(rawText);
       setParsedData(parsed);
+      if (preserveId) setSelectedSavedMeetId(preserveId);
       setSelectedEventFilter('ALL');
       setGenderFilter('ALL');
       setSearchQuery('');
@@ -3023,6 +3120,10 @@ const rRowId = `cl2-lo-${entry.id}`;
         try {
           localStorage.setItem('swimmeet_primary_team_v1', chosen);
         } catch {}
+      }
+
+      if (autoSave) {
+        saveMeetToRepository(rawText, parsed);
       }
     } catch (err) {
       setMeetErrorMsg(err.message || 'Failed to parse SDIF/CL2 file.');
@@ -10068,12 +10169,72 @@ const rRowId = `cl2-lo-${entry.id}`;
                   Select .CL2 / .SD3 File
                 </button>
                 <button
-                  onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA)}
+                  onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA, { autoSave: false })}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs shadow-sm transition cursor-pointer"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
                   Load Sample Meet
                 </button>
+              </div>
+            </div>
+
+            {/* Saved Meet Repository ("Load Past Meet") */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                  <Database className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-extrabold text-slate-900">
+                    Saved Meet Repository ({savedMeets.length})
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Uploaded <code className="font-mono">.cl2</code> /{' '}
+                    <code className="font-mono">.sd3</code> files auto-save here and sync across
+                    browsers so you can load or refresh any meet anytime.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <select
+                  value={selectedSavedMeetId}
+                  onChange={(e) => handleLoadSavedMeet(e.target.value)}
+                  disabled={savedMeets.length === 0}
+                  className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[230px] max-w-xs"
+                >
+                  <option value="">
+                    {savedMeets.length === 0
+                      ? 'No saved meets yet'
+                      : '-- Load Past / Saved Meet --'}
+                  </option>
+                  {savedMeets.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} {m.startDate ? `(${m.startDate})` : ''} — {m.swimCount} swims
+                    </option>
+                  ))}
+                </select>
+
+                {selectedSavedMeetId && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleLoadSavedMeet(selectedSavedMeetId)}
+                      title="Reload latest version of this saved meet"
+                      className="px-3 py-2 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition cursor-pointer"
+                    >
+                      Reload
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSavedMeet(selectedSavedMeetId)}
+                      title="Delete this saved meet from repository"
+                      className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 border border-slate-200 transition cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
