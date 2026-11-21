@@ -1410,6 +1410,7 @@ export default function App() {
   const [selectedHeatEventLabel, setSelectedHeatEventLabel] = useState('');
   const [selectedHeatNum, setSelectedHeatNum] = useState('ALL');
   const [broadcastGraphicTheme, setBroadcastGraphicTheme] = useState('slate');
+  const [selectedPngHeaderMarks, setSelectedPngHeaderMarks] = useState(new Set(['PROGRAM_RECORD']));
   const [isExportingAllGraphics, setIsExportingAllGraphics] = useState(false);
 
   const [relayOptEventKey, setRelayOptEventKey] = useState('women 200 medley relay');
@@ -3145,7 +3146,13 @@ const rRowId = `cl2-lo-${entry.id}`;
   };
 
   // Render a 1920x1080 Broadcast Heat Graphic PNG for any Event + Heat
-  const renderBroadcastHeatGraphicPng = (eventObj, heatLabel, laneEntriesMap, themeMode = 'slate') => {
+  const renderBroadcastHeatGraphicPng = (
+    eventObj,
+    heatLabel,
+    laneEntriesMap,
+    themeMode = 'slate',
+    headerMarkKeys = null
+  ) => {
     const canvas = document.createElement('canvas');
     canvas.width = 1920;
     canvas.height = 1080;
@@ -3217,7 +3224,7 @@ const rRowId = `cl2-lo-${entry.id}`;
       heatLabel && heatLabel !== 'ALL' ? ` — HEAT ${heatLabel}` : '';
     ctx.fillText(`${eventObj.label.toUpperCase()}${heatDisplay}`, marginX + 28, 134);
 
-    // Right side Program Record / Pool Record Reference
+    // Right side Checked Standards / Records Reference Pills
     const activeEvKey = normalizeEventKey(eventObj.label);
     const officialEvPool = historicalRecords.filter(
       (r) => r.isOfficial !== false && r.eventKey === activeEvKey
@@ -3230,31 +3237,58 @@ const rRowId = `cl2-lo-${entry.id}`;
     });
     const sortedEvBests = Array.from(bestBySw.values()).sort((a, b) => a.seconds - b.seconds);
     const schoolRec = sortedEvBests[0] || null;
-    const poolRec = qualStandards.find(
-      (s) => s.eventKey === activeEvKey && s.type === 'POOL_RECORD'
-    );
+    const freshmanRec =
+      !eventObj.isRelay
+        ? officialEvPool
+            .filter((r) => normalizeClass(r.classYear) === 'FR')
+            .sort((a, b) => a.seconds - b.seconds)[0] || null
+        : null;
+    const eventStandards = qualStandards.filter((s) => s.eventKey === activeEvKey);
 
-    ctx.textAlign = 'right';
-    if (schoolRec) {
-      ctx.fillStyle = '#fbbf24';
-      ctx.font = '800 18px system-ui, -apple-system, sans-serif';
-      ctx.fillText('PROGRAM RECORD', marginX + contentW - 32, 74);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '800 24px ui-monospace, SFMono-Regular, Menlo, monospace';
-      ctx.fillText(
-        `${schoolRec.time}  (${schoolRec.swimmerName})`,
-        marginX + contentW - 32,
-        104
-      );
+    const activeMarkSet =
+      headerMarkKeys instanceof Set ? headerMarkKeys : selectedPngHeaderMarks;
+
+    const headerMarkItems = [];
+    if (activeMarkSet.has('PROGRAM_RECORD') && schoolRec) {
+      headerMarkItems.push({
+        label: 'PROGRAM RECORD',
+        value: `${schoolRec.time}  (${schoolRec.swimmerName})`,
+        accent: '#fbbf24',
+      });
     }
-    if (poolRec) {
-      ctx.fillStyle = '#38bdf8';
-      ctx.font = '700 18px system-ui, -apple-system, sans-serif';
-      ctx.fillText(
-        `${poolRec.label.toUpperCase()}: ${poolRec.time}`,
-        marginX + contentW - 32,
-        138
-      );
+    if (activeMarkSet.has('FRESHMAN_RECORD') && freshmanRec) {
+      headerMarkItems.push({
+        label: 'FRESHMAN RECORD',
+        value: `${freshmanRec.time}  (${freshmanRec.swimmerName})`,
+        accent: '#f59e0b',
+      });
+    }
+    eventStandards.forEach((std) => {
+      const markKey = `STD_${std.id}`;
+      if (activeMarkSet.has(markKey)) {
+        headerMarkItems.push({
+          label: String(std.label || 'STANDARD').toUpperCase(),
+          value: std.time,
+          accent: '#38bdf8',
+        });
+      }
+    });
+
+    if (headerMarkItems.length > 0) {
+      ctx.textAlign = 'right';
+      const maxShown = Math.min(headerMarkItems.length, 3);
+      const lineStep = maxShown === 1 ? 36 : maxShown === 2 ? 48 : 38;
+      const startLineY = maxShown === 1 ? 94 : maxShown === 2 ? 78 : 66;
+
+      headerMarkItems.slice(0, maxShown).forEach((item, idx) => {
+        const yPos = startLineY + idx * lineStep;
+        ctx.fillStyle = item.accent;
+        ctx.font = '800 15px system-ui, -apple-system, sans-serif';
+        ctx.fillText(item.label, marginX + contentW - 32, yPos - 11);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '800 21px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.fillText(item.value, marginX + contentW - 32, yPos + 10);
+      });
     }
 
     // All-Time Rank Lookup for Callout Pills
@@ -3474,7 +3508,13 @@ const rRowId = `cl2-lo-${entry.id}`;
           const safeEv = evObj.label.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '');
           const evPad = String(evObj.num).padStart(2, '0');
           const fileName = `Ev${evPad}_${safeEv}_Heat${hNum}.png`;
-          const url = renderBroadcastHeatGraphicPng(evObj, hNum, lMap, broadcastGraphicTheme);
+          const url = renderBroadcastHeatGraphicPng(
+            evObj,
+            hNum,
+            lMap,
+            broadcastGraphicTheme,
+            selectedPngHeaderMarks
+          );
           triggerPngDownload(url, fileName);
           exportedCount++;
           await new Promise((res) => setTimeout(res, 160));
@@ -7258,7 +7298,8 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       activeEventObj,
                                       hVal,
                                       laneMap,
-                                      broadcastGraphicTheme
+                                      broadcastGraphicTheme,
+                                      selectedPngHeaderMarks
                                     );
                                     triggerPngDownload(
                                       dataUrl,
@@ -7285,6 +7326,67 @@ const rRowId = `cl2-lo-${entry.id}`;
                                   </span>
                                 </button>
                               </div>
+                            </div>
+
+                            {/* Broadcast PNG Header Standards & Records Checkboxes */}
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                                PNG Header Callouts:
+                              </span>
+                              {[
+                                {
+                                  key: 'PROGRAM_RECORD',
+                                  label: schoolRecordMark
+                                    ? `Program Record (${schoolRecordMark.time})`
+                                    : 'Program Record',
+                                  disabled: !schoolRecordMark,
+                                },
+                                ...(!isRelayEvent
+                                  ? [
+                                      {
+                                        key: 'FRESHMAN_RECORD',
+                                        label: freshmanRecordMark
+                                          ? `Freshman Record (${freshmanRecordMark.time})`
+                                          : 'Freshman Record',
+                                        disabled: !freshmanRecordMark,
+                                      },
+                                    ]
+                                  : []),
+                                ...matchingStandards.map((std) => ({
+                                  key: `STD_${std.id}`,
+                                  label: `${std.label} (${std.time})`,
+                                  disabled: false,
+                                })),
+                              ].map((chk) => {
+                                const checked = selectedPngHeaderMarks.has(chk.key);
+                                return (
+                                  <label
+                                    key={chk.key}
+                                    className={`inline-flex items-center gap-1.5 font-semibold select-none ${
+                                      chk.disabled
+                                        ? 'text-slate-400 cursor-not-allowed'
+                                        : 'text-slate-800 cursor-pointer'
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      disabled={chk.disabled}
+                                      checked={!chk.disabled && checked}
+                                      onChange={(e) => {
+                                        const isChecked = e.target.checked;
+                                        setSelectedPngHeaderMarks((prev) => {
+                                          const next = new Set(prev);
+                                          if (isChecked) next.add(chk.key);
+                                          else next.delete(chk.key);
+                                          return next;
+                                        });
+                                      }}
+                                      className="rounded text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <span>{chk.label}</span>
+                                  </label>
+                                );
+                              })}
                             </div>
 
                             {/* Event Benchmarks & Defined Standards/Records Strip */}
