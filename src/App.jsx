@@ -3187,7 +3187,7 @@ const rRowId = `cl2-lo-${entry.id}`;
       heatLabel && heatLabel !== 'ALL' ? ` — HEAT ${heatLabel}` : '';
     ctx.fillText(`${eventObj.label.toUpperCase()}${heatDisplay}`, marginX + 28, 134);
 
-    // Right side Program Record / Pool Record Reference
+    // Right side Program Record / Freshman Record / Selected Standards Reference
     const activeEvKey = normalizeEventKey(eventObj.label);
     const officialEvPool = historicalRecords.filter(
       (r) => r.isOfficial !== false && r.eventKey === activeEvKey
@@ -3200,31 +3200,60 @@ const rRowId = `cl2-lo-${entry.id}`;
     });
     const sortedEvBests = Array.from(bestBySw.values()).sort((a, b) => a.seconds - b.seconds);
     const schoolRec = sortedEvBests[0] || null;
-    const poolRec = qualStandards.find(
-      (s) => s.eventKey === activeEvKey && s.type === 'POOL_RECORD'
+    const freshmanRec =
+      officialEvPool
+        .filter((r) => normalizeClass(r.classYear) === 'FR')
+        .sort((a, b) => a.seconds - b.seconds)[0] || null;
+
+    const effectiveStdLabels =
+      broadcastSelectedStdLabels === null
+        ? new Set(
+            qualStandards
+              .filter((s) => s.type === 'POOL_RECORD')
+              .map((s) => s.label)
+          )
+        : broadcastSelectedStdLabels;
+
+    const selectedEvStds = qualStandards.filter(
+      (s) => s.eventKey === activeEvKey && effectiveStdLabels.has(s.label)
     );
 
-    ctx.textAlign = 'right';
-    if (schoolRec) {
-      ctx.fillStyle = '#fbbf24';
-      ctx.font = '800 18px system-ui, -apple-system, sans-serif';
-      ctx.fillText('PROGRAM RECORD', marginX + contentW - 32, 74);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '800 24px ui-monospace, SFMono-Regular, Menlo, monospace';
-      ctx.fillText(
-        `${schoolRec.time}  (${schoolRec.swimmerName})`,
-        marginX + contentW - 32,
-        104
-      );
+    const refItems = [];
+    if (broadcastIncludeProgramRec && schoolRec) {
+      refItems.push({
+        label: 'PROGRAM REC',
+        value: `${schoolRec.time} (${schoolRec.swimmerName})`,
+        color: '#fbbf24',
+      });
     }
-    if (poolRec) {
-      ctx.fillStyle = '#38bdf8';
-      ctx.font = '700 18px system-ui, -apple-system, sans-serif';
-      ctx.fillText(
-        `${poolRec.label.toUpperCase()}: ${poolRec.time}`,
-        marginX + contentW - 32,
-        138
-      );
+    if (broadcastIncludeFreshmanRec && freshmanRec) {
+      refItems.push({
+        label: 'FR RECORD',
+        value: `${freshmanRec.time} (${freshmanRec.swimmerName})`,
+        color: '#34d399',
+      });
+    }
+    selectedEvStds.forEach((std) => {
+      refItems.push({
+        label: std.label.toUpperCase(),
+        value: std.time,
+        color: std.type === 'POOL_RECORD' ? '#38bdf8' : '#c084fc',
+      });
+    });
+
+    ctx.textAlign = 'right';
+    if (refItems.length > 0) {
+      const visibleRefs = refItems.slice(0, 4);
+      const startRefY = visibleRefs.length === 1 ? 102 : visibleRefs.length === 2 ? 78 : 66;
+      const stepRefY = visibleRefs.length <= 2 ? 42 : visibleRefs.length === 3 ? 32 : 26;
+      const fontSize = visibleRefs.length <= 2 ? 20 : visibleRefs.length === 3 ? 17 : 15;
+
+      visibleRefs.forEach((item, idx) => {
+        const yPos = startRefY + idx * stepRefY;
+        ctx.fillStyle = item.color;
+        ctx.font = `800 ${fontSize}px system-ui, -apple-system, sans-serif`;
+        ctx.fillText(`${item.label}: ${item.value}`, marginX + contentW - 32, yPos);
+      });
     }
 
     // All-Time Rank Lookup for Callout Pills
