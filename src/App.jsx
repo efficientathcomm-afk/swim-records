@@ -1381,7 +1381,7 @@ export default function App() {
   const [winsActiveOnly, setWinsActiveOnly] = useState(false);
   const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
 
-const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'relayopt' | 'standards'
+  const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'relayopt' | 'standards'
   const [inMeetSearch, setInMeetSearch] = useState('');
   const [inMeetGenderFilter, setInMeetGenderFilter] = useState('ALL');
   const [inMeetTargetEventKey, setInMeetTargetEventKey] = useState('women 50 freestyle');
@@ -7058,41 +7058,45 @@ const rRowId = `cl2-lo-${entry.id}`;
                             });
                           }
                         });
-
                         const eventOptions = Array.from(eventOptionMap.values()).sort(
                           (a, b) => a.num - b.num
                         );
-
-                        const activeEvObj =
+                        const activeEventObj =
                           eventOptions.find((e) => e.label === selectedHeatEventLabel) ||
                           eventOptions[0] ||
                           null;
-                        const activeEvLabel = activeEvObj?.label || '';
-                        const isRelayEvent = Boolean(activeEvObj?.isRelay);
+                        const activeEventLabel = activeEventObj ? activeEventObj.label : '';
+                        const isRelayEvent = Boolean(activeEventObj?.isRelay);
 
-                        const evSwims = isRelayEvent
-                          ? parsedData.relayResults.filter((r) => r.eventLabel === activeEvLabel)
+                        const eventSwims = isRelayEvent
+                          ? parsedData.relayResults.filter((r) => r.eventLabel === activeEventLabel)
                           : parsedData.individualResults.filter(
-                              (r) => r.eventLabel === activeEvLabel
+                              (r) => r.eventLabel === activeEventLabel
                             );
 
-                        const heatOptions = Array.from(
-                          new Set(evSwims.map((r) => r.heat).filter(Boolean))
+                        const heats = Array.from(
+                          new Set(eventSwims.map((r) => r.heat).filter(Boolean))
                         ).sort((a, b) => Number(a) - Number(b));
 
-                        const heatSwims = evSwims.filter((r) =>
-                          selectedHeatNum === 'ALL' ? true : String(r.heat) === String(selectedHeatNum)
-                        );
+                        const chosenHeat =
+                          selectedHeatNum !== 'ALL' && heats.includes(selectedHeatNum)
+                            ? selectedHeatNum
+                            : heats[0] || 'ALL';
+
+                        const laneEntries =
+                          chosenHeat === 'ALL'
+                            ? eventSwims
+                            : eventSwims.filter((r) => String(r.heat) === String(chosenHeat));
 
                         const laneMap = new Map();
-                        heatSwims.forEach((sw) => {
-                          const laneNum = parseInt(sw.lane, 10);
-                          if (laneNum >= 1 && laneNum <= 8 && !laneMap.has(laneNum)) {
-                            laneMap.set(laneNum, sw);
+                        laneEntries.forEach((entry) => {
+                          const ln = parseInt(entry.lane, 10);
+                          if (ln >= 1 && ln <= 8 && !laneMap.has(ln)) {
+                            laneMap.set(ln, entry);
                           }
                         });
 
-                        const activeEvKey = normalizeEventKey(activeEvLabel);
+                        const activeEvKey = normalizeEventKey(activeEventLabel);
                         const officialEvPool = historicalRecords.filter(
                           (r) => r.isOfficial !== false && r.eventKey === activeEvKey
                         );
@@ -7116,9 +7120,9 @@ const rRowId = `cl2-lo-${entry.id}`;
                         const sortedEvBests = Array.from(bestBySw.values()).sort(
                           (a, b) => a.seconds - b.seconds
                         );
-                        const schoolRec = sortedEvBests[0] || null;
-                        const tenthMark = sortedEvBests[9] || null;
-                        const frRec =
+                        const schoolRecordMark = sortedEvBests[0] || null;
+                        const top10CutMark = sortedEvBests[9] || null;
+                        const freshmanRecordMark =
                           officialEvPool
                             .filter((r) => normalizeClass(r.classYear) === 'FR')
                             .sort((a, b) => a.seconds - b.seconds)[0] || null;
@@ -7128,191 +7132,193 @@ const rRowId = `cl2-lo-${entry.id}`;
 
                         return (
                           <div className="space-y-4">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div className="flex flex-wrap items-center gap-3 flex-1">
+                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                              <div className="flex flex-wrap items-center gap-3">
                                 <select
-                                  value={activeEvLabel}
+                                  value={activeEventLabel}
                                   onChange={(e) => {
                                     setSelectedHeatEventLabel(e.target.value);
                                     setSelectedHeatNum('ALL');
                                   }}
-                                  className="flex-1 min-w-[220px] px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                  className="px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[240px]"
                                 >
                                   {eventOptions.map((ev) => (
                                     <option key={ev.label} value={ev.label}>
                                       #{ev.num} — {ev.label}
+                                      {ev.isRelay ? ' (Relay)' : ''}
                                     </option>
                                   ))}
                                 </select>
 
-                                <select
-                                  value={selectedHeatNum}
-                                  onChange={(e) => setSelectedHeatNum(e.target.value)}
-                                  className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                >
-                                  <option value="ALL">
-                                    All Heats ({evSwims.length} {isRelayEvent ? 'relays' : 'swims'})
-                                  </option>
-                                  {heatOptions.map((h) => (
-                                    <option key={h} value={h}>
-                                      Heat {h}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-
-                              {/* Broadcast 1920x1080 PNG Graphic Controls */}
-                              <div className="flex flex-wrap items-center gap-2">
-                                <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-[11px] font-bold">
-                                  <button
-                                    type="button"
-                                    onClick={() => setBroadcastGraphicTheme('slate')}
-                                    className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
-                                      broadcastGraphicTheme === 'slate'
-                                        ? 'bg-slate-900 text-white shadow-xs'
-                                        : 'text-slate-600 hover:text-slate-900'
-                                    }`}
-                                  >
-                                    Full Slate
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setBroadcastGraphicTheme('transparent')}
-                                    className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
-                                      broadcastGraphicTheme === 'transparent'
-                                        ? 'bg-slate-900 text-white shadow-xs'
-                                        : 'text-slate-600 hover:text-slate-900'
-                                    }`}
-                                  >
-                                    Transparent Key
-                                  </button>
-                                </div>
-
-                                <button
-                                  type="button"
-                                  disabled={!activeEvObj || laneMap.size === 0}
-                                  onClick={() => {
-                                    if (!activeEvObj) return;
-                                    const safeEv = activeEvObj.label
-                                      .replace(/[^a-z0-9]+/gi, '_')
-                                      .replace(/^_|_$/g, '');
-                                    const evPad = String(activeEvObj.num).padStart(2, '0');
-                                    const hTag =
-                                      selectedHeatNum !== 'ALL' ? `_Heat${selectedHeatNum}` : '';
-                                    const url = renderBroadcastHeatGraphicPng(
-                                      activeEvObj,
-                                      selectedHeatNum,
-                                      laneMap,
-                                      broadcastGraphicTheme
-                                    );
-                                    triggerPngDownload(url, `Ev${evPad}_${safeEv}${hTag}.png`);
-                                  }}
-                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white shadow-xs transition cursor-pointer"
-                                >
-                                  <Download className="w-3.5 h-3.5" />
-                                  Export Heat PNG
-                                </button>
-
-                                <button
-                                  type="button"
-                                  disabled={isExportingAllGraphics}
-                                  onClick={handleExportAllMeetGraphics}
-                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white shadow-xs transition cursor-pointer"
-                                >
-                                  <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                                  {isExportingAllGraphics
-                                    ? 'Exporting...'
-                                    : 'Export All Heats (1080p)'}
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Top Event Cuts & Defined Standards Strip */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                              <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-xs">
-                                <div className="text-[10px] font-bold uppercase text-amber-800">
-                                  #1 Program Record
-                                </div>
-                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
-                                  {schoolRec ? (
-                                    <>
-                                      <span className="font-mono text-amber-900">
-                                        {schoolRec.time}
-                                      </span>{' '}
-                                      — {schoolRec.swimmerName}
-                                    </>
-                                  ) : (
-                                    <span className="text-slate-500 font-normal">No mark in DB</span>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 text-xs">
-                                <div className="text-[10px] font-bold uppercase text-indigo-800">
-                                  #10 All-Time Cut
-                                </div>
-                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
-                                  {tenthMark ? (
-                                    <>
-                                      <span className="font-mono text-indigo-900">
-                                        {tenthMark.time}
-                                      </span>{' '}
-                                      — {tenthMark.swimmerName}
-                                    </>
-                                  ) : (
-                                    <span className="text-slate-500 font-normal">
-                                      {sortedEvBests.length > 0
-                                        ? `Open spot (${sortedEvBests.length}/10 ${
-                                            isRelayEvent ? 'relays' : 'athletes'
-                                          })`
-                                        : 'No mark in DB'}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="p-3 rounded-xl bg-cyan-50/70 border border-cyan-200 text-xs">
-                                <div className="text-[10px] font-bold uppercase text-cyan-800">
-                                  Freshman (FR) Record
-                                </div>
-                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
-                                  {isRelayEvent ? (
-                                    <span className="text-slate-500 font-normal">
-                                      N/A for Relays
-                                    </span>
-                                  ) : frRec ? (
-                                    <>
-                                      <span className="font-mono text-cyan-900">{frRec.time}</span>{' '}
-                                      — {frRec.swimmerName}
-                                    </>
-                                  ) : (
-                                    <span className="text-slate-500 font-normal">
-                                      No FR mark in DB
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                                <div className="text-[10px] font-bold uppercase text-slate-600">
-                                  Defined Standards &amp; Pool Recs
-                                </div>
-                                {matchingStandards.length === 0 ? (
-                                  <div className="text-slate-500 mt-0.5">
-                                    None set for this event
-                                  </div>
-                                ) : (
-                                  <div className="flex flex-wrap gap-1.5 mt-1">
-                                    {matchingStandards.map((std) => (
-                                      <span
-                                        key={std.id}
-                                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getStandardBadgeStyle(
-                                          std.label
-                                        )}`}
+                                {heats.length > 0 && (
+                                  <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                                    {heats.map((h) => (
+                                      <button
+                                        key={h}
+                                        type="button"
+                                        onClick={() => setSelectedHeatNum(h)}
+                                        className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                                          String(chosenHeat) === String(h)
+                                            ? 'bg-indigo-600 text-white shadow-xs'
+                                            : 'text-slate-600 hover:text-slate-900'
+                                        }`}
                                       >
-                                        {std.label}: <span className="font-mono">{std.time}</span>
-                                      </span>
+                                        Heat {h}
+                                      </button>
                                     ))}
                                   </div>
                                 )}
                               </div>
+
+                              {/* Broadcast 1920x1080 Heat Graphic Export Controls */}
+                              {activeEventObj && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="flex bg-slate-100 p-0.5 rounded-lg text-[11px] font-bold">
+                                    <button
+                                      type="button"
+                                      onClick={() => setBroadcastGraphicTheme('slate')}
+                                      className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                                        broadcastGraphicTheme === 'slate'
+                                          ? 'bg-white text-slate-900 shadow-xs'
+                                          : 'text-slate-600 hover:text-slate-900'
+                                      }`}
+                                      title="Full dark broadcast slate background"
+                                    >
+                                      Full Slate
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setBroadcastGraphicTheme('transparent')}
+                                      className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                                        broadcastGraphicTheme === 'transparent'
+                                          ? 'bg-white text-slate-900 shadow-xs'
+                                          : 'text-slate-600 hover:text-slate-900'
+                                      }`}
+                                      title="Transparent alpha PNG for live video overlay"
+                                    >
+                                      Transparent Key
+                                    </button>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const safeEv = activeEventObj.label
+                                        .replace(/[^a-z0-9]+/gi, '_')
+                                        .replace(/^_|_$/g, '');
+                                      const evPad = String(activeEventObj.num).padStart(2, '0');
+                                      const hLabel = chosenHeat === 'ALL' ? '1' : chosenHeat;
+                                      const url = renderBroadcastHeatGraphicPng(
+                                        activeEventObj,
+                                        hLabel,
+                                        laneMap,
+                                        broadcastGraphicTheme
+                                      );
+                                      triggerPngDownload(url, `Ev${evPad}_${safeEv}_Heat${hLabel}.png`);
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition cursor-pointer"
+                                  >
+                                    <Download className="w-3.5 h-3.5 text-cyan-400" />
+                                    Export Heat PNG
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    disabled={isExportingAllGraphics}
+                                    onClick={handleExportAllMeetGraphics}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white shadow-xs transition cursor-pointer"
+                                  >
+                                    <Download className="w-3.5 h-3.5" />
+                                    {isExportingAllGraphics
+                                      ? 'Exporting All...'
+                                      : 'Export All Heats (1080p)'}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Event Benchmarks & Defined Standards / Pool Records Strip */}
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                <div className="p-2.5 rounded-lg bg-amber-50/80 border border-amber-200 text-xs">
+                                  <div className="text-[10px] font-bold uppercase text-amber-800">
+                                    #1 Program Record
+                                  </div>
+                                  <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                    {schoolRecordMark ? (
+                                      <>
+                                        <span className="font-mono text-amber-900">
+                                          {schoolRecordMark.time}
+                                        </span>{' '}
+                                        — {schoolRecordMark.swimmerName}
+                                      </>
+                                    ) : (
+                                      <span className="text-slate-500 font-normal">No record in DB</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="p-2.5 rounded-lg bg-indigo-50/80 border border-indigo-200 text-xs">
+                                  <div className="text-[10px] font-bold uppercase text-indigo-800">
+                                    #10 All-Time Cut
+                                  </div>
+                                  <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                    {top10CutMark ? (
+                                      <>
+                                        <span className="font-mono text-indigo-900">
+                                          {top10CutMark.time}
+                                        </span>{' '}
+                                        — {top10CutMark.swimmerName}
+                                      </>
+                                    ) : (
+                                      <span className="text-slate-500 font-normal">
+                                        {sortedEvBests.length > 0
+                                          ? `Open spot (${sortedEvBests.length}/10 filled)`
+                                          : 'No marks in DB'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="p-2.5 rounded-lg bg-cyan-50/80 border border-cyan-200 text-xs">
+                                  <div className="text-[10px] font-bold uppercase text-cyan-800">
+                                    Freshman (FR) Record
+                                  </div>
+                                  <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                    {freshmanRecordMark ? (
+                                      <>
+                                        <span className="font-mono text-cyan-900">
+                                          {freshmanRecordMark.time}
+                                        </span>{' '}
+                                        — {freshmanRecordMark.swimmerName}
+                                      </>
+                                    ) : (
+                                      <span className="text-slate-500 font-normal">
+                                        No FR mark in DB
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {matchingStandards.length > 0 && (
+                                <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center gap-2 text-xs">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                    Event Standards &amp; Pool Records:
+                                  </span>
+                                  {matchingStandards.map((std) => (
+                                    <span
+                                      key={std.id}
+                                      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${getStandardBadgeStyle(
+                                        std.label
+                                      )}`}
+                                    >
+                                      <span>{std.label}:</span>
+                                      <span className="font-mono">{std.time}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
 
                             <div className="overflow-x-auto border border-slate-200 rounded-xl">
@@ -7627,8 +7633,442 @@ const rRowId = `cl2-lo-${entry.id}`;
                 </div>
               )}
 
+              {/* SUB-TAB 2: ACTIVE ROSTER OVERVIEW */}
+              {inMeetSubTab === 'roster' && (() => {
+                const activeAthletes = masterRoster
+                  .filter((a) => a.isActive)
+                  .filter((a) => {
+                    if (inMeetGenderFilter !== 'ALL' && a.gender !== inMeetGenderFilter) return false;
+                    if (inMeetSearch.trim() !== '') {
+                      const q = inMeetSearch.toLowerCase();
+                      const hay = `${a.canonicalName} ${(a.aliases || []).join(' ')}`.toLowerCase();
+                      if (!hay.includes(q)) return false;
+                    }
+                    return true;
+                  })
+                  .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName));
+
+                const targetPool = (benchmarkIndex.byEvent[inMeetTargetEventKey] || []).slice();
+                const bestByTargetAth = new Map();
+                targetPool.forEach((rec) => {
+                  if (
+                    !bestByTargetAth.has(rec.swimmerKey) ||
+                    rec.seconds < bestByTargetAth.get(rec.swimmerKey).seconds
+                  ) {
+                    bestByTargetAth.set(rec.swimmerKey, rec);
+                  }
+                });
+                const sortedTargetBests = Array.from(bestByTargetAth.values()).sort(
+                  (a, b) => a.seconds - b.seconds
+                );
+                const targetRecord = sortedTargetBests[0] || null;
+                const targetTop10Cut = sortedTargetBests[9] || null;
+                const targetFrRecord =
+                  targetPool
+                    .filter((r) => normalizeClass(r.classYear) === 'FR')
+                    .sort((a, b) => a.seconds - b.seconds)[0] || null;
+
+                const seasonStart = getCurrentSeasonStart();
+
+                return (
+                  <div className="p-5 sm:p-6 space-y-5">
+                    {/* Search, Gender Filter, & Target Event Cut Strip */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                        <div className="md:col-span-5 relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={inMeetSearch}
+                            onChange={(e) => setInMeetSearch(e.target.value)}
+                            placeholder="Search active swimmer..."
+                            className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+
+                        <div className="md:col-span-3 flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                          {['ALL', 'Women', 'Men'].map((g) => (
+                            <button
+                              key={g}
+                              type="button"
+                              onClick={() => {
+                                setInMeetGenderFilter(g);
+                                if (g === 'Men' && inMeetTargetEventKey.startsWith('women')) {
+                                  setInMeetTargetEventKey('men 50 freestyle');
+                                } else if (g === 'Women' && inMeetTargetEventKey.startsWith('men')) {
+                                  setInMeetTargetEventKey('women 50 freestyle');
+                                }
+                              }}
+                              className={`flex-1 py-1.5 rounded-md transition cursor-pointer ${
+                                inMeetGenderFilter === g
+                                  ? 'bg-white text-slate-900 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              {g === 'ALL' ? 'All' : g}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="md:col-span-4">
+                          <select
+                            value={inMeetTargetEventKey}
+                            onChange={(e) => setInMeetTargetEventKey(e.target.value)}
+                            className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          >
+                            {CANONICAL_EVENTS.filter((ev) => !ev.toLowerCase().includes('relay')).map(
+                              (ev) => (
+                                <option key={ev} value={ev.toLowerCase()}>
+                                  Target Cuts: {ev}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
+                        <div className="bg-white border border-amber-200 rounded-lg px-3 py-2">
+                          <span className="text-[10px] font-bold uppercase text-amber-800 block">
+                            #1 Program Record
+                          </span>
+                          <span className="font-bold text-slate-900">
+                            {targetRecord
+                              ? `${targetRecord.time} — ${targetRecord.swimmerName}`
+                              : 'No mark in DB'}
+                          </span>
+                        </div>
+                        <div className="bg-white border border-indigo-200 rounded-lg px-3 py-2">
+                          <span className="text-[10px] font-bold uppercase text-indigo-800 block">
+                            #10 All-Time Cut
+                          </span>
+                          <span className="font-bold text-slate-900">
+                            {targetTop10Cut
+                              ? `${targetTop10Cut.time} — ${targetTop10Cut.swimmerName}`
+                              : `Open spot (${sortedTargetBests.length}/10)`}
+                          </span>
+                        </div>
+                        <div className="bg-white border border-cyan-200 rounded-lg px-3 py-2">
+                          <span className="text-[10px] font-bold uppercase text-cyan-800 block">
+                            Freshman (FR) Record
+                          </span>
+                          <span className="font-bold text-slate-900">
+                            {targetFrRecord
+                              ? `${targetFrRecord.time} — ${targetFrRecord.swimmerName}`
+                              : 'No FR mark in DB'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {activeAthletes.length === 0 ? (
+                      <div className="text-center py-10 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                        No active swimmers match the current filter. Manage active athletes in{' '}
+                        <strong>Section 1 → Master Roster</strong>.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {activeAthletes.map((ath) => {
+                          const swKey = normalizeSwimmerKey(ath.canonicalName);
+                          const athOfficial = historicalRecords.filter((r) => {
+                            if (r.isOfficial === false) return false;
+                            const m = resolveMasterAthlete(r.swimmerName);
+                            return normalizeSwimmerKey(m ? m.canonicalName : r.swimmerName) === swKey;
+                          });
+
+                          const isSplit = (r) =>
+                            r.swimType === 'INTERMEDIATE_SPLIT' ||
+                            String(r.place || '').toUpperCase() === 'S';
+                          const isLeadOff = (r) =>
+                            r.swimType === 'RELAY_LEADOFF' ||
+                            String(r.place || '').toUpperCase() === 'R' ||
+                            String(r.place || '').toUpperCase() === 'LR';
+                          const isPureOfficial = (r) => !isSplit(r) && !isLeadOff(r);
+
+                          const evMap = new Map();
+                          const ensureEv = (r) => {
+                            if (!evMap.has(r.eventKey)) {
+                              evMap.set(r.eventKey, {
+                                eventKey: r.eventKey,
+                                eventLabel: r.eventLabel || toTitleEventLabel(r.eventKey),
+                                officialPb: null,
+                                officialSb: null,
+                                leadOffPb: null,
+                                leadOffSb: null,
+                                splitPb: null,
+                                splitSb: null,
+                              });
+                            }
+                            return evMap.get(r.eventKey);
+                          };
+
+                          athOfficial
+                            .filter((r) => r.eventKey)
+                            .forEach((r) => {
+                              const entry = ensureEv(r);
+                              const inSeason = Boolean(r.dateObj && r.dateObj >= seasonStart);
+                              if (isSplit(r)) {
+                                if (!entry.splitPb || r.seconds < entry.splitPb.seconds) {
+                                  entry.splitPb = r;
+                                }
+                                if (inSeason && (!entry.splitSb || r.seconds < entry.splitSb.seconds)) {
+                                  entry.splitSb = r;
+                                }
+                              } else if (isLeadOff(r)) {
+                                if (!entry.leadOffPb || r.seconds < entry.leadOffPb.seconds) {
+                                  entry.leadOffPb = r;
+                                }
+                                if (
+                                  inSeason &&
+                                  (!entry.leadOffSb || r.seconds < entry.leadOffSb.seconds)
+                                ) {
+                                  entry.leadOffSb = r;
+                                }
+                              } else if (isPureOfficial(r)) {
+                                if (!entry.officialPb || r.seconds < entry.officialPb.seconds) {
+                                  entry.officialPb = r;
+                                }
+                                if (
+                                  inSeason &&
+                                  (!entry.officialSb || r.seconds < entry.officialSb.seconds)
+                                ) {
+                                  entry.officialSb = r;
+                                }
+                              }
+                            });
+
+                          const topEvents = Array.from(evMap.values())
+                            .map((ev) => {
+                              const primaryCareer = ev.officialPb || ev.leadOffPb || ev.splitPb;
+                              const primarySeason = ev.officialSb;
+                              const fasterCareerLeadOff =
+                                ev.leadOffPb &&
+                                (!ev.officialPb ||
+                                  ev.leadOffPb.seconds < ev.officialPb.seconds - 0.005)
+                                  ? ev.leadOffPb
+                                  : null;
+                              const fasterSeasonLeadOff =
+                                ev.leadOffSb &&
+                                (!ev.officialSb ||
+                                  ev.leadOffSb.seconds < ev.officialSb.seconds - 0.005)
+                                  ? ev.leadOffSb
+                                  : null;
+                              const fasterCareerSplit =
+                                ev.splitPb &&
+                                (!ev.officialPb ||
+                                  ev.splitPb.seconds < ev.officialPb.seconds - 0.005)
+                                  ? ev.splitPb
+                                  : null;
+                              const fasterSeasonSplit =
+                                ev.splitSb &&
+                                (!ev.officialSb ||
+                                  ev.splitSb.seconds < ev.officialSb.seconds - 0.005)
+                                  ? ev.splitSb
+                                  : null;
+
+                              const careerMatchesSeason = Boolean(
+                                primaryCareer &&
+                                  primarySeason &&
+                                  (primaryCareer.id === primarySeason.id ||
+                                    (Math.abs(primaryCareer.seconds - primarySeason.seconds) <
+                                      0.005 &&
+                                      primaryCareer.date === primarySeason.date))
+                              );
+
+                              return {
+                                ...ev,
+                                primaryCareer,
+                                primarySeason,
+                                careerMatchesSeason,
+                                fasterCareerLeadOff,
+                                fasterSeasonLeadOff,
+                                fasterCareerSplit,
+                                fasterSeasonSplit,
+                              };
+                            })
+                            .filter((ev) => ev.primaryCareer)
+                            .slice(0, 6);
+
+                          const meetSwims = parsedData
+                            ? parsedData.individualResults.filter((entry) => {
+                                const disp = formatSwimmerDisplay(
+                                  entry.swimmerName,
+                                  entry.preferredFirst
+                                );
+                                const m = resolveMasterAthlete(disp);
+                                return (
+                                  normalizeSwimmerKey(m ? m.canonicalName : disp) === swKey
+                                );
+                              })
+                            : [];
+
+                          return (
+                            <div
+                              key={ath.id}
+                              className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs hover:border-indigo-300 transition flex flex-col justify-between space-y-3"
+                            >
+                              <div className="space-y-2.5">
+                                <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
+                                  <div>
+                                    <button
+                                      type="button"
+                                      onClick={() => openSwimmerProfile(ath.canonicalName)}
+                                      className="font-extrabold text-sm text-slate-900 hover:text-indigo-700 hover:underline text-left cursor-pointer"
+                                    >
+                                      {ath.canonicalName}
+                                    </button>
+                                    <div className="text-[11px] text-slate-500">
+                                      {ath.gender} • Active Roster
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => openSwimmerProfile(ath.canonicalName)}
+                                    className="text-[11px] font-bold text-indigo-700 hover:underline shrink-0 cursor-pointer"
+                                  >
+                                    Profile →
+                                  </button>
+                                </div>
+
+                                {topEvents.length === 0 ? (
+                                  <div className="text-xs text-slate-400 italic py-2">
+                                    No committed individual times in DB yet.
+                                  </div>
+                                ) : (
+                                  <div className="overflow-x-auto border border-slate-100 rounded-lg">
+                                    <table className="w-full text-left text-[11px]">
+                                      <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[9px] border-b border-slate-100">
+                                        <tr>
+                                          <th className="py-1.5 px-2">Event</th>
+                                          <th className="py-1.5 px-2">Season Best</th>
+                                          <th className="py-1.5 px-2">Career Best</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {topEvents.map((ev) => (
+                                          <tr key={ev.eventKey} className="align-top">
+                                            <td className="py-1.5 px-2 font-bold text-slate-800">
+                                              {ev.eventLabel.replace(/^(Women|Men)\s+/i, '')}
+                                            </td>
+                                            <td className="py-1.5 px-2 font-mono">
+                                              {ev.primarySeason ? (
+                                                <div>
+                                                  <div className="font-bold text-cyan-800">
+                                                    {ev.primarySeason.time}
+                                                  </div>
+                                                  <div className="text-[9px] text-slate-400">
+                                                    {formatDisplayDateMDY(ev.primarySeason.date)}
+                                                  </div>
+                                                </div>
+                                              ) : (
+                                                <span className="text-slate-400 font-bold">—</span>
+                                              )}
+                                              {ev.fasterSeasonLeadOff && (
+                                                <div className="mt-0.5 text-[10px] font-bold text-purple-700">
+                                                  {ev.fasterSeasonLeadOff.time} (R)
+                                                  <span className="block text-[9px] font-normal text-purple-500">
+                                                    {formatDisplayDateMDY(
+                                                      ev.fasterSeasonLeadOff.date
+                                                    )}
+                                                  </span>
+                                                </div>
+                                              )}
+                                              {ev.fasterSeasonSplit && (
+                                                <div className="mt-0.5 text-[10px] font-bold text-amber-700">
+                                                  {ev.fasterSeasonSplit.time} (S)
+                                                  <span className="block text-[9px] font-normal text-amber-600">
+                                                    {formatDisplayDateMDY(
+                                                      ev.fasterSeasonSplit.date
+                                                    )}
+                                                  </span>
+                                                </div>
+                                              )}
+                                            </td>
+                                            <td className="py-1.5 px-2 font-mono">
+                                              {ev.careerMatchesSeason ? (
+                                                <span className="font-sans text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                                  Same
+                                                </span>
+                                              ) : ev.primaryCareer ? (
+                                                <div>
+                                                  <div className="font-bold text-slate-900">
+                                                    {ev.primaryCareer.time}
+                                                    {isLeadOff(ev.primaryCareer) ? ' (R)' : ''}
+                                                    {isSplit(ev.primaryCareer) ? ' (S)' : ''}
+                                                  </div>
+                                                  <div className="text-[9px] text-slate-400">
+                                                    {formatDisplayDateMDY(ev.primaryCareer.date)}
+                                                  </div>
+                                                </div>
+                                              ) : (
+                                                <span className="text-slate-400">—</span>
+                                              )}
+                                              {ev.fasterCareerLeadOff &&
+                                                ev.fasterCareerLeadOff.id !==
+                                                  ev.primaryCareer?.id && (
+                                                  <div className="mt-0.5 text-[10px] font-bold text-purple-700">
+                                                    {ev.fasterCareerLeadOff.time} (R)
+                                                    <span className="block text-[9px] font-normal text-purple-500">
+                                                      {formatDisplayDateMDY(
+                                                        ev.fasterCareerLeadOff.date
+                                                      )}
+                                                    </span>
+                                                  </div>
+                                                )}
+                                              {ev.fasterCareerSplit &&
+                                                ev.fasterCareerSplit.id !==
+                                                  ev.primaryCareer?.id && (
+                                                  <div className="mt-0.5 text-[10px] font-bold text-amber-700">
+                                                    {ev.fasterCareerSplit.time} (S)
+                                                    <span className="block text-[9px] font-normal text-amber-600">
+                                                      {formatDisplayDateMDY(
+                                                        ev.fasterCareerSplit.date
+                                                      )}
+                                                    </span>
+                                                  </div>
+                                                )}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+
+                              {meetSwims.length > 0 && (
+                                <div className="pt-2 border-t border-slate-100 space-y-1">
+                                  <div className="text-[10px] font-bold uppercase text-indigo-700">
+                                    Loaded Meet Swims
+                                  </div>
+                                  {meetSwims.map((ms) => (
+                                    <div
+                                      key={ms.id}
+                                      className="flex items-center justify-between text-[11px] text-slate-700"
+                                    >
+                                      <span className="truncate">
+                                        {ms.eventLabel.replace(/^(Women|Men)\s+/i, '')}
+                                      </span>
+                                      <span className="font-mono font-bold text-indigo-900">
+                                        {ms.finalsTime !== 'NT'
+                                          ? ms.finalsTime
+                                          : ms.seedTime || 'NT'}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* SUB-TAB 2B: RELAY LINEUP OPTIMIZER & SPLIT FORECASTER */}
-                {inMeetSubTab === 'relayopt' && (() => {
+              {inMeetSubTab === 'relayopt' && (() => {
                 const relayEventSpecs = {
                   'women 200 freestyle relay': {
                     gender: 'Women',
@@ -8332,316 +8772,6 @@ const rRowId = `cl2-lo-${entry.id}`;
                 );
               })()}
 
-              {/* SUB-TAB 2: ACTIVE ROSTER OVERVIEW */}
-              {inMeetSubTab === 'roster' && (() => {
-                const activeAthletes = masterRoster
-                  .filter((a) => a.isActive)
-                  .filter((a) => {
-                    if (inMeetGenderFilter !== 'ALL' && a.gender !== inMeetGenderFilter) return false;
-                    if (inMeetSearch.trim() !== '') {
-                      const q = inMeetSearch.toLowerCase();
-                      const hay = `${a.canonicalName} ${(a.aliases || []).join(' ')}`.toLowerCase();
-                      if (!hay.includes(q)) return false;
-                    }
-                    return true;
-                  })
-                  .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName));
-
-                const targetPool = (benchmarkIndex.byEvent[inMeetTargetEventKey] || []).slice();
-                const bestByTargetAth = new Map();
-                targetPool.forEach((rec) => {
-                  if (!bestByTargetAth.has(rec.swimmerKey) || rec.seconds < bestByTargetAth.get(rec.swimmerKey).seconds) {
-                    bestByTargetAth.set(rec.swimmerKey, rec);
-                  }
-                });
-                const sortedTargetBests = Array.from(bestByTargetAth.values()).sort(
-                  (a, b) => a.seconds - b.seconds
-                );
-                const targetRecord = sortedTargetBests[0] || null;
-                const targetTop10Cut = sortedTargetBests[9] || null;
-                const targetFrRecord =
-                  targetPool
-                    .filter((r) => normalizeClass(r.classYear) === 'FR')
-                    .sort((a, b) => a.seconds - b.seconds)[0] || null;
-
-                const seasonStart = getCurrentSeasonStart();
-
-                return (
-                  <div className="p-5 sm:p-6 space-y-5">
-                    {/* Search, Gender Filter, & Target Event Cut Strip */}
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                        <div className="md:col-span-5 relative">
-                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="text"
-                            value={inMeetSearch}
-                            onChange={(e) => setInMeetSearch(e.target.value)}
-                            placeholder="Search active swimmer..."
-                            className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          />
-                        </div>
-
-                        <div className="md:col-span-3 flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
-                          {['ALL', 'Women', 'Men'].map((g) => (
-                            <button
-                              key={g}
-                              type="button"
-                              onClick={() => {
-                                setInMeetGenderFilter(g);
-                                if (g === 'Men' && inMeetTargetEventKey.startsWith('women')) {
-                                  setInMeetTargetEventKey('men 50 freestyle');
-                                } else if (g === 'Women' && inMeetTargetEventKey.startsWith('men')) {
-                                  setInMeetTargetEventKey('women 50 freestyle');
-                                }
-                              }}
-                              className={`flex-1 py-1.5 rounded-md transition cursor-pointer ${
-                                inMeetGenderFilter === g
-                                  ? 'bg-white text-slate-900 shadow-xs'
-                                  : 'text-slate-600 hover:text-slate-900'
-                              }`}
-                            >
-                              {g === 'ALL' ? 'All' : g}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="md:col-span-4">
-                          <select
-                            value={inMeetTargetEventKey}
-                            onChange={(e) => setInMeetTargetEventKey(e.target.value)}
-                            className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          >
-                            {CANONICAL_EVENTS.filter((ev) => !ev.toLowerCase().includes('relay')).map(
-                              (ev) => (
-                                <option key={ev} value={ev.toLowerCase()}>
-                                  Target Cuts: {ev}
-                                </option>
-                              )
-                            )}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
-                        <div className="bg-white border border-amber-200 rounded-lg px-3 py-2">
-                          <span className="text-[10px] font-bold uppercase text-amber-800 block">
-                            #1 Program Record
-                          </span>
-                          <span className="font-bold text-slate-900">
-                            {targetRecord
-                              ? `${targetRecord.time} — ${targetRecord.swimmerName}`
-                              : 'No mark in DB'}
-                          </span>
-                        </div>
-                        <div className="bg-white border border-indigo-200 rounded-lg px-3 py-2">
-                          <span className="text-[10px] font-bold uppercase text-indigo-800 block">
-                            #10 All-Time Cut
-                          </span>
-                          <span className="font-bold text-slate-900">
-                            {targetTop10Cut
-                              ? `${targetTop10Cut.time} — ${targetTop10Cut.swimmerName}`
-                              : `Open spot (${sortedTargetBests.length}/10)`}
-                          </span>
-                        </div>
-                        <div className="bg-white border border-cyan-200 rounded-lg px-3 py-2">
-                          <span className="text-[10px] font-bold uppercase text-cyan-800 block">
-                            Freshman (FR) Record
-                          </span>
-                          <span className="font-bold text-slate-900">
-                            {targetFrRecord
-                              ? `${targetFrRecord.time} — ${targetFrRecord.swimmerName}`
-                              : 'No FR mark in DB'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {activeAthletes.length === 0 ? (
-                      <div className="text-center py-10 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                        No active swimmers match the current filter. Manage active athletes in{' '}
-                        <strong>Section 1 → Master Roster</strong>.
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {activeAthletes.map((ath) => {
-                          const swKey = normalizeSwimmerKey(ath.canonicalName);
-                          const athOfficial = historicalRecords.filter((r) => {
-                            if (r.isOfficial === false) return false;
-                            const m = resolveMasterAthlete(r.swimmerName);
-                            return normalizeSwimmerKey(m ? m.canonicalName : r.swimmerName) === swKey;
-                          });
-
-                          const isSplit = (r) =>
-                            r.swimType === 'INTERMEDIATE_SPLIT' ||
-                            String(r.place || '').toUpperCase() === 'S';
-
-                          const bestByEv = new Map();
-                          athOfficial
-                            .filter((r) => !isSplit(r) && r.eventKey)
-                            .forEach((r) => {
-                              const prev = bestByEv.get(r.eventKey);
-                              if (!prev || r.seconds < prev.pb.seconds) {
-                                bestByEv.set(r.eventKey, {
-                                  eventKey: r.eventKey,
-                                  eventLabel: r.eventLabel || toTitleEventLabel(r.eventKey),
-                                  pb: r,
-                                  sb: null,
-                                });
-                              }
-                            });
-
-                          athOfficial
-                            .filter(
-                              (r) =>
-                                !isSplit(r) &&
-                                r.eventKey &&
-                                r.dateObj &&
-                                r.dateObj >= seasonStart
-                            )
-                            .forEach((r) => {
-                              const entry = bestByEv.get(r.eventKey);
-                              if (entry && (!entry.sb || r.seconds < entry.sb.seconds)) {
-                                entry.sb = r;
-                              }
-                            });
-
-                          const topEvents = Array.from(bestByEv.values()).slice(0, 5);
-
-                          const splitBestsMap = new Map();
-                          athOfficial
-                            .filter((r) => isSplit(r) && r.eventKey)
-                            .forEach((r) => {
-                              if (
-                                !splitBestsMap.has(r.eventKey) ||
-                                r.seconds < splitBestsMap.get(r.eventKey).seconds
-                              ) {
-                                splitBestsMap.set(r.eventKey, r);
-                              }
-                            });
-                          const splitBests = Array.from(splitBestsMap.values()).slice(0, 3);
-
-                          const meetSwims = parsedData
-                            ? parsedData.individualResults.filter((entry) => {
-                                const disp = formatSwimmerDisplay(
-                                  entry.swimmerName,
-                                  entry.preferredFirst
-                                );
-                                const m = resolveMasterAthlete(disp);
-                                return (
-                                  normalizeSwimmerKey(m ? m.canonicalName : disp) === swKey
-                                );
-                              })
-                            : [];
-
-                          return (
-                            <div
-                              key={ath.id}
-                              className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs hover:border-indigo-300 transition flex flex-col justify-between space-y-3"
-                            >
-                              <div className="space-y-2.5">
-                                <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
-                                  <div>
-                                    <button
-                                      type="button"
-                                      onClick={() => openSwimmerProfile(ath.canonicalName)}
-                                      className="font-extrabold text-sm text-slate-900 hover:text-indigo-700 hover:underline text-left cursor-pointer"
-                                    >
-                                      {ath.canonicalName}
-                                    </button>
-                                    <div className="text-[11px] text-slate-500">
-                                      {ath.gender} • Active Roster
-                                    </div>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => openSwimmerProfile(ath.canonicalName)}
-                                    className="text-[11px] font-bold text-indigo-700 hover:underline shrink-0 cursor-pointer"
-                                  >
-                                    Profile →
-                                  </button>
-                                </div>
-
-                                {topEvents.length === 0 ? (
-                                  <div className="text-xs text-slate-400 italic py-2">
-                                    No committed individual times in DB yet.
-                                  </div>
-                                ) : (
-                                  <div className="space-y-1.5 text-xs">
-                                    {topEvents.map((ev) => (
-                                      <div
-                                        key={ev.eventKey}
-                                        className="flex items-center justify-between gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5"
-                                      >
-                                        <span className="font-semibold text-slate-800 truncate">
-                                          {ev.eventLabel.replace(/^(Women|Men)\s+/i, '')}
-                                        </span>
-                                        <div className="font-mono text-[11px] shrink-0 text-right">
-                                          <span className="font-bold text-slate-900">
-                                            PB {ev.pb.time}
-                                          </span>
-                                          {ev.sb && (
-                                            <span className="text-cyan-700 ml-1.5">
-                                              SB {ev.sb.time}
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-
-                                {splitBests.length > 0 && (
-                                  <div className="pt-1 border-t border-slate-100">
-                                    <div className="text-[10px] font-bold uppercase text-amber-800 mb-1">
-                                      Opening Split Bests (S)
-                                    </div>
-                                    <div className="flex flex-wrap gap-1">
-                                      {splitBests.map((sp) => (
-                                        <span
-                                          key={sp.id}
-                                          className="px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-900 font-mono text-[10px] font-semibold"
-                                        >
-                                          {sp.eventLabel.replace(/^(Women|Men)\s+/i, '')}:{' '}
-                                          {sp.time}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-
-                              {meetSwims.length > 0 && (
-                                <div className="pt-2 border-t border-slate-100 space-y-1">
-                                  <div className="text-[10px] font-bold uppercase text-indigo-700">
-                                    Loaded Meet Swims
-                                  </div>
-                                  {meetSwims.map((ms) => (
-                                    <div
-                                      key={ms.id}
-                                      className="flex items-center justify-between text-[11px] text-slate-700"
-                                    >
-                                      <span className="truncate">
-                                        {ms.eventLabel.replace(/^(Women|Men)\s+/i, '')}
-                                      </span>
-                                      <span className="font-mono font-bold text-indigo-900">
-                                        {ms.finalsTime !== 'NT'
-                                          ? ms.finalsTime
-                                          : ms.seedTime || 'NT'}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-              
               {/* SUB-TAB 3: QUALIFYING STANDARDS & POOL RECORDS */}
               {inMeetSubTab === 'standards' && (
                 <div className="p-5 sm:p-6 space-y-5">
