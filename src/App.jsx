@@ -3155,7 +3155,7 @@ const rRowId = `cl2-lo-${entry.id}`;
       } catch {}
 
       if (liveMeetSyncEnabled) {
-        pushLiveMeetToCloud(text, parsed, nextTeamColors, qualStandards, true);
+        pushLiveMeetToCloud(rawText, parsed, nextTeamColors, qualStandards, true);
       }
 
       const allEvSorted = [...parsed.individualResults, ...parsed.relayResults].sort(
