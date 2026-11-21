@@ -1353,7 +1353,7 @@ export default function App() {
   const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
 
   // Section 3: In-Meet Deck & Broadcast Console State
-  const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'standards'
+  const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'relayopt' | 'standards'
   const [inMeetSearch, setInMeetSearch] = useState('');
   const [inMeetGender, setInMeetGender] = useState('ALL');
   const [inMeetTargetEventKey, setInMeetTargetEventKey] = useState('women 50 freestyle');
@@ -1361,6 +1361,14 @@ export default function App() {
   const [selectedHeatNum, setSelectedHeatNum] = useState('ALL');
   const [broadcastGraphicTheme, setBroadcastGraphicTheme] = useState('slate'); // 'slate' | 'transparent'
   const [isExportingAllGraphics, setIsExportingAllGraphics] = useState(false);
+
+  // Relay Lineup Optimizer & Split Forecaster State
+  const [relayOptEventKey, setRelayOptEventKey] = useState('women 200 medley relay');
+  const [relayOptBasis, setRelayOptBasis] = useState('PB'); // 'PB' | 'SB'
+  const [relayOptExchangeDelta, setRelayOptExchangeDelta] = useState(-0.45);
+  const [relayOptExcludedKeys, setRelayOptExcludedKeys] = useState(new Set());
+  const [relayOptManualA, setRelayOptManualA] = useState(['', '', '', '']);
+  const [relayOptManualB, setRelayOptManualB] = useState(['', '', '', '']);
 
   // Swimmer Career Profile Modal State
   const [profileSwimmerName, setProfileSwimmerName] = useState(null);
@@ -6542,6 +6550,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                   {[
                     { id: 'heatsheet', label: 'Heat Sheet (Lanes 1–8)' },
                     { id: 'roster', label: `Active Roster (${masterRoster.filter((a) => a.isActive).length})` },
+                    { id: 'relayopt', label: 'Relay Optimizer' },
                     { id: 'standards', label: `Standards & Pool Recs (${qualStandards.length})` },
                   ].map((tab) => (
                     <button
@@ -7211,316 +7220,710 @@ const rRowId = `cl2-lo-${entry.id}`;
                 </div>
               )}
 
-              {/* SUB-TAB 2: ACTIVE ROSTER OVERVIEW */}
-              {inMeetSubTab === 'roster' && (
-                <div className="p-5 sm:p-6 space-y-5">
-                  {/* Filter & Event Target Cut Bar */}
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 items-center">
-                    <div className="md:col-span-4 relative">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        value={inMeetSearch}
-                        onChange={(e) => setInMeetSearch(e.target.value)}
-                        placeholder="Filter active swimmers..."
-                        className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
+              {/* SUB-TAB 2B: RELAY LINEUP OPTIMIZER & SPLIT FORECASTER */}
+              {inMeetSubTab === 'relayopt' && (() => {
+                const relayEventSpecs = {
+                  'women 200 freestyle relay': {
+                    gender: 'Women',
+                    isMedley: false,
+                    legs: [
+                      { label: 'Leg 1 (Lead-Off Free)', eventKey: 'women 50 freestyle', isLeadOff: true },
+                      { label: 'Leg 2 (Flying Free)', eventKey: 'women 50 freestyle', isLeadOff: false },
+                      { label: 'Leg 3 (Flying Free)', eventKey: 'women 50 freestyle', isLeadOff: false },
+                      { label: 'Leg 4 (Anchor Free)', eventKey: 'women 50 freestyle', isLeadOff: false },
+                    ],
+                  },
+                  'women 400 freestyle relay': {
+                    gender: 'Women',
+                    isMedley: false,
+                    legs: [
+                      { label: 'Leg 1 (Lead-Off Free)', eventKey: 'women 100 freestyle', isLeadOff: true },
+                      { label: 'Leg 2 (Flying Free)', eventKey: 'women 100 freestyle', isLeadOff: false },
+                      { label: 'Leg 3 (Flying Free)', eventKey: 'women 100 freestyle', isLeadOff: false },
+                      { label: 'Leg 4 (Anchor Free)', eventKey: 'women 100 freestyle', isLeadOff: false },
+                    ],
+                  },
+                  'women 800 freestyle relay': {
+                    gender: 'Women',
+                    isMedley: false,
+                    legs: [
+                      { label: 'Leg 1 (Lead-Off Free)', eventKey: 'women 200 freestyle', isLeadOff: true },
+                      { label: 'Leg 2 (Flying Free)', eventKey: 'women 200 freestyle', isLeadOff: false },
+                      { label: 'Leg 3 (Flying Free)', eventKey: 'women 200 freestyle', isLeadOff: false },
+                      { label: 'Leg 4 (Anchor Free)', eventKey: 'women 200 freestyle', isLeadOff: false },
+                    ],
+                  },
+                  'women 200 medley relay': {
+                    gender: 'Women',
+                    isMedley: true,
+                    legs: [
+                      { label: 'Leg 1 (50 Back)', eventKey: 'women 50 backstroke', isLeadOff: true },
+                      { label: 'Leg 2 (50 Breast)', eventKey: 'women 50 breaststroke', isLeadOff: false },
+                      { label: 'Leg 3 (50 Fly)', eventKey: 'women 50 butterfly', isLeadOff: false },
+                      { label: 'Leg 4 (50 Free)', eventKey: 'women 50 freestyle', isLeadOff: false },
+                    ],
+                  },
+                  'women 400 medley relay': {
+                    gender: 'Women',
+                    isMedley: true,
+                    legs: [
+                      { label: 'Leg 1 (100 Back)', eventKey: 'women 100 backstroke', isLeadOff: true },
+                      { label: 'Leg 2 (100 Breast)', eventKey: 'women 100 breaststroke', isLeadOff: false },
+                      { label: 'Leg 3 (100 Fly)', eventKey: 'women 100 butterfly', isLeadOff: false },
+                      { label: 'Leg 4 (100 Free)', eventKey: 'women 100 freestyle', isLeadOff: false },
+                    ],
+                  },
+                  'men 200 freestyle relay': {
+                    gender: 'Men',
+                    isMedley: false,
+                    legs: [
+                      { label: 'Leg 1 (Lead-Off Free)', eventKey: 'men 50 freestyle', isLeadOff: true },
+                      { label: 'Leg 2 (Flying Free)', eventKey: 'men 50 freestyle', isLeadOff: false },
+                      { label: 'Leg 3 (Flying Free)', eventKey: 'men 50 freestyle', isLeadOff: false },
+                      { label: 'Leg 4 (Anchor Free)', eventKey: 'men 50 freestyle', isLeadOff: false },
+                    ],
+                  },
+                  'men 400 freestyle relay': {
+                    gender: 'Men',
+                    isMedley: false,
+                    legs: [
+                      { label: 'Leg 1 (Lead-Off Free)', eventKey: 'men 100 freestyle', isLeadOff: true },
+                      { label: 'Leg 2 (Flying Free)', eventKey: 'men 100 freestyle', isLeadOff: false },
+                      { label: 'Leg 3 (Flying Free)', eventKey: 'men 100 freestyle', isLeadOff: false },
+                      { label: 'Leg 4 (Anchor Free)', eventKey: 'men 100 freestyle', isLeadOff: false },
+                    ],
+                  },
+                  'men 800 freestyle relay': {
+                    gender: 'Men',
+                    isMedley: false,
+                    legs: [
+                      { label: 'Leg 1 (Lead-Off Free)', eventKey: 'men 200 freestyle', isLeadOff: true },
+                      { label: 'Leg 2 (Flying Free)', eventKey: 'men 200 freestyle', isLeadOff: false },
+                      { label: 'Leg 3 (Flying Free)', eventKey: 'men 200 freestyle', isLeadOff: false },
+                      { label: 'Leg 4 (Anchor Free)', eventKey: 'men 200 freestyle', isLeadOff: false },
+                    ],
+                  },
+                  'men 200 medley relay': {
+                    gender: 'Men',
+                    isMedley: true,
+                    legs: [
+                      { label: 'Leg 1 (50 Back)', eventKey: 'men 50 backstroke', isLeadOff: true },
+                      { label: 'Leg 2 (50 Breast)', eventKey: 'men 50 breaststroke', isLeadOff: false },
+                      { label: 'Leg 3 (50 Fly)', eventKey: 'men 50 butterfly', isLeadOff: false },
+                      { label: 'Leg 4 (50 Free)', eventKey: 'men 50 freestyle', isLeadOff: false },
+                    ],
+                  },
+                  'men 400 medley relay': {
+                    gender: 'Men',
+                    isMedley: true,
+                    legs: [
+                      { label: 'Leg 1 (100 Back)', eventKey: 'men 100 backstroke', isLeadOff: true },
+                      { label: 'Leg 2 (100 Breast)', eventKey: 'men 100 breaststroke', isLeadOff: false },
+                      { label: 'Leg 3 (100 Fly)', eventKey: 'men 100 butterfly', isLeadOff: false },
+                      { label: 'Leg 4 (100 Free)', eventKey: 'men 100 freestyle', isLeadOff: false },
+                    ],
+                  },
+                };
 
-                    <div className="md:col-span-3 flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
-                      {['ALL', 'Women', 'Men'].map((g) => (
-                        <button
-                          key={g}
-                          type="button"
-                          onClick={() => {
-                            setInMeetGender(g);
-                            if (g === 'Women' || g === 'Men') {
-                              const firstEv = CANONICAL_EVENTS.find((e) => e.startsWith(g));
-                              if (firstEv) setInMeetTargetEventKey(firstEv.toLowerCase());
-                            }
-                          }}
-                          className={`flex-1 py-1 rounded-md transition cursor-pointer ${
-                            inMeetGender === g
-                              ? 'bg-white text-slate-900 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          {g === 'ALL' ? 'All' : g}
-                        </button>
-                      ))}
-                    </div>
+                const spec =
+                  relayEventSpecs[relayOptEventKey] || relayEventSpecs['women 200 medley relay'];
+                const seasonStart = getCurrentSeasonStart();
 
-                    <div className="md:col-span-5 flex flex-wrap items-center gap-2">
-                      <span className="text-[11px] font-bold uppercase text-slate-500 shrink-0">
-                        Target Cuts:
-                      </span>
-                      <select
-                        value={inMeetTargetEventKey}
-                        onChange={(e) => setInMeetTargetEventKey(e.target.value)}
-                        className="flex-1 min-w-[170px] px-2.5 py-1.5 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      >
-                        {CANONICAL_EVENTS.filter((e) =>
-                          inMeetGender === 'ALL' ? true : e.startsWith(inMeetGender)
-                        ).map((ev) => (
-                          <option key={ev} value={ev.toLowerCase()}>
-                            {ev}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
+                const activeGenderRoster = masterRoster
+                  .filter((a) => a.isActive && a.gender === spec.gender)
+                  .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName));
 
-                  {/* Event Record & Top-10 Cut Strip */}
-                  {(() => {
-                    const evPool = historicalRecords.filter(
-                      (r) => r.isOfficial !== false && r.eventKey === inMeetTargetEventKey
-                    );
-                    const bestByAthlete = new Map();
-                    evPool.forEach((r) => {
-                      if (
-                        !bestByAthlete.has(r.swimmerKey) ||
-                        r.seconds < bestByAthlete.get(r.swimmerKey).seconds
-                      ) {
-                        bestByAthlete.set(r.swimmerKey, r);
+                // Map each active swimmer's flat-start bests (PB or SB) across the needed leg events
+                const neededEventKeys = Array.from(new Set(spec.legs.map((l) => l.eventKey)));
+                const swimmerBestByEvent = new Map();
+
+                activeGenderRoster.forEach((ath) => {
+                  const swKey = normalizeSwimmerKey(ath.canonicalName);
+                  const evMap = new Map();
+                  neededEventKeys.forEach((evK) => {
+                    const pool = historicalRecords.filter((r) => {
+                      if (r.isOfficial === false || r.eventKey !== evK) return false;
+                      const m = resolveMasterAthlete(r.swimmerName);
+                      const rKey = normalizeSwimmerKey(m ? m.canonicalName : r.swimmerName);
+                      if (rKey !== swKey) return false;
+                      if (relayOptBasis === 'SB') {
+                        return Boolean(r.dateObj && r.dateObj >= seasonStart);
                       }
+                      return true;
                     });
-                    const sortedBests = Array.from(bestByAthlete.values()).sort(
-                      (a, b) => a.seconds - b.seconds
-                    );
-                    const schoolRec = sortedBests[0] || null;
-                    const tenthMark = sortedBests[9] || null;
-                    const frRec =
-                      evPool
-                        .filter((r) => normalizeClass(r.classYear) === 'FR')
-                        .sort((a, b) => a.seconds - b.seconds)[0] || null;
+                    if (pool.length > 0) {
+                      const bestRec = pool.reduce((best, cur) =>
+                        cur.seconds < best.seconds ? cur : best
+                      );
+                      evMap.set(evK, bestRec);
+                    }
+                  });
+                  swimmerBestByEvent.set(swKey, {
+                    swimmerKey: swKey,
+                    canonicalName: ath.canonicalName,
+                    evMap,
+                  });
+                });
 
-                    return (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-xs">
-                          <div className="text-[10px] font-bold uppercase text-amber-800">
-                            #1 Program Record
-                          </div>
-                          <div className="font-extrabold text-slate-900 mt-0.5">
-                            {schoolRec ? (
-                              <>
-                                <span className="font-mono text-amber-900">{schoolRec.time}</span>{' '}
-                                — {schoolRec.swimmerName}
-                              </>
-                            ) : (
-                              <span className="text-slate-500 font-normal">No mark in DB</span>
-                            )}
-                          </div>
+                const availableSwimmers = activeGenderRoster
+                  .map((ath) => swimmerBestByEvent.get(normalizeSwimmerKey(ath.canonicalName)))
+                  .filter((item) => item && !relayOptExcludedKeys.has(item.swimmerKey));
+
+                // Compute optimal 4-swimmer assignment (exact 4! permutation search across top 8 per stroke for Medley, or top 4 fastest for Free Relay)
+                const solveBestRelayLineup = (candidatePool) => {
+                  if (candidatePool.length < 4) return null;
+
+                  if (!spec.isMedley) {
+                    const evK = spec.legs[0].eventKey;
+                    const ranked = candidatePool
+                      .filter((c) => c.evMap.has(evK))
+                      .sort((a, b) => a.evMap.get(evK).seconds - b.evMap.get(evK).seconds);
+                    if (ranked.length < 4) return null;
+
+                    // Put fastest flat-start swimmer on Lead-Off (or keep top 4 ordered)
+                    const chosen = ranked.slice(0, 4);
+                    return chosen.map((athObj, idx) => {
+                      const rec = athObj.evMap.get(evK);
+                      const projSec =
+                        idx === 0 ? rec.seconds : Math.max(0.1, rec.seconds + relayOptExchangeDelta);
+                      return {
+                        legIdx: idx,
+                        swimmerKey: athObj.swimmerKey,
+                        swimmerName: athObj.canonicalName,
+                        flatSec: rec.seconds,
+                        flatTime: rec.time,
+                        sourceLabel:
+                          rec.swimType === 'INTERMEDIATE_SPLIT' || rec.place === 'S'
+                            ? 'Split (S)'
+                            : rec.swimType === 'RELAY_LEADOFF' || rec.place === 'R'
+                            ? 'Lead-Off (R)'
+                            : 'Official',
+                        projSec,
+                        projTime: secondsToTime(projSec),
+                      };
+                    });
+                  }
+
+                  // Medley Relay: take top 8 candidates per stroke and find minimum-sum 4-distinct-swimmer assignment
+                  const legPools = spec.legs.map((leg) =>
+                    candidatePool
+                      .filter((c) => c.evMap.has(leg.eventKey))
+                      .sort(
+                        (a, b) =>
+                          a.evMap.get(leg.eventKey).seconds - b.evMap.get(leg.eventKey).seconds
+                      )
+                      .slice(0, 8)
+                  );
+                  if (legPools.some((p) => p.length === 0)) return null;
+
+                  let bestCombo = null;
+                  let bestTotal = Infinity;
+
+                  for (const s0 of legPools[0]) {
+                    for (const s1 of legPools[1]) {
+                      if (s1.swimmerKey === s0.swimmerKey) continue;
+                      for (const s2 of legPools[2]) {
+                        if (s2.swimmerKey === s0.swimmerKey || s2.swimmerKey === s1.swimmerKey)
+                          continue;
+                        for (const s3 of legPools[3]) {
+                          if (
+                            s3.swimmerKey === s0.swimmerKey ||
+                            s3.swimmerKey === s1.swimmerKey ||
+                            s3.swimmerKey === s2.swimmerKey
+                          )
+                            continue;
+
+                          const combo = [s0, s1, s2, s3];
+                          const total = combo.reduce((sum, athObj, idx) => {
+                            const baseSec = athObj.evMap.get(spec.legs[idx].eventKey).seconds;
+                            return (
+                              sum +
+                              (idx === 0
+                                ? baseSec
+                                : Math.max(0.1, baseSec + relayOptExchangeDelta))
+                            );
+                          }, 0);
+
+                          if (total < bestTotal) {
+                            bestTotal = total;
+                            bestCombo = combo;
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  if (!bestCombo) return null;
+                  return bestCombo.map((athObj, idx) => {
+                    const rec = athObj.evMap.get(spec.legs[idx].eventKey);
+                    const projSec =
+                      idx === 0 ? rec.seconds : Math.max(0.1, rec.seconds + relayOptExchangeDelta);
+                    return {
+                      legIdx: idx,
+                      swimmerKey: athObj.swimmerKey,
+                      swimmerName: athObj.canonicalName,
+                      flatSec: rec.seconds,
+                      flatTime: rec.time,
+                      sourceLabel:
+                        rec.swimType === 'INTERMEDIATE_SPLIT' || rec.place === 'S'
+                          ? 'Split (S)'
+                          : rec.swimType === 'RELAY_LEADOFF' || rec.place === 'R'
+                          ? 'Lead-Off (R)'
+                          : 'Official',
+                      projSec,
+                      projTime: secondsToTime(projSec),
+                    };
+                  });
+                };
+
+                const autoLineupA = solveBestRelayLineup(availableSwimmers);
+                const usedInA = new Set((autoLineupA || []).map((l) => l.swimmerKey));
+                const autoLineupB = solveBestRelayLineup(
+                  availableSwimmers.filter((s) => !usedInA.has(s.swimmerKey))
+                );
+
+                // Resolve effective lineup (applying any manual dropdown overrides)
+                const buildEffectiveLineup = (autoLegs, manualKeys) => {
+                  return spec.legs.map((leg, idx) => {
+                    const chosenKey = manualKeys[idx] || autoLegs?.[idx]?.swimmerKey || '';
+                    const athObj = chosenKey ? swimmerBestByEvent.get(chosenKey) : null;
+                    const rec = athObj ? athObj.evMap.get(leg.eventKey) : null;
+                    if (!athObj || !rec) {
+                      return {
+                        legIdx: idx,
+                        swimmerKey: chosenKey,
+                        swimmerName: athObj?.canonicalName || '',
+                        flatSec: null,
+                        flatTime: '—',
+                        sourceLabel: '',
+                        projSec: null,
+                        projTime: '—',
+                      };
+                    }
+                    const projSec =
+                      idx === 0 ? rec.seconds : Math.max(0.1, rec.seconds + relayOptExchangeDelta);
+                    return {
+                      legIdx: idx,
+                      swimmerKey: athObj.swimmerKey,
+                      swimmerName: athObj.canonicalName,
+                      flatSec: rec.seconds,
+                      flatTime: rec.time,
+                      sourceLabel:
+                        rec.swimType === 'INTERMEDIATE_SPLIT' || rec.place === 'S'
+                          ? 'Split (S)'
+                          : rec.swimType === 'RELAY_LEADOFF' || rec.place === 'R'
+                          ? 'Lead-Off (R)'
+                          : 'Official',
+                      projSec,
+                      projTime: secondsToTime(projSec),
+                    };
+                  });
+                };
+
+                const effectiveA = buildEffectiveLineup(autoLineupA, relayOptManualA);
+                const effectiveB = buildEffectiveLineup(autoLineupB, relayOptManualB);
+
+                const calcRelayTotal = (legsArr) => {
+                  if (legsArr.some((l) => l.projSec === null)) return null;
+                  return legsArr.reduce((acc, l) => acc + l.projSec, 0);
+                };
+
+                const totalSecA = calcRelayTotal(effectiveA);
+                const totalSecB = calcRelayTotal(effectiveB);
+
+                // Program Record, #10 Cut, and Qualifying Standards for this Relay
+                const relayHistRows = historicalRecords.filter(
+                  (r) => r.isOfficial !== false && r.eventKey === relayOptEventKey
+                );
+                const sortedRelayHist = [...relayHistRows].sort((a, b) => a.seconds - b.seconds);
+                const schoolRelayRec = sortedRelayHist[0] || null;
+                const tenthRelayRec = sortedRelayHist[9] || null;
+                const matchingRelayStds = qualStandards.filter(
+                  (s) => s.eventKey === relayOptEventKey
+                );
+
+                const renderSquadCard = (squadTitle, accentClass, legsArr, totalSec, manualArr, setManualArr) => {
+                  const hasManual = manualArr.some(Boolean);
+                  const duplicateKeys = new Set();
+                  const seen = new Set();
+                  legsArr.forEach((l) => {
+                    if (!l.swimmerKey) return;
+                    if (seen.has(l.swimmerKey)) duplicateKeys.add(l.swimmerKey);
+                    seen.add(l.swimmerKey);
+                  });
+
+                  const hitStds =
+                    totalSec !== null
+                      ? evaluateStandardsForSwim(
+                          toTitleEventLabel(relayOptEventKey),
+                          secondsToTime(totalSec)
+                        )
+                      : [];
+
+                  return (
+                    <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2.5 py-1 rounded-lg text-xs font-black uppercase ${accentClass}`}
+                          >
+                            {squadTitle}
+                          </span>
+                          {hasManual && (
+                            <button
+                              type="button"
+                              onClick={() => setManualArr(['', '', '', ''])}
+                              className="text-[11px] font-bold text-indigo-700 hover:underline cursor-pointer"
+                            >
+                              Reset to Optimal Auto-Pick
+                            </button>
+                          )}
                         </div>
-                        <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 text-xs">
-                          <div className="text-[10px] font-bold uppercase text-indigo-800">
-                            #10 All-Time Cut
+                        <div className="text-right">
+                          <div className="text-[10px] font-bold uppercase text-slate-500">
+                            Projected Relay Time ({relayOptBasis})
                           </div>
-                          <div className="font-extrabold text-slate-900 mt-0.5">
-                            {tenthMark ? (
-                              <>
-                                <span className="font-mono text-indigo-900">{tenthMark.time}</span>{' '}
-                                — {tenthMark.swimmerName}
-                              </>
-                            ) : (
-                              <span className="text-slate-500 font-normal">
-                                {sortedBests.length > 0
-                                  ? `Open spot (${sortedBests.length}/10 athletes)`
-                                  : 'No mark in DB'}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="p-3 rounded-xl bg-cyan-50/70 border border-cyan-200 text-xs">
-                          <div className="text-[10px] font-bold uppercase text-cyan-800">
-                            Freshman (FR) Record
-                          </div>
-                          <div className="font-extrabold text-slate-900 mt-0.5">
-                            {frRec ? (
-                              <>
-                                <span className="font-mono text-cyan-900">{frRec.time}</span> —{' '}
-                                {frRec.swimmerName}
-                              </>
-                            ) : (
-                              <span className="text-slate-500 font-normal">No FR mark in DB</span>
-                            )}
+                          <div className="text-xl sm:text-2xl font-mono font-black text-slate-900">
+                            {totalSec !== null ? secondsToTime(totalSec) : 'Incomplete'}
                           </div>
                         </div>
                       </div>
-                    );
-                  })()}
 
-                  {masterRoster.filter((a) => a.isActive).length === 0 ? (
-                    <div className="text-center py-12 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                      Add active swimmers in <strong>Section 1 → Master Roster</strong> to populate
-                      your deck reference board.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {masterRoster
-                        .filter((a) => {
-                          if (!a.isActive) return false;
-                          if (inMeetGender !== 'ALL' && a.gender !== inMeetGender) return false;
-                          if (inMeetSearch.trim() !== '') {
-                            const q = inMeetSearch.toLowerCase();
-                            const hay = `${a.canonicalName} ${(a.aliases || []).join(' ')}`.toLowerCase();
-                            if (!hay.includes(q)) return false;
-                          }
-                          return true;
-                        })
-                        .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
-                        .map((ath) => {
-                          const swKey = normalizeSwimmerKey(ath.canonicalName);
-                          const swFullBestMap = new Map();
-                          const swSplitBestMap = new Map();
-                          historicalRecords
-                            .filter((r) => r.isOfficial !== false && r.swimmerKey === swKey)
-                            .forEach((r) => {
-                              const isSplit =
-                                r.swimType === 'INTERMEDIATE_SPLIT' ||
-                                String(r.place || '').toUpperCase() === 'S';
-                              const targetMap = isSplit ? swSplitBestMap : swFullBestMap;
-                              if (
-                                !targetMap.has(r.eventKey) ||
-                                r.seconds < targetMap.get(r.eventKey).seconds
-                              ) {
-                                targetMap.set(r.eventKey, r);
-                              }
-                            });
-                          const eventKeys = Array.from(
-                            new Set([...swFullBestMap.keys(), ...swSplitBestMap.keys()])
-                          ).slice(0, 4);
+                      {duplicateKeys.size > 0 && (
+                        <div className="bg-red-50 border border-red-200 text-red-800 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5">
+                          <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                          <span>Warning: Same swimmer is assigned to multiple legs in this relay.</span>
+                        </div>
+                      )}
 
-                          const meetEntries = parsedData
-                            ? parsedData.individualResults.filter((entry) => {
-                                const displaySw = formatSwimmerDisplay(
-                                  entry.swimmerName,
-                                  entry.preferredFirst
-                                );
-                                const resolved = resolveMasterAthlete(displaySw);
-                                const matchKey = normalizeSwimmerKey(
-                                  resolved ? resolved.canonicalName : displaySw
-                                );
-                                return matchKey === swKey;
-                              })
-                            : [];
+                      {/* Benchmark Comparison Pills for Projected Time */}
+                      {totalSec !== null && (
+                        <div className="flex flex-wrap gap-1.5 text-[11px]">
+                          {schoolRelayRec && (
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-bold ${
+                                totalSec <= schoolRelayRec.seconds + 0.005
+                                  ? 'bg-amber-200 text-amber-950'
+                                  : 'bg-white border border-slate-200 text-slate-700'
+                              }`}
+                            >
+                              {totalSec <= schoolRelayRec.seconds + 0.005
+                                ? `Breaks School Record (${schoolRelayRec.time})!`
+                                : `${(totalSec - schoolRelayRec.seconds).toFixed(2)}s off Record (${schoolRelayRec.time})`}
+                            </span>
+                          )}
+                          {tenthRelayRec && (
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-bold ${
+                                totalSec <= tenthRelayRec.seconds + 0.005
+                                  ? 'bg-indigo-100 text-indigo-900'
+                                  : 'bg-white border border-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {totalSec <= tenthRelayRec.seconds + 0.005
+                                ? `Top-10 Pace (#10: ${tenthRelayRec.time})`
+                                : `${(totalSec - tenthRelayRec.seconds).toFixed(2)}s off #10 (${tenthRelayRec.time})`}
+                            </span>
+                          )}
+                          {hitStds.map((std) => (
+                            <span
+                              key={std.id}
+                              className={`px-2 py-0.5 rounded-full font-bold ${getStandardBadgeStyle(
+                                std.label
+                              )}`}
+                            >
+                              Hits {std.label} ({std.time})
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* 4-Leg Lineup Rows */}
+                      <div className="space-y-2">
+                        {spec.legs.map((legSpec, idx) => {
+                          const legData = legsArr[idx];
+                          const candidatesForLeg = activeGenderRoster
+                            .map((ath) => {
+                              const k = normalizeSwimmerKey(ath.canonicalName);
+                              const item = swimmerBestByEvent.get(k);
+                              const rec = item?.evMap.get(legSpec.eventKey);
+                              return {
+                                swimmerKey: k,
+                                canonicalName: ath.canonicalName,
+                                rec,
+                                excluded: relayOptExcludedKeys.has(k),
+                              };
+                            })
+                            .filter((c) => c.rec)
+                            .sort((a, b) => a.rec.seconds - b.rec.seconds);
 
                           return (
                             <div
-                              key={ath.id}
-                              className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2.5"
+                              key={idx}
+                              className="bg-white border border-slate-200 rounded-xl p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
                             >
-                              <div className="flex items-center justify-between gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => openSwimmerProfile(ath.canonicalName)}
-                                  className="font-extrabold text-sm text-slate-900 text-left hover:text-indigo-700 hover:underline cursor-pointer"
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[10px] font-bold uppercase text-slate-500">
+                                  {legSpec.label}
+                                </div>
+                                <select
+                                  value={legData.swimmerKey}
+                                  onChange={(e) => {
+                                    const next = [...manualArr];
+                                    next[idx] = e.target.value;
+                                    setManualArr(next);
+                                  }}
+                                  className="mt-0.5 w-full px-2 py-1 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
-                                  {ath.canonicalName}
-                                </button>
-                                <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-600 shrink-0">
-                                  {ath.gender}
-                                </span>
+                                  <option value="">-- Select Swimmer --</option>
+                                  {candidatesForLeg.map((c) => (
+                                    <option key={c.swimmerKey} value={c.swimmerKey}>
+                                      {c.canonicalName} — {c.rec.time}
+                                      {c.excluded ? ' (Unavailable)' : ''}
+                                    </option>
+                                  ))}
+                                </select>
                               </div>
-                              {eventKeys.length === 0 ? (
-                                <div className="text-xs text-slate-400 italic">
-                                  No career marks recorded yet
-                                </div>
-                              ) : (
-                                <div className="space-y-1">
-                                  {eventKeys.map((evKey) => {
-                                    const fullBest = swFullBestMap.get(evKey);
-                                    const splitBest = swSplitBestMap.get(evKey);
-                                    const label = (fullBest || splitBest).eventLabel.replace(
-                                      /^(Women|Men)\s+/i,
-                                      ''
-                                    );
-                                    return (
-                                      <div
-                                        key={evKey}
-                                        className="flex items-center justify-between text-xs bg-white px-2.5 py-1.5 rounded-lg border border-slate-100 gap-2"
-                                      >
-                                        <span className="text-slate-600 truncate">{label}</span>
-                                        <div className="flex items-center gap-1.5 font-mono font-bold shrink-0">
-                                          {fullBest && (
-                                            <span className="text-slate-900">{fullBest.time}</span>
-                                          )}
-                                          {splitBest && (
-                                            <span
-                                              title={
-                                                splitBest.splitContext ||
-                                                'Best Intermediate Split (S)'
-                                              }
-                                              className="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
-                                            >
-                                              {splitBest.time} (S)
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
 
-                              {meetEntries.length > 0 && (
-                                <div className="pt-2 border-t border-slate-200/80 space-y-1">
-                                  <div className="text-[10px] font-bold uppercase text-indigo-700">
-                                    Loaded Meet Swims ({meetEntries.length})
+                              <div className="flex items-center gap-3 sm:text-right shrink-0 font-mono text-xs">
+                                <div>
+                                  <div className="text-[10px] font-sans text-slate-400">
+                                    Flat {relayOptBasis}
+                                    {legData.sourceLabel && legData.sourceLabel !== 'Official'
+                                      ? ` (${legData.sourceLabel})`
+                                      : ''}
                                   </div>
-                                  {meetEntries.map((mEntry) => {
-                                    const badges = benchmarkIndex.evaluateSwim(
-                                      ath.canonicalName,
-                                      mEntry.eventLabel,
-                                      mEntry.finalsTime,
-                                      mEntry.classYear
-                                    );
-                                    const hitStds = evaluateStandardsForSwim(
-                                      mEntry.eventLabel,
-                                      mEntry.finalsTime
-                                    );
-                                    return (
-                                      <div
-                                        key={mEntry.id}
-                                        className="flex items-center justify-between gap-1.5 text-[11px] bg-indigo-50/70 px-2 py-1 rounded border border-indigo-100"
-                                      >
-                                        <span className="text-slate-700 truncate">
-                                          {mEntry.eventLabel.replace(/^(Women|Men)\s+/i, '')}
-                                        </span>
-                                        <div className="flex items-center gap-1 font-mono font-bold shrink-0">
-                                          <span className="text-slate-900">
-                                            {mEntry.finalsTime}
-                                          </span>
-                                          {badges.slice(0, 2).map((b, idx) => (
-                                            <span
-                                              key={idx}
-                                              className="px-1 py-0.2 rounded text-[9px] font-sans font-bold bg-amber-100 text-amber-900"
-                                            >
-                                              {b.label}
-                                            </span>
-                                          ))}
-                                          {hitStds.map((s) => (
-                                            <span
-                                              key={s.id}
-                                              className={`px-1 py-0.2 rounded text-[9px] font-sans font-bold ${getStandardBadgeStyle(
-                                                s.label
-                                              )}`}
-                                            >
-                                              {s.label}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+                                  <div className="font-semibold text-slate-700">
+                                    {legData.flatTime}
+                                  </div>
                                 </div>
-                              )}
+                                <div className="bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-lg">
+                                  <div className="text-[10px] font-sans font-bold text-indigo-700">
+                                    {idx === 0 ? 'Lead-Off' : `Relay (${relayOptExchangeDelta >= 0 ? '+' : ''}${relayOptExchangeDelta.toFixed(2)}s)`}
+                                  </div>
+                                  <div className="font-black text-indigo-950">
+                                    {legData.projTime}
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           );
                         })}
+                      </div>
                     </div>
-                  )}
-                </div>
-              )}
+                  );
+                };
+
+                return (
+                  <div className="p-5 sm:p-6 space-y-5">
+                    {/* Controls Bar */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                      <div className="md:col-span-5">
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                          Relay Event
+                        </label>
+                        <select
+                          value={relayOptEventKey}
+                          onChange={(e) => {
+                            setRelayOptEventKey(e.target.value);
+                            setRelayOptManualA(['', '', '', '']);
+                            setRelayOptManualB(['', '', '', '']);
+                          }}
+                          className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          {Object.keys(relayEventSpecs).map((rk) => (
+                            <option key={rk} value={rk}>
+                              {toTitleEventLabel(rk)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="md:col-span-4">
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                          Split Forecast Basis
+                        </label>
+                        <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                          <button
+                            type="button"
+                            onClick={() => setRelayOptBasis('PB')}
+                            className={`flex-1 py-1.5 rounded-md transition cursor-pointer ${
+                              relayOptBasis === 'PB'
+                                ? 'bg-white text-slate-900 shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            Career PB
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRelayOptBasis('SB')}
+                            className={`flex-1 py-1.5 rounded-md transition cursor-pointer ${
+                              relayOptBasis === 'SB'
+                                ? 'bg-white text-slate-900 shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            Season Best (SB)
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="md:col-span-3">
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                          Flying Exchange Delta (Legs 2–4)
+                        </label>
+                        <select
+                          value={relayOptExchangeDelta}
+                          onChange={(e) => setRelayOptExchangeDelta(parseFloat(e.target.value))}
+                          className="w-full px-3 py-2 text-xs font-mono font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          <option value={0}>0.00s (Raw Flat-Start Sum)</option>
+                          <option value={-0.3}>-0.30s (Conservative Exchange)</option>
+                          <option value={-0.45}>-0.45s (Standard College Exchange)</option>
+                          <option value={-0.6}>-0.60s (Aggressive Exchange)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Reference Benchmarks Strip */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-xs">
+                        <div className="text-[10px] font-bold uppercase text-amber-800">
+                          School Relay Record
+                        </div>
+                        <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                          {schoolRelayRec ? (
+                            <>
+                              <span className="font-mono text-amber-900">
+                                {schoolRelayRec.time}
+                              </span>{' '}
+                              ({formatDisplayDateMDY(schoolRelayRec.date)})
+                            </>
+                          ) : (
+                            <span className="text-slate-500 font-normal">No relay record in DB</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 text-xs">
+                        <div className="text-[10px] font-bold uppercase text-indigo-800">
+                          #10 All-Time Relay Cut
+                        </div>
+                        <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                          {tenthRelayRec ? (
+                            <span className="font-mono text-indigo-900">
+                              {tenthRelayRec.time}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 font-normal">
+                              {sortedRelayHist.length > 0
+                                ? `Open spot (${sortedRelayHist.length}/10 relays)`
+                                : 'No relay marks in DB'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                        <div className="text-[10px] font-bold uppercase text-slate-600">
+                          Defined Relay Standards
+                        </div>
+                        {matchingRelayStds.length === 0 ? (
+                          <div className="text-slate-500 mt-0.5">None set for this relay</div>
+                        ) : (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {matchingRelayStds.map((std) => (
+                              <span
+                                key={std.id}
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getStandardBadgeStyle(
+                                  std.label
+                                )}`}
+                              >
+                                {std.label}: <span className="font-mono">{std.time}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {activeGenderRoster.length === 0 ? (
+                      <div className="text-center py-10 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                        Add active {spec.gender} swimmers in{' '}
+                        <strong>Section 1 → Master Roster</strong> to generate optimal relay
+                        lineups.
+                      </div>
+                    ) : (
+                      <>
+                        {/* A-Relay & B-Relay Side-by-Side Cards */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                          {renderSquadCard(
+                            'Optimal A-Relay',
+                            'bg-indigo-600 text-white',
+                            effectiveA,
+                            totalSecA,
+                            relayOptManualA,
+                            setRelayOptManualA
+                          )}
+                          {renderSquadCard(
+                            'Optimal B-Relay',
+                            'bg-slate-800 text-white',
+                            effectiveB,
+                            totalSecB,
+                            relayOptManualB,
+                            setRelayOptManualB
+                          )}
+                        </div>
+
+                        {/* Swimmer Availability Toggles (Scratch / Rest Swimmers from Relay Pool) */}
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                              Active {spec.gender} Pool Availability (Click to Scratch / Rest from
+                              Auto-Optimizer)
+                            </span>
+                            {relayOptExcludedKeys.size > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setRelayOptExcludedKeys(new Set())}
+                                className="text-[11px] font-bold text-indigo-700 hover:underline cursor-pointer"
+                              >
+                                Restore All ({relayOptExcludedKeys.size} scratched)
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {activeGenderRoster.map((ath) => {
+                              const k = normalizeSwimmerKey(ath.canonicalName);
+                              const isExcluded = relayOptExcludedKeys.has(k);
+                              return (
+                                <button
+                                  key={ath.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setRelayOptExcludedKeys((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(k)) next.delete(k);
+                                      else next.add(k);
+                                      return next;
+                                    });
+                                  }}
+                                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                                    isExcluded
+                                      ? 'bg-slate-200/70 text-slate-400 border-slate-300 line-through'
+                                      : 'bg-white text-slate-800 border-slate-200 hover:border-indigo-400'
+                                  }`}
+                                >
+                                  {ath.canonicalName}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* SUB-TAB 3: QUALIFYING STANDARDS & POOL RECORDS */}
               {inMeetSubTab === 'standards' && (
