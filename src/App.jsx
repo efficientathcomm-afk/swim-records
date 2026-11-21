@@ -1438,6 +1438,12 @@ export default function App() {
   // File Input Refs
   const fileInputRef = useRef(null);
   const historyCsvInputRef = useRef(null);
+  const awayLogoInputRef = useRef(null);
+  const homeLogoInputRef = useRef(null);
+
+  // Optional Meet Logos for Standalone Web Recap (.HTML) Export (Session-only, not saved to DB)
+  const [awayLogoDataUrl, setAwayLogoDataUrl] = useState('');
+  const [homeLogoDataUrl, setHomeLogoDataUrl] = useState('');
 
   // Saved Meet Repository ("Load Past Meet") State
   const [savedMeets, setSavedMeets] = useState(() => {
@@ -3168,6 +3174,22 @@ const rRowId = `cl2-lo-${entry.id}`;
       setMeetErrorMsg('Error reading the selected file.');
     };
     reader.readAsText(file);
+  };
+
+  const handleLogoFileSelect = (fileOrEvent, side) => {
+    const file = fileOrEvent?.target ? fileOrEvent.target.files?.[0] : fileOrEvent;
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setBenchmarkStatusMsg('Please select a valid image file (PNG, JPG, SVG, or WebP) for the logo.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = String(ev.target?.result || '');
+      if (side === 'away') setAwayLogoDataUrl(dataUrl);
+      else setHomeLogoDataUrl(dataUrl);
+    };
+    reader.readAsDataURL(file);
   };
 
   const toggleRow = (id) => {
@@ -4922,26 +4944,39 @@ const rRowId = `cl2-lo-${entry.id}`;
       color: #fff;
       border-radius: 18px;
       padding: 24px 28px;
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: minmax(76px, auto) 1fr minmax(76px, auto);
       align-items: center;
-      gap: 18px;
+      gap: 20px;
       box-shadow: 0 10px 25px -10px rgba(15, 23, 42, 0.35);
     }
+    .hero-center { text-align: center; }
     .hero h1 { margin: 0; font-size: 1.55rem; font-weight: 800; letter-spacing: -0.02em; }
-    .hero-meta { margin-top: 6px; font-size: 0.85rem; color: #cbd5e1; display: flex; flex-wrap: wrap; gap: 14px; }
-    .kpis { display: flex; gap: 10px; }
-    .kpi {
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 12px;
-      padding: 10px 16px;
-      text-align: center;
-      min-width: 84px;
+    .hero-meta { margin-top: 6px; font-size: 0.85rem; color: #cbd5e1; display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; }
+    .logo-slot { display: flex; align-items: center; }
+    .logo-slot.left { justify-content: flex-start; }
+    .logo-slot.right { justify-content: flex-end; }
+    .logo-box {
+      width: 78px;
+      height: 78px;
+      border-radius: 16px;
+      background: #ffffff;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.25);
     }
-    .kpi-lbl { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: #a5f3fc; font-weight: 700; }
-    .kpi-val { font-size: 1.35rem; font-weight: 800; margin-top: 2px; }
+    .logo-box img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    @media (max-width: 640px) {
+      .hero { grid-template-columns: 1fr; text-align: center; }
+      .logo-slot.left, .logo-slot.right { justify-content: center; }
+    }
     .scores-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 18px; }
     .card {
       background: var(--card);
@@ -5074,7 +5109,14 @@ const rRowId = `cl2-lo-${entry.id}`;
 <body>
   <div class="container">
     <header class="hero">
-      <div>
+      <div class="logo-slot left">
+        ${
+          awayLogoDataUrl
+            ? `<div class="logo-box"><img src="${awayLogoDataUrl}" alt="Away Team Logo" /></div>`
+            : ''
+        }
+      </div>
+      <div class="hero-center">
         <h1>${escapeHtml(meetTitle)}</h1>
         <div class="hero-meta">
           ${meetDate ? `<span>📅 ${escapeHtml(meetDate)}</span>` : ''}
@@ -5082,10 +5124,12 @@ const rRowId = `cl2-lo-${entry.id}`;
           ${parsedData.meetInfo.software ? `<span>⏱️ ${escapeHtml(parsedData.meetInfo.software)}</span>` : ''}
         </div>
       </div>
-      <div class="kpis">
-        <div class="kpi"><div class="kpi-lbl">Teams</div><div class="kpi-val">${parsedData.stats.totalTeams}</div></div>
-        <div class="kpi"><div class="kpi-lbl">Swimmers</div><div class="kpi-val">${parsedData.stats.totalSwimmers}</div></div>
-        <div class="kpi"><div class="kpi-lbl">Swims</div><div class="kpi-val">${parsedData.stats.totalSwims}</div></div>
+      <div class="logo-slot right">
+        ${
+          homeLogoDataUrl
+            ? `<div class="logo-box"><img src="${homeLogoDataUrl}" alt="Home Team Logo" /></div>`
+            : ''
+        }
       </div>
     </header>
 
@@ -12994,32 +13038,146 @@ const rRowId = `cl2-lo-${entry.id}`;
                       <h3 className="text-base font-extrabold text-slate-900">
                         SID Post-Meet Recap Notes
                       </h3>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          onClick={handleExportWebRecapHtml}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer"
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                          Export Web Recap (.HTML)
-                        </button>
-                        <button
-                          onClick={handleCopyRecap}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
-                        >
-                          {copiedRecap ? (
-                            <>
-                              <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              Copied!
-                            </>
-                          ) : (
-                            <>
-                              <ClipboardCopy className="w-3.5 h-3.5 text-cyan-400" />
-                              Copy Recap
-                            </>
-                          )}
-                        </button>
-                      </div>
+                      <button
+                        onClick={handleCopyRecap}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+                      >
+                        {copiedRecap ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            Copied!
+                          </>
+                        ) : (
+                          <>
+                            <ClipboardCopy className="w-3.5 h-3.5 text-cyan-400" />
+                            Copy Recap
+                          </>
+                        )}
+                      </button>
                     </div>
+
+                    {/* Optional Away & Home Logos + Standalone Web Recap (.HTML) Export */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                          Web Recap Header Logos (Optional)
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          Embedded directly in exported .HTML (not saved to DB)
+                        </span>
+                      </div>
+
+                      <input
+                        ref={awayLogoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          handleLogoFileSelect(e, 'away');
+                          e.target.value = '';
+                        }}
+                      />
+                      <input
+                        ref={homeLogoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          handleLogoFileSelect(e, 'home');
+                          e.target.value = '';
+                        }}
+                      />
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {/* Away Logo Picker */}
+                        <div className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {awayLogoDataUrl ? (
+                              <img
+                                src={awayLogoDataUrl}
+                                alt="Away Logo Preview"
+                                className="w-7 h-7 rounded-md object-contain bg-white border border-slate-200 p-0.5 shrink-0"
+                              />
+                            ) : (
+                              <div className="w-7 h-7 rounded-md bg-slate-100 border border-dashed border-slate-300 flex items-center justify-center text-[10px] font-bold text-slate-400 shrink-0">
+                                L
+                              </div>
+                            )}
+                            <span className="text-xs font-bold text-slate-700 truncate">
+                              {awayLogoDataUrl ? 'Away Logo Ready' : 'Away Logo (Left)'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => awayLogoInputRef.current?.click()}
+                              className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 transition cursor-pointer"
+                            >
+                              {awayLogoDataUrl ? 'Change' : 'Add Away Logo'}
+                            </button>
+                            {awayLogoDataUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setAwayLogoDataUrl('')}
+                                title="Remove Away Logo"
+                                className="p-1 rounded text-slate-400 hover:text-red-600 cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Home Logo Picker */}
+                        <div className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {homeLogoDataUrl ? (
+                              <img
+                                src={homeLogoDataUrl}
+                                alt="Home Logo Preview"
+                                className="w-7 h-7 rounded-md object-contain bg-white border border-slate-200 p-0.5 shrink-0"
+                              />
+                            ) : (
+                              <div className="w-7 h-7 rounded-md bg-slate-100 border border-dashed border-slate-300 flex items-center justify-center text-[10px] font-bold text-slate-400 shrink-0">
+                                R
+                              </div>
+                            )}
+                            <span className="text-xs font-bold text-slate-700 truncate">
+                              {homeLogoDataUrl ? 'Home Logo Ready' : 'Home Logo (Right)'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => homeLogoInputRef.current?.click()}
+                              className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 transition cursor-pointer"
+                            >
+                              {homeLogoDataUrl ? 'Change' : 'Add Home Logo'}
+                            </button>
+                            {homeLogoDataUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setHomeLogoDataUrl('')}
+                                title="Remove Home Logo"
+                                className="p-1 rounded text-slate-400 hover:text-red-600 cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleExportWebRecapHtml}
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition cursor-pointer"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        Export Web Recap (.HTML)
+                      </button>
+                    </div>
+
                     <textarea
                       readOnly
                       value={generatedRecapText}
