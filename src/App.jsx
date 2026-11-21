@@ -4401,6 +4401,688 @@ const rRowId = `cl2-lo-${entry.id}`;
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  // Self-Contained Single-Page Interactive Web Recap (.HTML) Export
+  const handleExportWebRecapHtml = () => {
+    if (!parsedData) return;
+
+    const escapeHtml = (val) =>
+      String(val ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const meetTitle = parsedData.meetInfo.name || 'Swim Meet Results';
+    const meetDate = parsedData.meetInfo.startDate || '';
+    const meetLoc = [parsedData.meetInfo.city, parsedData.meetInfo.state].filter(Boolean).join(', ');
+    const primaryTeamObj =
+      selectedTeam !== 'ALL'
+        ? parsedData.teams.find((t) => t.code === selectedTeam)
+        : parsedData.teams.find((t) => String(t.name || '').toLowerCase().includes('gettysburg'));
+
+    // Build chronological event list (Individual + Relay)
+    const eventMap = new Map();
+    parsedData.individualResults.forEach((r) => {
+      const k = `${r.eventNumber}|${r.eventLabel}`;
+      if (!eventMap.has(k)) {
+        eventMap.set(k, {
+          key: k,
+          eventNumber: Number(r.eventNumber) || 999,
+          eventLabel: r.eventLabel,
+          genderLabel: r.genderLabel,
+          course: r.course,
+          isRelay: false,
+          entries: [],
+        });
+      }
+      eventMap.get(k).entries.push(r);
+    });
+    parsedData.relayResults.forEach((r) => {
+      const k = `${r.eventNumber}|${r.eventLabel}`;
+      if (!eventMap.has(k)) {
+        eventMap.set(k, {
+          key: k,
+          eventNumber: Number(r.eventNumber) || 999,
+          eventLabel: r.eventLabel,
+          genderLabel: r.genderLabel,
+          course: r.course,
+          isRelay: true,
+          entries: [],
+        });
+      }
+      eventMap.get(k).entries.push(r);
+    });
+
+    const orderedEvents = Array.from(eventMap.values()).sort(
+      (a, b) => a.eventNumber - b.eventNumber
+    );
+
+    // Team Scoreboards HTML
+    const womenScores = [...(parsedData.teamScores || [])].sort(
+      (a, b) => b.womenPoints - a.womenPoints
+    );
+    const menScores = [...(parsedData.teamScores || [])].sort(
+      (a, b) => b.menPoints - a.menPoints
+    );
+
+    const renderScoreList = (list, key) =>
+      list
+        .map((t, idx) => {
+          const hex = getTeamHexColor(t.code, t.name);
+          const pts = t[key] || 0;
+          return `<div class="score-row ${idx === 0 && pts > 0 ? 'leader' : ''}">
+            <div class="score-team">
+              <span class="team-dot" style="background:${escapeHtml(hex)}"></span>
+              <span>${escapeHtml(t.name)}</span>
+            </div>
+            <span class="score-pts">${escapeHtml(pts)}</span>
+          </div>`;
+        })
+        .join('');
+
+    // Multi-Win Leaders HTML
+    const winsHtml =
+      winSummary.athletes.length > 0
+        ? `<section class="card">
+            <div class="card-head">
+              <h2>Event Winners &amp; Multi-Win Leaders</h2>
+              <span class="pill">${escapeHtml(
+                primaryTeamObj ? primaryTeamObj.name : 'All Teams'
+              )} • ${winSummary.totalWins} Wins</span>
+            </div>
+            <div class="wins-grid">
+              ${winSummary.athletes
+                .map((ath) => {
+                  const total = ath.indWins + ath.relWins;
+                  return `<div class="win-card">
+                    <div class="win-top">
+                      <div>
+                        <div class="win-name">${escapeHtml(ath.name)}</div>
+                        <div class="win-team">${escapeHtml(ath.teamName)}</div>
+                      </div>
+                      <div class="win-badge">${total} Win${total > 1 ? 's' : ''} (${ath.indWins}I / ${ath.relWins}R)</div>
+                    </div>
+                    <ul class="win-events">
+                      ${ath.events.map((ev) => `<li>${escapeHtml(ev)}</li>`).join('')}
+                    </ul>
+                  </div>`;
+                })
+                .join('')}
+            </div>
+          </section>`
+        : '';
+
+    // Event Cards HTML
+    const eventsHtml = orderedEvents
+      .map((evGrp) => {
+        const sortedEntries = [...evGrp.entries].sort((a, b) => {
+          const pA = a.place ?? 9999;
+          const pB = b.place ?? 9999;
+          if (pA !== pB) return pA - pB;
+          return (a.timeSeconds ?? Infinity) - (b.timeSeconds ?? Infinity);
+        });
+        const validTimes = sortedEntries
+          .map((e) => e.timeSeconds)
+          .filter((t) => Number.isFinite(t));
+        const fastestSec = validTimes.length > 0 ? Math.min(...validTimes) : Infinity;
+
+        const rowsHtml = sortedEntries
+          .map((row) => {
+            const teamHex = getTeamHexColor(row.teamCode, row.teamName);
+            const behindSec =
+              Number.isFinite(row.timeSeconds) && Number.isFinite(fastestSec)
+                ? row.timeSeconds - fastestSec
+                : Infinity;
+            const behindLabel = Number.isFinite(behindSec)
+              ? behindSec < 0.005
+                ? '<span class="tag-leader">Leader</span>'
+                : `+${behindSec.toFixed(2)}s`
+              : '—';
+
+            const isPrimary =
+              selectedTeam !== 'ALL'
+                ? row.teamCode === selectedTeam
+                : String(row.teamName || '').toLowerCase().includes('gettysburg');
+
+            if (evGrp.isRelay) {
+              const legsBreakdown = calculateRelayLegBreakdown(row);
+              const hasDetails = legsBreakdown.length > 0;
+              const detailId = `det-${escapeHtml(row.id)}`;
+              const legsSummary = legsBreakdown
+                .map(
+                  (l) =>
+                    `${l.legOrder}) ${formatSwimmerDisplay(l.swimmerName, l.preferredFirst)}`
+                )
+                .join(' • ');
+
+              const legRowsHtml = legsBreakdown
+                .map(
+                  (leg) => `<tr>
+                    <td><strong>Leg ${leg.legOrder}</strong></td>
+                    <td>${escapeHtml(
+                      formatSwimmerDisplay(leg.swimmerName, leg.preferredFirst)
+                    )}</td>
+                    <td>${escapeHtml(leg.classYear || '—')}</td>
+                    <td class="mono">${
+                      leg.subSplits.length > 0
+                        ? leg.subSplits
+                            .map((s) => `${escapeHtml(s.subDistance)}: <strong>${escapeHtml(s.lap)}</strong>`)
+                            .join(' &nbsp;|&nbsp; ')
+                        : '—'
+                    }</td>
+                    <td class="mono right"><strong>${escapeHtml(leg.legTotalTime)}</strong></td>
+                    <td class="mono right">${escapeHtml(leg.endCumulativeTime)}</td>
+                  </tr>`
+                )
+                .join('');
+
+              return `<tr class="res-row ${hasDetails ? 'clickable' : ''}" data-team="${escapeHtml(
+                row.teamCode
+              )}" style="border-left:4px solid ${escapeHtml(teamHex)}" ${
+                hasDetails ? `onclick="toggleSplitRow('${detailId}', this)"` : ''
+              }>
+                <td class="center">${
+                  row.place ? `<span class="place-badge p-${row.place}">${row.place}</span>` : '—'
+                }</td>
+                <td>
+                  <div class="sw-name">${escapeHtml(row.relayTitle)}</div>
+                  <div class="sw-sub">${escapeHtml(legsSummary || 'Relay Squad')}</div>
+                </td>
+                <td>${escapeHtml(row.teamName)}</td>
+                <td class="mono right"><strong>${escapeHtml(row.finalsTime)}</strong></td>
+                <td class="mono right">${behindLabel}</td>
+                <td class="mono center">${row.points > 0 ? row.points : '—'}</td>
+                <td class="right">${
+                  hasDetails
+                    ? `<button type="button" class="split-btn">Legs (${legsBreakdown.length}) ▾</button>`
+                    : '<span class="muted">—</span>'
+                }</td>
+              </tr>
+              ${
+                hasDetails
+                  ? `<tr id="${detailId}" class="split-drawer hidden">
+                      <td colspan="7">
+                        <div class="drawer-box">
+                          <div class="drawer-title">Relay Leg Breakdown — ${escapeHtml(
+                            row.relayTitle
+                          )}</div>
+                          <table class="sub-table">
+                            <thead>
+                              <tr>
+                                <th>Leg</th>
+                                <th>Swimmer</th>
+                                <th>Class</th>
+                                <th>Sub-Splits</th>
+                                <th class="right">Leg Time</th>
+                                <th class="right">Cumulative</th>
+                              </tr>
+                            </thead>
+                            <tbody>${legRowsHtml}</tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>`
+                  : ''
+              }`;
+            }
+
+            // Individual Swim Row
+            const dispName = formatSwimmerDisplay(row.swimmerName, row.preferredFirst);
+            const tags = isPrimary
+              ? benchmarkIndex.evaluateSwim(dispName, row.eventLabel, row.finalsTime, row.classYear)
+              : [];
+            const hitStds = evaluateStandardsForSwim(row.eventLabel, row.finalsTime);
+            const badgesHtml = [
+              ...tags.map((t) => `<span class="badge badge-rec">${escapeHtml(t.label)}</span>`),
+              ...hitStds.map((s) => `<span class="badge badge-std">${escapeHtml(s.label)}</span>`),
+            ].join('');
+
+            const hasSplits = row.splits && row.splits.length > 0;
+            const detailId = `det-${escapeHtml(row.id)}`;
+            let drawerHtml = '';
+
+            if (hasSplits) {
+              const analysis = calculateSplitBreakdown(
+                row.splits,
+                row.distance,
+                row.splitInterval,
+                row.splitType
+              );
+              const { minLap, maxLap } = analysis.stats || { minLap: 0, maxLap: 1 };
+              const range = Math.max(maxLap - minLap, 0.5);
+              const barsHtml =
+                analysis.stats && analysis.rows.length > 1
+                  ? `<div class="pacing-wrap">
+                      <div class="pacing-label">Lap Pacing Comparison (shorter bar = faster lap • Avg: <strong>${escapeHtml(
+                        analysis.stats.avgLap
+                      )}</strong>)</div>
+                      <div class="pacing-bars">
+                        ${analysis.rows
+                          .map((s) => {
+                            const hPct = Number.isFinite(s.lapSec)
+                              ? Math.round(32 + ((s.lapSec - minLap) / range) * 68)
+                              : 50;
+                            const cls = s.isFastest
+                              ? 'bar-fast'
+                              : s.isSlowest
+                              ? 'bar-slow'
+                              : 'bar-mid';
+                            return `<div class="bar-col" title="${escapeHtml(
+                              s.distanceLabel
+                            )}: Lap ${escapeHtml(s.lap)} (Cum ${escapeHtml(s.cumulative)})">
+                              <div class="bar-track"><div class="bar-fill ${cls}" style="height:${hPct}%"></div></div>
+                              <span>${s.distance}</span>
+                            </div>`;
+                          })
+                          .join('')}
+                      </div>
+                    </div>`
+                  : '';
+
+              const splitTableRows = analysis.rows
+                .map(
+                  (s) => `<tr class="${s.isFastest ? 'row-fast' : s.isSlowest ? 'row-slow' : ''}">
+                    <td><strong>${escapeHtml(s.distanceLabel)}</strong></td>
+                    <td class="mono right"><strong>${escapeHtml(s.cumulative)}</strong></td>
+                    <td class="mono right cyan"><strong>${escapeHtml(s.lap)}</strong></td>
+                    <td class="right">${
+                      s.isFastest
+                        ? '<span class="badge badge-fast">Fastest Lap</span>'
+                        : s.isSlowest
+                        ? '<span class="badge badge-slow">Slowest Lap</span>'
+                        : '—'
+                    }</td>
+                  </tr>`
+                )
+                .join('');
+
+              drawerHtml = `<tr id="${detailId}" class="split-drawer hidden">
+                <td colspan="7">
+                  <div class="drawer-box">
+                    <div class="drawer-title">Split Breakdown (${
+                      analysis.stats?.interval || 50
+                    }y Intervals) — ${escapeHtml(dispName)}</div>
+                    ${barsHtml}
+                    <table class="sub-table">
+                      <thead>
+                        <tr>
+                          <th>Distance</th>
+                          <th class="right">Cumulative</th>
+                          <th class="right">Lap Split</th>
+                          <th class="right">Pace Note</th>
+                        </tr>
+                      </thead>
+                      <tbody>${splitTableRows}</tbody>
+                    </table>
+                  </div>
+                </td>
+              </tr>`;
+            }
+
+            return `<tr class="res-row ${hasSplits ? 'clickable' : ''}" data-team="${escapeHtml(
+              row.teamCode
+            )}" style="border-left:4px solid ${escapeHtml(teamHex)}" ${
+              hasSplits ? `onclick="toggleSplitRow('${detailId}', this)"` : ''
+            }>
+              <td class="center">${
+                row.place ? `<span class="place-badge p-${row.place}">${row.place}</span>` : '—'
+              }</td>
+              <td>
+                <div class="sw-name">${escapeHtml(dispName)} ${badgesHtml}</div>
+                <div class="sw-sub">${row.classYear ? `Class: ${escapeHtml(row.classYear)} • ` : ''}${
+              row.heat ? `Heat ${escapeHtml(row.heat)}` : ''
+            }${row.heat && row.lane ? ' • ' : ''}${
+              row.lane ? `Lane ${escapeHtml(row.lane)}` : ''
+            }</div>
+              </td>
+              <td>${escapeHtml(row.teamName)}</td>
+              <td class="mono right"><strong>${escapeHtml(row.finalsTime)}</strong></td>
+              <td class="mono right">${behindLabel}</td>
+              <td class="mono center">${row.points > 0 ? row.points : '—'}</td>
+              <td class="right">${
+                hasSplits
+                  ? `<button type="button" class="split-btn">Splits (${row.splits.length}) ▾</button>`
+                  : '<span class="muted">—</span>'
+              }</td>
+            </tr>${drawerHtml}`;
+          })
+          .join('');
+
+        return `<section class="card event-card" data-gender="${escapeHtml(evGrp.genderLabel)}">
+          <div class="event-head">
+            <div class="event-title-wrap">
+              <span class="ev-num">Event #${evGrp.eventNumber}</span>
+              <div>
+                <h3>${escapeHtml(evGrp.eventLabel)}</h3>
+                <p>${sortedEntries.length} ${
+          evGrp.isRelay ? 'Relay Entries' : 'Swimmers'
+        } • ${escapeHtml(evGrp.course)}</p>
+              </div>
+            </div>
+            <button type="button" class="expand-ev-btn" onclick="toggleEventSplits(this)">Toggle Event Splits</button>
+          </div>
+          <div class="table-wrap">
+            <table class="main-table">
+              <thead>
+                <tr>
+                  <th class="center" style="width:64px">Place</th>
+                  <th>${evGrp.isRelay ? 'Relay Squad' : 'Swimmer'}</th>
+                  <th>Team</th>
+                  <th class="right">Finals Time</th>
+                  <th class="right">Behind</th>
+                  <th class="center" style="width:60px">Pts</th>
+                  <th class="right" style="width:115px">Details</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        </section>`;
+      })
+      .join('');
+
+    const teamOptionsHtml = parsedData.teams
+      .map((t) => `<option value="${escapeHtml(t.code)}">${escapeHtml(t.name)}</option>`)
+      .join('');
+
+    const fullHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(meetTitle)} — Meet Results &amp; Splits</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --navy: #0f172a;
+      --cyan: #0284c7;
+      --cyan-soft: #e0f2fe;
+      --emerald: #059669;
+      --amber: #d97706;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.45;
+    }
+    .container { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; }
+    .hero {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #083344 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 24px 28px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      box-shadow: 0 10px 25px -10px rgba(15, 23, 42, 0.35);
+    }
+    .hero h1 { margin: 0; font-size: 1.55rem; font-weight: 800; letter-spacing: -0.02em; }
+    .hero-meta { margin-top: 6px; font-size: 0.85rem; color: #cbd5e1; display: flex; flex-wrap: wrap; gap: 14px; }
+    .kpis { display: flex; gap: 10px; }
+    .kpi {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 10px 16px;
+      text-align: center;
+      min-width: 84px;
+    }
+    .kpi-lbl { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: #a5f3fc; font-weight: 700; }
+    .kpi-val { font-size: 1.35rem; font-weight: 800; margin-top: 2px; }
+    .scores-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 18px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-top: 18px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    }
+    .score-card { padding: 16px 18px; margin-top: 0; }
+    .score-card h2 { margin: 0 0 10px; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; }
+    .score-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 12px; border-radius: 10px; border: 1px solid #f1f5f9;
+      background: #f8fafc; margin-bottom: 6px; font-size: 0.88rem;
+    }
+    .score-row.leader { background: #fff; border-color: #fde68a; font-weight: 700; }
+    .score-team { display: flex; align-items: center; gap: 8px; }
+    .team-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
+    .score-pts { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 800; font-size: 1rem; }
+    .toolbar {
+      background: #fff; border: 1px solid var(--border); border-radius: 14px;
+      padding: 12px 16px; margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+    }
+    .toolbar-left { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: 1; }
+    .toolbar input, .toolbar select {
+      padding: 8px 12px; border-radius: 9px; border: 1px solid var(--border); font-size: 0.82rem; background: #f8fafc; color: var(--ink);
+    }
+    .toolbar input { min-width: 220px; flex: 1; max-width: 320px; }
+    .btn {
+      padding: 8px 12px; border-radius: 9px; border: 1px solid var(--border); background: #fff;
+      font-size: 0.78rem; font-weight: 700; cursor: pointer; color: var(--ink);
+    }
+    .btn:hover { background: #f1f5f9; }
+    .card-head {
+      padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px;
+    }
+    .card-head h2 { margin: 0; font-size: 0.98rem; font-weight: 800; }
+    .pill { font-size: 0.75rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--cyan-soft); color: #075985; }
+    .wins-grid { padding: 14px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+    .win-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: #f8fafc; }
+    .win-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .win-name { font-weight: 800; font-size: 0.9rem; }
+    .win-team { font-size: 0.72rem; color: var(--muted); }
+    .win-badge { font-size: 0.72rem; font-weight: 800; color: #0369a1; background: #e0f2fe; padding: 2px 8px; border-radius: 8px; white-space: nowrap; }
+    .win-events { margin: 8px 0 0; padding-left: 16px; font-size: 0.78rem; color: #334155; }
+    .event-head {
+      background: var(--navy); color: #fff; padding: 12px 18px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px;
+    }
+    .event-title-wrap { display: flex; align-items: center; gap: 12px; }
+    .ev-num {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; font-weight: 800;
+      padding: 4px 10px; border-radius: 8px; background: rgba(6, 182, 212, 0.2); color: #67e8f9; border: 1px solid rgba(34, 211, 238, 0.3);
+    }
+    .event-head h3 { margin: 0; font-size: 0.98rem; font-weight: 800; }
+    .event-head p { margin: 2px 0 0; font-size: 0.74rem; color: #94a3b8; }
+    .expand-ev-btn {
+      background: #1e293b; color: #67e8f9; border: 1px solid #334155; border-radius: 8px;
+      padding: 6px 10px; font-size: 0.74rem; font-weight: 700; cursor: pointer;
+    }
+    .table-wrap { overflow-x: auto; }
+    .main-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; text-align: left; }
+    .main-table th {
+      background: #f8fafc; color: #475569; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 10px 12px; border-bottom: 1px solid var(--border);
+    }
+    .main-table td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    .res-row.clickable { cursor: pointer; }
+    .res-row.clickable:hover { background: #f0f9ff; }
+    .sw-name { font-weight: 700; color: var(--ink); display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+    .sw-sub { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+    .right { text-align: right; }
+    .center { text-align: center; }
+    .muted { color: #94a3b8; font-size: 0.75rem; }
+    .cyan { color: #0369a1; }
+    .place-badge {
+      display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px;
+      border-radius: 999px; font-size: 0.74rem; font-weight: 800; background: #f1f5f9; color: #475569;
+    }
+    .place-badge.p-1 { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    .place-badge.p-2 { background: #e2e8f0; color: #1e293b; border: 1px solid #cbd5e1; }
+    .place-badge.p-3 { background: #ffedd5; color: #9a3412; border: 1px solid #fdba74; }
+    .tag-leader {
+      display: inline-block; padding: 2px 7px; border-radius: 6px; background: #ecfdf5; color: #047857;
+      font-family: inherit; font-weight: 700; font-size: 0.72rem; border: 1px solid #a7f3d0;
+    }
+    .badge { display: inline-block; padding: 1px 6px; border-radius: 5px; font-size: 0.66rem; font-weight: 800; }
+    .badge-rec { background: #fef3c7; color: #78350f; border: 1px solid #fde68a; }
+    .badge-std { background: #ede9fe; color: #5b21b6; border: 1px solid #ddd6fe; }
+    .badge-fast { background: #d1fae5; color: #065f46; }
+    .badge-slow { background: #fef3c7; color: #92400e; }
+    .split-btn {
+      background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; border-radius: 999px;
+      padding: 3px 10px; font-size: 0.72rem; font-weight: 700; cursor: pointer;
+    }
+    .hidden { display: none; }
+    .split-drawer td { background: #f8fafc; padding: 12px 18px; }
+    .drawer-box { background: #fff; border: 1px solid #bae6fd; border-radius: 12px; padding: 12px 14px; }
+    .drawer-title { font-size: 0.74rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: #075985; margin-bottom: 10px; }
+    .sub-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    .sub-table th { background: #f8fafc; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 0.68rem; text-transform: uppercase; color: #475569; }
+    .sub-table td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; }
+    .row-fast td { background: #ecfdf5; }
+    .row-slow td { background: #fffbeb; }
+    .pacing-wrap { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+    .pacing-label { font-size: 0.72rem; color: #475569; margin-bottom: 8px; }
+    .pacing-bars { display: flex; align-items: flex-end; gap: 6px; height: 64px; }
+    .bar-col { flex: 1; min-width: 18px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 0.62rem; color: #64748b; font-family: ui-monospace, monospace; }
+    .bar-track { width: 100%; height: 46px; display: flex; align-items: flex-end; justify-content: center; }
+    .bar-fill { width: 100%; max-width: 24px; border-radius: 4px 4px 0 0; }
+    .bar-fast { background: #10b981; }
+    .bar-slow { background: #f59e0b; }
+    .bar-mid { background: #0ea5e9; }
+    .footer { text-align: center; font-size: 0.75rem; color: var(--muted); margin-top: 28px; }
+    @media print {
+      .toolbar, .expand-ev-btn, .split-btn { display: none !important; }
+      .split-drawer.hidden { display: table-row !important; }
+      body { background: #fff; }
+      .card { box-shadow: none; break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="hero">
+      <div>
+        <h1>${escapeHtml(meetTitle)}</h1>
+        <div class="hero-meta">
+          ${meetDate ? `<span>📅 ${escapeHtml(meetDate)}</span>` : ''}
+          ${meetLoc ? `<span>📍 ${escapeHtml(meetLoc)}</span>` : ''}
+          ${parsedData.meetInfo.software ? `<span>⏱️ ${escapeHtml(parsedData.meetInfo.software)}</span>` : ''}
+        </div>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><div class="kpi-lbl">Teams</div><div class="kpi-val">${parsedData.stats.totalTeams}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Swimmers</div><div class="kpi-val">${parsedData.stats.totalSwimmers}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Swims</div><div class="kpi-val">${parsedData.stats.totalSwims}</div></div>
+      </div>
+    </header>
+
+    ${
+      parsedData.teamScores && parsedData.teamScores.length > 0
+        ? `<div class="scores-grid">
+            <div class="card score-card"><h2>🏆 Women's Team Scores</h2>${renderScoreList(womenScores, 'womenPoints')}</div>
+            <div class="card score-card"><h2>🏆 Men's Team Scores</h2>${renderScoreList(menScores, 'menPoints')}</div>
+          </div>`
+        : ''
+    }
+
+    ${winsHtml}
+
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <input type="text" id="searchBox" placeholder="Search swimmer, relay, or team..." oninput="applyFilters()" />
+        <select id="teamFilter" onchange="applyFilters()">
+          <option value="ALL">All Teams (${parsedData.teams.length})</option>
+          ${teamOptionsHtml}
+        </select>
+        <select id="genderFilter" onchange="applyFilters()">
+          <option value="ALL">All Events (Women &amp; Men)</option>
+          <option value="Women">Women Only</option>
+          <option value="Men">Men Only</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn" onclick="toggleAllSplits(true)">Expand All Splits</button>
+        <button type="button" class="btn" onclick="toggleAllSplits(false)">Collapse All Splits</button>
+      </div>
+    </div>
+
+    ${eventsHtml}
+
+    <div class="footer">Generated by Swim Meet Command Center • Standalone Interactive Meet Recap</div>
+  </div>
+
+  <script>
+    function toggleSplitRow(id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle('hidden');
+    }
+    function toggleEventSplits(btn) {
+      var card = btn.closest('.event-card');
+      if (!card) return;
+      var drawers = card.querySelectorAll('.split-drawer');
+      if (!drawers.length) return;
+      var anyClosed = Array.prototype.some.call(drawers, function(d) { return d.classList.contains('hidden'); });
+      drawers.forEach(function(d) {
+        if (anyClosed) d.classList.remove('hidden');
+        else d.classList.add('hidden');
+      });
+    }
+    function toggleAllSplits(expand) {
+      document.querySelectorAll('.split-drawer').forEach(function(d) {
+        if (expand) d.classList.remove('hidden');
+        else d.classList.add('hidden');
+      });
+    }
+    function applyFilters() {
+      var q = (document.getElementById('searchBox').value || '').toLowerCase().trim();
+      var team = document.getElementById('teamFilter').value;
+      var gender = document.getElementById('genderFilter').value;
+
+      document.querySelectorAll('.event-card').forEach(function(card) {
+        var evGender = card.getAttribute('data-gender') || '';
+        var genderOk = (gender === 'ALL' || evGender === gender);
+        var visibleCount = 0;
+
+        card.querySelectorAll('.res-row').forEach(function(row) {
+          var rTeam = row.getAttribute('data-team') || '';
+          var teamOk = (team === 'ALL' || rTeam === team);
+          var textOk = (!q || row.textContent.toLowerCase().indexOf(q) !== -1);
+          var show = genderOk && teamOk && textOk;
+          row.style.display = show ? '' : 'none';
+          var next = row.nextElementSibling;
+          if (next && next.classList.contains('split-drawer') && !show) {
+            next.classList.add('hidden');
+          }
+          if (show) visibleCount++;
+        });
+
+        card.style.display = (genderOk && visibleCount > 0) ? '' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>`;
+
+    const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeMeetName = (parsedData.meetInfo.name || 'swim_meet')
+      .replace(/[^a-z0-9]+/gi, '_')
+      .replace(/^_|_$/g, '')
+      .toLowerCase();
+    link.href = url;
+    link.setAttribute('download', `${safeMeetName}_web_recap.html`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setBenchmarkStatusMsg(`Exported standalone interactive web recap (${safeMeetName}_web_recap.html).`);
+  };
+
   // SID Post-Meet Recap Generator
   const generatedRecapText = useMemo(() => {
     if (!parsedData) return '';
@@ -10445,6 +11127,13 @@ const rRowId = `cl2-lo-${entry.id}`;
                           <span>Export CSV</span>
                         </button>
                         <button
+                          onClick={handleExportWebRecapHtml}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Export Web Recap (.HTML)</span>
+                        </button>
+                        <button
                           onClick={() => setActiveSection('postmeet')}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 text-cyan-200 border border-white/15 transition cursor-pointer"
                         >
@@ -12160,22 +12849,31 @@ const rRowId = `cl2-lo-${entry.id}`;
                       <h3 className="text-base font-extrabold text-slate-900">
                         SID Post-Meet Recap Notes
                       </h3>
-                      <button
-                        onClick={handleCopyRecap}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
-                      >
-                        {copiedRecap ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            Copied!
-                          </>
-                        ) : (
-                          <>
-                            <ClipboardCopy className="w-3.5 h-3.5 text-cyan-400" />
-                            Copy Recap
-                          </>
-                        )}
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={handleExportWebRecapHtml}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          Export Web Recap (.HTML)
+                        </button>
+                        <button
+                          onClick={handleCopyRecap}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+                        >
+                          {copiedRecap ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <ClipboardCopy className="w-3.5 h-3.5 text-cyan-400" />
+                              Copy Recap
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <textarea
                       readOnly
