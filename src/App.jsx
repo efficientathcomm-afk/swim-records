@@ -1442,6 +1442,24 @@ export default function App() {
   const [scoutPasteText, setScoutPasteText] = useState('');
   const [scoutPasteEventHint, setScoutPasteEventHint] = useState('');
   const [scoutOurBasis, setScoutOurBasis] = useState('SB'); // 'SB' | 'PB'
+  const [scoutFormatPreset, setScoutFormatPreset] = useState('200MR_200IM_200FR');
+  const [scoutCustomEvents, setScoutCustomEvents] = useState([
+    '200 Medley Relay',
+    '1000 Freestyle',
+    '200 Freestyle',
+    '100 Backstroke',
+    '100 Breaststroke',
+    '200 Butterfly',
+    '50 Freestyle',
+    '100 Freestyle',
+    '200 Backstroke',
+    '200 Breaststroke',
+    '500 Freestyle',
+    '100 Butterfly',
+    '200 Individual Medley',
+    '200 Freestyle Relay',
+  ]);
+  const [scoutCustomEventToAdd, setScoutCustomEventToAdd] = useState('400 Individual Medley');
 
   // Virtual Dual-Meet Score Simulator State
   const [simTimeBasis, setSimTimeBasis] = useState('AUTO'); // 'AUTO' | 'SEED' | 'FINALS'
@@ -3425,12 +3443,28 @@ const rRowId = `cl2-lo-${entry.id}`;
     return parsedEntries;
   };
 
-  // Load Head-to-Head Gettysburg vs. Scouted Opponent Dual Meet into the Score Simulator
-  const handleLoadScoutIntoSimulator = (scoutObj) => {
-    if (!scoutObj) return;
-    const seasonStart = getCurrentSeasonStart();
-    const dualEvents = [
-      '200 Medley Relay',
+  // Resolve the active dual-meet event order for Swimcloud Opponent Scout (8 standard presets + Custom)
+  const getScoutDualEvents = () => {
+    const presetSpecs = {
+      '200MR_200IM_200FR': { mr: '200 Medley Relay', im: '200 Individual Medley', fr: '200 Freestyle Relay' },
+      '200MR_200IM_400FR': { mr: '200 Medley Relay', im: '200 Individual Medley', fr: '400 Freestyle Relay' },
+      '200MR_400IM_200FR': { mr: '200 Medley Relay', im: '400 Individual Medley', fr: '200 Freestyle Relay' },
+      '200MR_400IM_400FR': { mr: '200 Medley Relay', im: '400 Individual Medley', fr: '400 Freestyle Relay' },
+      '400MR_200IM_200FR': { mr: '400 Medley Relay', im: '200 Individual Medley', fr: '200 Freestyle Relay' },
+      '400MR_200IM_400FR': { mr: '400 Medley Relay', im: '200 Individual Medley', fr: '400 Freestyle Relay' },
+      '400MR_400IM_200FR': { mr: '400 Medley Relay', im: '400 Individual Medley', fr: '200 Freestyle Relay' },
+      '400MR_400IM_400FR': { mr: '400 Medley Relay', im: '400 Individual Medley', fr: '400 Freestyle Relay' },
+    };
+
+    if (scoutFormatPreset === 'CUSTOM') {
+      return scoutCustomEvents.length > 0
+        ? scoutCustomEvents
+        : ['200 Medley Relay', '200 Freestyle Relay'];
+    }
+
+    const chosen = presetSpecs[scoutFormatPreset] || presetSpecs['200MR_200IM_200FR'];
+    return [
+      chosen.mr,
       '1000 Freestyle',
       '200 Freestyle',
       '100 Backstroke',
@@ -3442,9 +3476,16 @@ const rRowId = `cl2-lo-${entry.id}`;
       '200 Breaststroke',
       '500 Freestyle',
       '100 Butterfly',
-      '200 Individual Medley',
-      '200 Freestyle Relay',
+      chosen.im,
+      chosen.fr,
     ];
+  };
+
+  // Load Head-to-Head Gettysburg vs. Scouted Opponent Dual Meet into the Score Simulator
+  const handleLoadScoutIntoSimulator = (scoutObj) => {
+    if (!scoutObj) return;
+    const seasonStart = getCurrentSeasonStart();
+    const dualEvents = getScoutDualEvents();
 
     const ourCode = 'MAGETT';
     const ourName = 'Gettysburg College';
@@ -11202,22 +11243,10 @@ const rRowId = `cl2-lo-${entry.id}`;
                   ? `https://www.swimcloud.com/times/iframe/?gender=${scGenderCode}&team=${activeScout.swimcloudTeamId}&hide_gender=1`
                   : '';
 
-                const dualEventList = [
-                  '200 Medley Relay',
-                  '1000 Freestyle',
-                  '200 Freestyle',
-                  '100 Backstroke',
-                  '100 Breaststroke',
-                  '200 Butterfly',
-                  '50 Freestyle',
-                  '100 Freestyle',
-                  '200 Backstroke',
-                  '200 Breaststroke',
-                  '500 Freestyle',
-                  '100 Butterfly',
-                  '200 Individual Medley',
-                  '200 Freestyle Relay',
-                ];
+                const dualEventList = getScoutDualEvents();
+                const allBaseEvents = Array.from(
+                  new Set(CANONICAL_EVENTS.map((ev) => ev.replace(/^(Women|Men)\s+/i, '')))
+                );
 
                 const seasonStart = getCurrentSeasonStart();
                 const activeOurRoster = masterRoster.filter(
@@ -11243,15 +11272,15 @@ const rRowId = `cl2-lo-${entry.id}`;
                         </div>
 
                         {opponentScouts.length > 0 && (
-                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          <div className="flex flex-wrap items-center gap-2">
                             <select
                               value={activeScout?.id || ''}
                               onChange={(e) => setSelectedScoutId(e.target.value)}
-                              className="px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[210px]"
+                              className="px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
                             >
-                              {opponentScouts.map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.teamName} ({(s.entries || []).length} times)
+                              {opponentScouts.map((sc) => (
+                                <option key={sc.id} value={sc.id}>
+                                  {sc.teamName} ({(sc.entries || []).length} scouted marks)
                                 </option>
                               ))}
                             </select>
@@ -11259,8 +11288,8 @@ const rRowId = `cl2-lo-${entry.id}`;
                               <button
                                 type="button"
                                 onClick={() => handleDeleteOpponentScout(activeScout.id)}
-                                title="Delete this opponent profile"
-                                className="p-2 rounded-xl bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                                title="Delete selected opponent profile"
+                                className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 bg-white border border-slate-200 cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -11269,11 +11298,11 @@ const rRowId = `cl2-lo-${entry.id}`;
                         )}
                       </div>
 
-                      {/* Add / Update Opponent Profile Form */}
+                      {/* Add / Link Opponent Form */}
                       <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                         <div className="md:col-span-4">
                           <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                            Opponent School Name
+                            Opponent Team Name
                           </label>
                           <input
                             type="text"
@@ -11283,24 +11312,26 @@ const rRowId = `cl2-lo-${entry.id}`;
                             className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           />
                         </div>
+
                         <div className="md:col-span-5">
                           <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                            Swimcloud Team URL, ID, or &lt;iframe&gt; Code
+                            Swimcloud Team URL, Team ID, or &lt;iframe&gt; Code
                           </label>
                           <input
                             type="text"
                             value={newScoutSwimcloudInput}
                             onChange={(e) => setNewScoutSwimcloudInput(e.target.value)}
-                            placeholder="e.g., 111 or https://www.swimcloud.com/team/111/ or <iframe>..."
+                            placeholder='https://www.swimcloud.com/team/111/ or <iframe src="...">'
                             className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           />
                         </div>
+
                         <div className="md:col-span-3 flex items-center gap-2">
                           <input
                             type="color"
                             value={newScoutColor}
                             onChange={(e) => setNewScoutColor(e.target.value)}
-                            title="Opponent team color"
+                            title="Opponent Accent Color"
                             className="w-9 h-9 rounded-lg border border-slate-200 bg-white p-0.5 cursor-pointer shrink-0"
                           />
                           <button
@@ -11308,37 +11339,35 @@ const rRowId = `cl2-lo-${entry.id}`;
                             onClick={async () => {
                               const cleanName = newScoutTeamName.trim();
                               if (!cleanName) {
-                                setBenchmarkStatusMsg('Enter an opponent school name first.');
+                                setBenchmarkStatusMsg('Enter an opponent team name first.');
                                 return;
                               }
-                              const extractedId = extractSwimcloudTeamId(newScoutSwimcloudInput);
-                              const slugId =
-                                cleanName
-                                  .toLowerCase()
-                                  .replace(/[^a-z0-9]+/g, '_')
-                                  .replace(/^_|_$/g, '') || `scout_${Date.now()}`;
-                              const existing = opponentScouts.find((s) => s.id === slugId);
-                              const scoutObj = {
-                                id: slugId,
+                              const scId = extractSwimcloudTeamId(newScoutSwimcloudInput);
+                              const slug = cleanName
+                                .toLowerCase()
+                                .replace(/[^a-z0-9]+/g, '_')
+                                .replace(/^_|_$/g, '');
+                              const scoutId = `scout_${slug || Date.now()}`;
+                              const existing = opponentScouts.find((s) => s.id === scoutId);
+                              const nextScout = {
+                                id: scoutId,
                                 teamName: cleanName,
-                                swimcloudTeamId: extractedId || existing?.swimcloudTeamId || '',
+                                swimcloudTeamId: scId || existing?.swimcloudTeamId || '',
                                 color: newScoutColor,
                                 entries: existing?.entries || [],
                                 updatedAt: new Date().toISOString(),
                               };
-                              await persistOpponentScout(scoutObj);
-                              setSelectedScoutId(slugId);
+                              await persistOpponentScout(nextScout);
+                              setSelectedScoutId(scoutId);
                               setNewScoutTeamName('');
                               setNewScoutSwimcloudInput('');
                               setBenchmarkStatusMsg(
-                                `Saved opponent profile "${cleanName}"${
-                                  scoutObj.swimcloudTeamId
-                                    ? ` (Swimcloud Team #${scoutObj.swimcloudTeamId})`
-                                    : ''
+                                `Saved opponent "${cleanName}"${
+                                  scId ? ` (Swimcloud Team #${scId})` : ''
                                 }.`
                               );
                             }}
-                            className="flex-1 px-4 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer"
+                            className="flex-1 px-3.5 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer"
                           >
                             Save Opponent
                           </button>
@@ -11346,71 +11375,183 @@ const rRowId = `cl2-lo-${entry.id}`;
                       </div>
                     </div>
 
-                    {activeScout && (
+                    {!activeScout ? (
+                      <div className="text-center py-10 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                        Add an opponent above (with their Swimcloud URL, Team ID, or{' '}
+                        <code className="font-mono">&lt;iframe&gt;</code> embed snippet) to load
+                        their live Swimcloud top times and scout matchups.
+                      </div>
+                    ) : (
                       <>
-                        {/* Gender Switcher + Head-to-Head Controls */}
-                        <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl p-3.5">
-                          <div className="flex flex-wrap items-center gap-3">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="w-3.5 h-3.5 rounded-full"
-                                style={{ backgroundColor: activeScout.color || '#e11d48' }}
-                              />
-                              <span className="font-extrabold text-sm text-slate-900">
-                                {activeScout.teamName}
-                              </span>
+                        {/* Gender Switcher + Meet Format Selector + Head-to-Head Controls */}
+                        <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2.5">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="w-3.5 h-3.5 rounded-full"
+                                  style={{ backgroundColor: activeScout.color || '#e11d48' }}
+                                />
+                                <span className="font-extrabold text-sm text-slate-900">
+                                  {activeScout.teamName}
+                                </span>
+                              </div>
+
+                              <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-bold">
+                                {['Women', 'Men'].map((g) => (
+                                  <button
+                                    key={g}
+                                    type="button"
+                                    onClick={() => {
+                                      setScoutGenderView(g);
+                                      setScoutPasteEventHint('');
+                                    }}
+                                    className={`px-3 py-1 rounded-md transition cursor-pointer ${
+                                      scoutGenderView === g
+                                        ? 'bg-white text-slate-900 shadow-xs'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                  >
+                                    {g}
+                                  </button>
+                                ))}
+                              </div>
+
+                              <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-bold">
+                                {[
+                                  { id: 'SB', label: 'Compare vs. Our SB' },
+                                  { id: 'PB', label: 'Compare vs. Our PB' },
+                                ].map((b) => (
+                                  <button
+                                    key={b.id}
+                                    type="button"
+                                    onClick={() => setScoutOurBasis(b.id)}
+                                    className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                                      scoutOurBasis === b.id
+                                        ? 'bg-white text-indigo-700 shadow-xs'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                  >
+                                    {b.label}
+                                  </button>
+                                ))}
+                              </div>
+
+                              <select
+                                value={scoutFormatPreset}
+                                onChange={(e) => setScoutFormatPreset(e.target.value)}
+                                title="Dual Meet Event Format"
+                                className="px-2.5 py-1.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              >
+                                <option value="200MR_200IM_200FR">Format: 200 MR / 200 IM / 200 FR</option>
+                                <option value="200MR_200IM_400FR">Format: 200 MR / 200 IM / 400 FR</option>
+                                <option value="200MR_400IM_200FR">Format: 200 MR / 400 IM / 200 FR</option>
+                                <option value="200MR_400IM_400FR">Format: 200 MR / 400 IM / 400 FR</option>
+                                <option value="400MR_200IM_200FR">Format: 400 MR / 200 IM / 200 FR</option>
+                                <option value="400MR_200IM_400FR">Format: 400 MR / 200 IM / 400 FR</option>
+                                <option value="400MR_400IM_200FR">Format: 400 MR / 400 IM / 200 FR</option>
+                                <option value="400MR_400IM_400FR">Format: 400 MR / 400 IM / 400 FR</option>
+                                <option value="CUSTOM">Format: Custom Event Lineup ({scoutCustomEvents.length})</option>
+                              </select>
                             </div>
 
-                            <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-bold">
-                              {['Women', 'Men'].map((g) => (
-                                <button
-                                  key={g}
-                                  type="button"
-                                  onClick={() => {
-                                    setScoutGenderView(g);
-                                    setScoutPasteEventHint('');
-                                  }}
-                                  className={`px-3 py-1 rounded-md transition cursor-pointer ${
-                                    scoutGenderView === g
-                                      ? 'bg-white text-slate-900 shadow-xs'
-                                      : 'text-slate-600 hover:text-slate-900'
-                                  }`}
-                                >
-                                  {g}
-                                </button>
-                              ))}
-                            </div>
-
-                            <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-bold">
-                              {[
-                                { id: 'SB', label: 'Compare vs. Our SB' },
-                                { id: 'PB', label: 'Compare vs. Our PB' },
-                              ].map((b) => (
-                                <button
-                                  key={b.id}
-                                  type="button"
-                                  onClick={() => setScoutOurBasis(b.id)}
-                                  className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
-                                    scoutOurBasis === b.id
-                                      ? 'bg-white text-indigo-700 shadow-xs'
-                                      : 'text-slate-600 hover:text-slate-900'
-                                  }`}
-                                >
-                                  {b.label}
-                                </button>
-                              ))}
-                            </div>
+                            <button
+                              type="button"
+                              disabled={(activeScout.entries || []).length === 0}
+                              onClick={() => handleLoadScoutIntoSimulator(activeScout)}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-xs transition cursor-pointer"
+                            >
+                              <Play className="w-3.5 h-3.5 fill-current" />
+                              <span>Load Dual Matchup into Score Simulator</span>
+                            </button>
                           </div>
 
-                          <button
-                            type="button"
-                            disabled={(activeScout.entries || []).length === 0}
-                            onClick={() => handleLoadScoutIntoSimulator(activeScout)}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-xs transition cursor-pointer"
-                          >
-                            <Play className="w-3.5 h-3.5 fill-current" />
-                            <span>Load Dual Matchup into Score Simulator</span>
-                          </button>
+                          {/* Custom Event Order Builder when Format === 'CUSTOM' */}
+                          {scoutFormatPreset === 'CUSTOM' && (
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5 text-xs">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                                  Custom Meet Event Lineup ({scoutCustomEvents.length} Events — Both Genders)
+                                </span>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <select
+                                    value={scoutCustomEventToAdd}
+                                    onChange={(e) => setScoutCustomEventToAdd(e.target.value)}
+                                    className="px-2.5 py-1 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                                  >
+                                    {allBaseEvents.map((ev) => (
+                                      <option key={ev} value={ev}>
+                                        {ev}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setScoutCustomEvents((prev) => [...prev, scoutCustomEventToAdd])
+                                    }
+                                    className="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                                  >
+                                    + Add Event
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-1.5">
+                                {scoutCustomEvents.map((evName, idx) => (
+                                  <div
+                                    key={`${evName}-${idx}`}
+                                    className="inline-flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-800"
+                                  >
+                                    <span className="font-mono text-slate-400">#{idx + 1}</span>
+                                    <span>{evName}</span>
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() =>
+                                        setScoutCustomEvents((prev) => {
+                                          const next = [...prev];
+                                          [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                                          return next;
+                                        })
+                                      }
+                                      title="Move earlier"
+                                      className="text-slate-400 hover:text-slate-800 disabled:opacity-30 px-0.5 cursor-pointer"
+                                    >
+                                      ↑
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === scoutCustomEvents.length - 1}
+                                      onClick={() =>
+                                        setScoutCustomEvents((prev) => {
+                                          const next = [...prev];
+                                          [next[idx + 1], next[idx]] = [next[idx], next[idx + 1]];
+                                          return next;
+                                        })
+                                      }
+                                      title="Move later"
+                                      className="text-slate-400 hover:text-slate-800 disabled:opacity-30 px-0.5 cursor-pointer"
+                                    >
+                                      ↓
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setScoutCustomEvents((prev) =>
+                                          prev.filter((_, i) => i !== idx)
+                                        )
+                                      }
+                                      title="Remove event"
+                                      className="text-slate-400 hover:text-red-600 pl-0.5 cursor-pointer"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* Live Swimcloud Embed + Copy-Paste Importer Split Grid */}
