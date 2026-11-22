@@ -1425,6 +1425,24 @@ export default function App() {
   const [relayOptManualB, setRelayOptManualB] = useState(['', '', '', '']);
   const [relayOptExcludedKeys, setRelayOptExcludedKeys] = useState(new Set());
 
+  // Swimcloud Opponent Scout State (Firestore `opponent_scouts` + local cache)
+  const [opponentScouts, setOpponentScouts] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('swimmeet_opponent_scouts_v1') || '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedScoutId, setSelectedScoutId] = useState('');
+  const [newScoutTeamName, setNewScoutTeamName] = useState('');
+  const [newScoutSwimcloudInput, setNewScoutSwimcloudInput] = useState('');
+  const [newScoutColor, setNewScoutColor] = useState('#e11d48');
+  const [scoutGenderView, setScoutGenderView] = useState('Women'); // 'Women' | 'Men'
+  const [scoutPasteText, setScoutPasteText] = useState('');
+  const [scoutPasteEventHint, setScoutPasteEventHint] = useState('');
+  const [scoutOurBasis, setScoutOurBasis] = useState('SB'); // 'SB' | 'PB'
+
   // Virtual Dual-Meet Score Simulator State
   const [simTimeBasis, setSimTimeBasis] = useState('AUTO'); // 'AUTO' | 'SEED' | 'FINALS'
   const [simScoringFormat, setSimScoringFormat] = useState('DUAL_9'); // 'DUAL_9' (9-4-3-2-1 / 11-4-2) | 'DUAL_6' (6-4-3-2-1 / 8-4-2)
@@ -1556,6 +1574,16 @@ export default function App() {
       }
     });
 
+    const unsubScouts = onSnapshot(collection(db, 'opponent_scouts'), (snap) => {
+      const rows = snap.docs
+        .map((d) => ({ ...d.data(), id: d.id }))
+        .sort((a, b) => String(a.teamName || '').localeCompare(String(b.teamName || '')));
+      setOpponentScouts(rows);
+      try {
+        localStorage.setItem('swimmeet_opponent_scouts_v1', JSON.stringify(rows));
+      } catch {}
+    });
+
     return () => {
       unsubPerf();
       unsubRoster();
@@ -1563,6 +1591,7 @@ export default function App() {
       unsubEvents();
       unsubSavedMeets();
       unsubStandards();
+      unsubScouts();
     };
   }, [cloudUser]);
 
@@ -3224,20 +3253,413 @@ const rRowId = `cl2-lo-${entry.id}`;
     });
   };
 
-  const updateQualStandardsList = (nextList, changedItem = null, deletedId = null) => {
-    setQualStandards(nextList);
-    try {
-      localStorage.setItem('swimmeet_qual_standards_v1', JSON.stringify(nextList));
-    } catch {}
+  // Extract numeric Swimcloud team ID from a team URL, iframe embed code, or raw numeric ID
+  const extractSwimcloudTeamId = (rawInput) => {
+    const str = String(rawInput || '').trim();
+    if (!str) return '';
+    if (/^\d+$/.test(str)) return str;
+    const paramMatch = str.match(/[?&]team=(\d+)/i);
+    if (paramMatch) return paramMatch[1];
+    const pathMatch = str.match(/swimcloud\.com\/team\/(\d+)/i);
+    if (pathMatch) return pathMatch[1];
+    return '';
+  };
+
+  const persistOpponentScout = async (scoutObj) => {
+    setOpponentScouts((prev) => {
+      const filtered = prev.filter((s) => s.id !== scoutObj.id);
+      const next = [...filtered, scoutObj].sort((a, b) =>
+        String(a.teamName || '').localeCompare(String(b.teamName || ''))
+      );
+      try {
+        localStorage.setItem('swimmeet_opponent_scouts_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
     if (cloudUser) {
-      if (deletedId) {
-        deleteDoc(doc(db, 'qual_standards', String(deletedId))).catch(() => {});
-      } else if (changedItem) {
-        syncCollectionToCloud('qual_standards', [changedItem], false);
-      } else {
-        syncCollectionToCloud('qual_standards', nextList, false);
-      }
+      try {
+        await setDoc(doc(db, 'opponent_scouts', String(scoutObj.id)), scoutObj);
+      } catch {}
     }
+  };
+
+  const handleDeleteOpponentScout = async (scoutId) => {
+    if (!scoutId) return;
+    setOpponentScouts((prev) => {
+      const next = prev.filter((s) => s.id !== scoutId);
+      try {
+        localStorage.setItem('swimmeet_opponent_scouts_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    if (selectedScoutId === scoutId) setSelectedScoutId('');
+    if (cloudUser) {
+      try {
+        await deleteDoc(doc(db, 'opponent_scouts', String(scoutId)));
+      } catch {}
+    }
+    setBenchmarkStatusMsg('Deleted opponent scouting profile.');
+  };
+
+  // Parse pasted lines copied from Swimcloud Team Times iframe or Top Times page
+  const parseSwimcloudPastedTimes = (rawText, genderLabel, fallbackEventKey = '') => {
+    const lines = String(rawText || '')
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return [];
+
+    let currentEventKey = fallbackEventKey || '';
+    const parsedEntries = [];
+
+    const detectEventHeader = (line) => {
+      const clean = line.replace(/\s+/g, ' ').trim();
+      if (clean.length > 65) return '';
+      if (/\d{1,2}:\d{2}\.\d{2}/.test(clean)) return '';
+      const evKey = normalizeEventKey(clean, genderLabel);
+      if (
+        evKey &&
+        (evKey.startsWith('women ') || evKey.startsWith('men ')) &&
+        /\b(50|100|200|400|500|800|1000|1650)\b/.test(evKey)
+      ) {
+        return evKey;
+      }
+      return '';
+    };
+
+    lines.forEach((line, idx) => {
+      // Check if line is an event section header (e.g., "50 Y Free" or "Women 100 Backstroke")
+      const headerEv = detectEventHeader(line);
+      if (headerEv && !/\b\d{2}\.\d{2}\b/.test(line)) {
+        currentEventKey = headerEv;
+        return;
+      }
+
+      const cols = line.includes('\t')
+        ? line.split('\t').map((c) => c.trim()).filter(Boolean)
+        : line.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean);
+
+      // Find swimming time token (e.g., 21.45, 48.92, 1:42.18, 10:15.44)
+      const timeRegex = /^(?:(\d{1,2}):)?(\d{2}\.\d{2})[A-Z*]?$/;
+      let timeStr = '';
+      let timeColIdx = -1;
+
+      for (let c = 0; c < cols.length; c++) {
+        const m = cols[c].match(timeRegex);
+        if (m) {
+          timeStr = m[0].replace(/[A-Z*]+$/i, '');
+          timeColIdx = c;
+          break;
+        }
+      }
+
+      if (!timeStr) {
+        const inlineMatch = line.match(/\b(?:(\d{1,2}):)?(\d{2}\.\d{2})\b/);
+        if (inlineMatch) {
+          timeStr = inlineMatch[0];
+        }
+      }
+
+      const sec = timeToSeconds(timeStr);
+      if (sec === null || sec <= 15) return;
+
+      // Also check if an event name is inline on the same row
+      let rowEventKey = currentEventKey;
+      for (const col of cols) {
+        const inlineEv = detectEventHeader(col);
+        if (inlineEv) {
+          rowEventKey = inlineEv;
+          break;
+        }
+      }
+      if (!rowEventKey) return;
+
+      // Extract athlete name & optional class year from columns before the time
+      let rawName = '';
+      let classYr = '';
+      const candidateCols = timeColIdx > 0 ? cols.slice(0, timeColIdx) : cols;
+      for (const token of candidateCols) {
+        if (/^\d+$/.test(token)) continue; // rank number
+        if (/^(FR|SO|JR|SR|GR|FRESHMAN|SOPHOMORE|JUNIOR|SENIOR)$/i.test(token)) {
+          classYr = normalizeClass(token);
+          continue;
+        }
+        if (detectEventHeader(token)) continue;
+        if (/[a-zA-Z]{2,}/.test(token) && !rawName) {
+          rawName = token;
+        }
+      }
+
+      // If single-line fallback without tabs, strip rank, time, date, and class year
+      if (!rawName) {
+        const stripped = line
+          .replace(/^\d+\s+/, '')
+          .replace(timeStr, '')
+          .replace(/\b(FR|SO|JR|SR|GR)\b/g, '')
+          .replace(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s+\d{4}\b/gi, '')
+          .replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, '')
+          .trim();
+        if (/[a-zA-Z]{2,}/.test(stripped)) {
+          rawName = stripped;
+        }
+      }
+
+      if (!rawName) return;
+      const formattedName = formatSwimmerDisplayName(rawName);
+      const isRelay = rowEventKey.endsWith('relay');
+
+      parsedEntries.push({
+        id: `sc-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        swimmerName: isRelay ? `${formattedName} Relay` : formattedName,
+        swimmerKey: normalizeSwimmerKey(formattedName),
+        classYear: classYr,
+        gender: genderLabel,
+        eventKey: rowEventKey,
+        eventLabel: toTitleEventLabel(rowEventKey),
+        time: timeStr,
+        seconds: sec,
+        isRelay,
+      });
+    });
+
+    return parsedEntries;
+  };
+
+  // Load Head-to-Head Gettysburg vs. Scouted Opponent Dual Meet into the Score Simulator
+  const handleLoadScoutIntoSimulator = (scoutObj) => {
+    if (!scoutObj) return;
+    const seasonStart = getCurrentSeasonStart();
+    const dualEvents = [
+      '200 Medley Relay',
+      '1000 Freestyle',
+      '200 Freestyle',
+      '100 Backstroke',
+      '100 Breaststroke',
+      '200 Butterfly',
+      '50 Freestyle',
+      '100 Freestyle',
+      '200 Backstroke',
+      '200 Breaststroke',
+      '500 Freestyle',
+      '100 Butterfly',
+      '200 Individual Medley',
+      '200 Freestyle Relay',
+    ];
+
+    const ourCode = 'MAGETT';
+    const ourName = 'Gettysburg College';
+    const oppCode =
+      scoutObj.teamName
+        .toUpperCase()
+        .replace(/[^A-Z]/g, '')
+        .slice(0, 6) || 'OPPON';
+    const oppName = scoutObj.teamName;
+
+    const activeRoster = masterRoster.filter((a) => a.isActive);
+    const individualResults = [];
+    const relayResults = [];
+    let evNum = 1;
+
+    ['Women', 'Men'].forEach((gender) => {
+      dualEvents.forEach((baseEv) => {
+        const fullEvLabel = `${gender} ${baseEv}`;
+        const evKey = fullEvLabel.toLowerCase();
+        const isRelay = baseEv.toLowerCase().includes('relay');
+
+        // 1. Gettysburg best marks (up to top 4 per event)
+        if (!isRelay) {
+          const ourBestMap = new Map();
+          activeRoster
+            .filter((a) => a.gender === gender)
+            .forEach((ath) => {
+              const swKey = normalizeSwimmerKey(ath.canonicalName);
+              const pool = historicalRecords.filter((r) => {
+                if (r.isOfficial === false || r.eventKey !== evKey) return false;
+                const m = resolveMasterAthlete(r.swimmerName);
+                const k = normalizeSwimmerKey(m ? m.canonicalName : r.swimmerName);
+                if (k !== swKey) return false;
+                if (scoutOurBasis === 'SB') {
+                  return Boolean(r.dateObj && r.dateObj >= seasonStart);
+                }
+                return true;
+              });
+              if (pool.length > 0) {
+                const best = pool.reduce((b, c) => (c.seconds < b.seconds ? c : b));
+                ourBestMap.set(swKey, { ath, rec: best });
+              }
+            });
+
+          Array.from(ourBestMap.values())
+            .sort((a, b) => a.rec.seconds - b.rec.seconds)
+            .slice(0, 4)
+            .forEach(({ ath, rec }, idx) => {
+              individualResults.push({
+                id: `sim-our-${evNum}-${idx}-${ath.id}`,
+                type: 'individual',
+                teamCode: ourCode,
+                teamName: ourName,
+                swimmerName: ath.canonicalName,
+                preferredFirst: '',
+                classYear: rec.classYear || '',
+                genderCode: gender === 'Women' ? 'F' : 'M',
+                genderLabel: gender,
+                distance: parseInt(baseEv, 10) || 100,
+                strokeName: baseEv.replace(/^\d+\s+/, ''),
+                eventNumber: evNum,
+                eventLabel: fullEvLabel,
+                seedTime: rec.time,
+                seedSeconds: rec.seconds,
+                finalsTime: 'NT',
+                timeSeconds: Infinity,
+                course: 'SCY (Yards)',
+                heat: '1',
+                lane: String((idx + 1) * 2),
+                place: null,
+                points: 0,
+                splits: [],
+              });
+            });
+        } else {
+          // Top 2 Gettysburg historical relays for this event
+          const ourRelays = historicalRecords
+            .filter((r) => r.isOfficial !== false && r.eventKey === evKey)
+            .sort((a, b) => a.seconds - b.seconds)
+            .slice(0, 2);
+          ourRelays.forEach((relRec, idx) => {
+            const letter = idx === 0 ? 'A' : 'B';
+            relayResults.push({
+              id: `sim-our-rel-${evNum}-${idx}`,
+              type: 'relay',
+              relayLetter: letter,
+              teamCode: ourCode,
+              teamName: ourName,
+              relayTitle: `${ourName} "${letter}"`,
+              genderCode: gender === 'Women' ? 'F' : 'M',
+              genderLabel: gender,
+              distance: parseInt(baseEv, 10) || 200,
+              strokeName: baseEv.replace(/^\d+\s+/, ''),
+              eventNumber: evNum,
+              eventLabel: fullEvLabel,
+              seedTime: relRec.time,
+              seedSeconds: relRec.seconds,
+              finalsTime: 'NT',
+              timeSeconds: Infinity,
+              course: 'SCY (Yards)',
+              heat: '1',
+              lane: idx === 0 ? '4' : '2',
+              place: null,
+              points: 0,
+              legs: [],
+              splits: [],
+            });
+          });
+        }
+
+        // 2. Scouted Opponent entries for this event
+        const oppEntries = (scoutObj.entries || [])
+          .filter((e) => e.eventKey === evKey)
+          .sort((a, b) => a.seconds - b.seconds)
+          .slice(0, isRelay ? 2 : 4);
+
+        oppEntries.forEach((opp, idx) => {
+          if (isRelay) {
+            const letter = idx === 0 ? 'A' : 'B';
+            relayResults.push({
+              id: `sim-opp-rel-${evNum}-${idx}-${opp.id}`,
+              type: 'relay',
+              relayLetter: letter,
+              teamCode: oppCode,
+              teamName: oppName,
+              relayTitle: `${oppName} "${letter}"`,
+              genderCode: gender === 'Women' ? 'F' : 'M',
+              genderLabel: gender,
+              distance: parseInt(baseEv, 10) || 200,
+              strokeName: baseEv.replace(/^\d+\s+/, ''),
+              eventNumber: evNum,
+              eventLabel: fullEvLabel,
+              seedTime: opp.time,
+              seedSeconds: opp.seconds,
+              finalsTime: 'NT',
+              timeSeconds: Infinity,
+              course: 'SCY (Yards)',
+              heat: '1',
+              lane: idx === 0 ? '3' : '5',
+              place: null,
+              points: 0,
+              legs: [],
+              splits: [],
+            });
+          } else {
+            individualResults.push({
+              id: `sim-opp-${evNum}-${idx}-${opp.id}`,
+              type: 'individual',
+              teamCode: oppCode,
+              teamName: oppName,
+              swimmerName: opp.swimmerName,
+              preferredFirst: '',
+              classYear: opp.classYear || '',
+              genderCode: gender === 'Women' ? 'F' : 'M',
+              genderLabel: gender,
+              distance: parseInt(baseEv, 10) || 100,
+              strokeName: baseEv.replace(/^\d+\s+/, ''),
+              eventNumber: evNum,
+              eventLabel: fullEvLabel,
+              seedTime: opp.time,
+              seedSeconds: opp.seconds,
+              finalsTime: 'NT',
+              timeSeconds: Infinity,
+              course: 'SCY (Yards)',
+              heat: '1',
+              lane: String(idx * 2 + 1),
+              place: null,
+              points: 0,
+              splits: [],
+            });
+          }
+        });
+
+        evNum += 1;
+      });
+    });
+
+    handleSetTeamHexColor(ourCode, '#0284c7');
+    handleSetTeamHexColor(oppCode, scoutObj.color || '#e11d48');
+
+    setParsedData({
+      meetInfo: {
+        name: `Projected Dual: Gettysburg vs. ${oppName}`,
+        city: 'Gettysburg',
+        state: 'PA',
+        startDate: new Date().toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        }),
+        isoDate: new Date().toISOString().slice(0, 10),
+        software: 'Swimcloud Opponent Scout Projection',
+      },
+      teams: [
+        { code: ourCode, name: ourName, city: 'Gettysburg', state: 'PA', swimmerList: [] },
+        { code: oppCode, name: oppName, city: '', state: '', swimmerList: [] },
+      ],
+      teamScores: [],
+      individualResults,
+      relayResults,
+      stats: {
+        totalTeams: 2,
+        totalSwimmers: new Set(individualResults.map((r) => r.swimmerName)).size,
+        totalIndividualSwims: individualResults.length,
+        totalRelays: relayResults.length,
+        totalSwims: individualResults.length + relayResults.length,
+      },
+    });
+    setSimTimeBasis('SEED');
+    setSimCustomOrders({});
+    setSimScratchedIds(new Set());
+    setInMeetSubTab('scoresim');
+    setBenchmarkStatusMsg(
+      `Loaded projected dual meet (Gettysburg ${scoutOurBasis} vs. ${oppName} Swimcloud times) into Score Simulator.`
+    );
   };
 
   const handleSaveQualStandardEdit = (stdId) => {
@@ -8053,6 +8475,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                   {[
                     { id: 'heatsheet', label: 'Heat Sheet (Lanes 1–8)' },
                     { id: 'scoresim', label: 'Score Simulator' },
+                    { id: 'scout', label: `Opponent Scout (${opponentScouts.length})` },
                     { id: 'roster', label: `Active Roster (${masterRoster.filter((a) => a.isActive).length})` },
                     { id: 'relayopt', label: 'Relay Optimizer' },
                     { id: 'standards', label: `Standards & Pool Recs (${qualStandards.length})` },
@@ -10760,6 +11183,527 @@ const rRowId = `cl2-lo-${entry.id}`;
                                 >
                                   {ath.canonicalName}
                                 </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* SUB-TAB 2C: SWIMCLOUD OPPONENT SCOUT */}
+              {inMeetSubTab === 'scout' && (() => {
+                const activeScout =
+                  opponentScouts.find((s) => s.id === selectedScoutId) || opponentScouts[0] || null;
+                const scGenderCode = scoutGenderView === 'Men' ? 'M' : 'F';
+                const embedSrc = activeScout?.swimcloudTeamId
+                  ? `https://www.swimcloud.com/times/iframe/?gender=${scGenderCode}&team=${activeScout.swimcloudTeamId}&hide_gender=1`
+                  : '';
+
+                const dualEventList = [
+                  '200 Medley Relay',
+                  '1000 Freestyle',
+                  '200 Freestyle',
+                  '100 Backstroke',
+                  '100 Breaststroke',
+                  '200 Butterfly',
+                  '50 Freestyle',
+                  '100 Freestyle',
+                  '200 Backstroke',
+                  '200 Breaststroke',
+                  '500 Freestyle',
+                  '100 Butterfly',
+                  '200 Individual Medley',
+                  '200 Freestyle Relay',
+                ];
+
+                const seasonStart = getCurrentSeasonStart();
+                const activeOurRoster = masterRoster.filter(
+                  (a) => a.isActive && a.gender === scoutGenderView
+                );
+
+                return (
+                  <div className="p-5 sm:p-6 space-y-6">
+                    {/* Top Bar: Select Saved Opponent OR Create New Opponent Profile */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4">
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-3.5">
+                        <div>
+                          <h3 className="text-sm sm:text-base font-extrabold text-slate-900">
+                            Swimcloud Opponent Scout &amp; Live Embed Viewer
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Paste a Swimcloud team URL (e.g.,{' '}
+                            <code className="font-mono">swimcloud.com/team/111/</code>), team ID, or{' '}
+                            <code className="font-mono">&lt;iframe&gt;</code> embed code to view their
+                            live Swimcloud Top Times right here and build a head-to-head dual
+                            scouting report.
+                          </p>
+                        </div>
+
+                        {opponentScouts.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            <select
+                              value={activeScout?.id || ''}
+                              onChange={(e) => setSelectedScoutId(e.target.value)}
+                              className="px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[210px]"
+                            >
+                              {opponentScouts.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.teamName} ({(s.entries || []).length} times)
+                                </option>
+                              ))}
+                            </select>
+                            {activeScout && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteOpponentScout(activeScout.id)}
+                                title="Delete this opponent profile"
+                                className="p-2 rounded-xl bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Add / Update Opponent Profile Form */}
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                        <div className="md:col-span-4">
+                          <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                            Opponent School Name
+                          </label>
+                          <input
+                            type="text"
+                            value={newScoutTeamName}
+                            onChange={(e) => setNewScoutTeamName(e.target.value)}
+                            placeholder="e.g., Swarthmore College"
+                            className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <div className="md:col-span-5">
+                          <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                            Swimcloud Team URL, ID, or &lt;iframe&gt; Code
+                          </label>
+                          <input
+                            type="text"
+                            value={newScoutSwimcloudInput}
+                            onChange={(e) => setNewScoutSwimcloudInput(e.target.value)}
+                            placeholder="e.g., 111 or https://www.swimcloud.com/team/111/ or <iframe>..."
+                            className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <div className="md:col-span-3 flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={newScoutColor}
+                            onChange={(e) => setNewScoutColor(e.target.value)}
+                            title="Opponent team color"
+                            className="w-9 h-9 rounded-lg border border-slate-200 bg-white p-0.5 cursor-pointer shrink-0"
+                          />
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const cleanName = newScoutTeamName.trim();
+                              if (!cleanName) {
+                                setBenchmarkStatusMsg('Enter an opponent school name first.');
+                                return;
+                              }
+                              const extractedId = extractSwimcloudTeamId(newScoutSwimcloudInput);
+                              const slugId =
+                                cleanName
+                                  .toLowerCase()
+                                  .replace(/[^a-z0-9]+/g, '_')
+                                  .replace(/^_|_$/g, '') || `scout_${Date.now()}`;
+                              const existing = opponentScouts.find((s) => s.id === slugId);
+                              const scoutObj = {
+                                id: slugId,
+                                teamName: cleanName,
+                                swimcloudTeamId: extractedId || existing?.swimcloudTeamId || '',
+                                color: newScoutColor,
+                                entries: existing?.entries || [],
+                                updatedAt: new Date().toISOString(),
+                              };
+                              await persistOpponentScout(scoutObj);
+                              setSelectedScoutId(slugId);
+                              setNewScoutTeamName('');
+                              setNewScoutSwimcloudInput('');
+                              setBenchmarkStatusMsg(
+                                `Saved opponent profile "${cleanName}"${
+                                  scoutObj.swimcloudTeamId
+                                    ? ` (Swimcloud Team #${scoutObj.swimcloudTeamId})`
+                                    : ''
+                                }.`
+                              );
+                            }}
+                            className="flex-1 px-4 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer"
+                          >
+                            Save Opponent
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {activeScout && (
+                      <>
+                        {/* Gender Switcher + Head-to-Head Controls */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl p-3.5">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-3.5 h-3.5 rounded-full"
+                                style={{ backgroundColor: activeScout.color || '#e11d48' }}
+                              />
+                              <span className="font-extrabold text-sm text-slate-900">
+                                {activeScout.teamName}
+                              </span>
+                            </div>
+
+                            <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-bold">
+                              {['Women', 'Men'].map((g) => (
+                                <button
+                                  key={g}
+                                  type="button"
+                                  onClick={() => {
+                                    setScoutGenderView(g);
+                                    setScoutPasteEventHint('');
+                                  }}
+                                  className={`px-3 py-1 rounded-md transition cursor-pointer ${
+                                    scoutGenderView === g
+                                      ? 'bg-white text-slate-900 shadow-xs'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                >
+                                  {g}
+                                </button>
+                              ))}
+                            </div>
+
+                            <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-bold">
+                              {[
+                                { id: 'SB', label: 'Compare vs. Our SB' },
+                                { id: 'PB', label: 'Compare vs. Our PB' },
+                              ].map((b) => (
+                                <button
+                                  key={b.id}
+                                  type="button"
+                                  onClick={() => setScoutOurBasis(b.id)}
+                                  className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                                    scoutOurBasis === b.id
+                                      ? 'bg-white text-indigo-700 shadow-xs'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                >
+                                  {b.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={(activeScout.entries || []).length === 0}
+                            onClick={() => handleLoadScoutIntoSimulator(activeScout)}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-xs transition cursor-pointer"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                            <span>Load Dual Matchup into Score Simulator</span>
+                          </button>
+                        </div>
+
+                        {/* Live Swimcloud Embed + Copy-Paste Importer Split Grid */}
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                          {/* Left: Live Swimcloud Team Times Iframe */}
+                          <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col">
+                            <div className="bg-slate-900 text-white px-4 py-2.5 flex items-center justify-between gap-2 text-xs">
+                              <span className="font-bold">
+                                Live Swimcloud Widget — {activeScout.teamName} ({scoutGenderView})
+                              </span>
+                              {activeScout.swimcloudTeamId ? (
+                                <a
+                                  href={`https://www.swimcloud.com/team/${activeScout.swimcloudTeamId}/times/?gender=${scGenderCode}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-cyan-300 hover:underline font-semibold"
+                                >
+                                  Open on Swimcloud ↗
+                                </a>
+                              ) : (
+                                <span className="text-slate-400">No Swimcloud Team ID linked</span>
+                              )}
+                            </div>
+
+                            {embedSrc ? (
+                              <iframe
+                                key={embedSrc}
+                                src={embedSrc}
+                                title={`Swimcloud ${activeScout.teamName} ${scoutGenderView} Times`}
+                                className="w-full h-[460px] border-0 bg-white"
+                              />
+                            ) : (
+                              <div className="p-8 text-center text-xs text-slate-500 space-y-2 my-auto">
+                                <p>
+                                  No Swimcloud Team ID was saved for{' '}
+                                  <strong>{activeScout.teamName}</strong> yet.
+                                </p>
+                                <p>
+                                  Re-save with their Swimcloud URL (e.g.{' '}
+                                  <code className="font-mono">swimcloud.com/team/111/</code>) or
+                                  paste times directly on the right.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Right: Paste Copied Swimcloud Times to Save & Score */}
+                          <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                            <div className="space-y-2.5">
+                              <div className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
+                                Import Copied Swimcloud Times ({scoutGenderView})
+                              </div>
+                              <p className="text-[11px] text-slate-500 leading-relaxed">
+                                Highlight &amp; copy (<code className="font-mono">Ctrl+C</code>) the
+                                times from the Swimcloud frame on the left (or any Swimcloud Top
+                                Times page), choose the event if copying a single event table, and
+                                paste below.
+                              </p>
+
+                              <div>
+                                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                                  Default Event (if copied block has no event header)
+                                </label>
+                                <select
+                                  value={scoutPasteEventHint}
+                                  onChange={(e) => setScoutPasteEventHint(e.target.value)}
+                                  className="w-full px-2.5 py-1.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg"
+                                >
+                                  <option value="">Auto-detect Event Headers from Paste</option>
+                                  {CANONICAL_EVENTS.filter((ev) =>
+                                    ev.startsWith(scoutGenderView)
+                                  ).map((ev) => (
+                                    <option key={ev} value={ev.toLowerCase()}>
+                                      {ev}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <textarea
+                                rows={10}
+                                value={scoutPasteText}
+                                onChange={(e) => setScoutPasteText(e.target.value)}
+                                placeholder={`Paste copied Swimcloud rows here...\nExample:\n1\tSmith, John\tJR\t20.84\n2\tDoe, Alex\tSO\t21.19`}
+                                className="w-full p-2.5 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              />
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                              <button
+                                type="button"
+                                disabled={!scoutPasteText.trim()}
+                                onClick={async () => {
+                                  const newEntries = parseSwimcloudPastedTimes(
+                                    scoutPasteText,
+                                    scoutGenderView,
+                                    scoutPasteEventHint
+                                  );
+                                  if (newEntries.length === 0) {
+                                    setBenchmarkStatusMsg(
+                                      'Could not detect valid swimmer names and times. Try selecting a Default Event above and pasting the Swimcloud rows again.'
+                                    );
+                                    return;
+                                  }
+                                  const existing = activeScout.entries || [];
+                                  const mergedMap = new Map(
+                                    existing.map((e) => [`${e.swimmerKey}|${e.eventKey}`, e])
+                                  );
+                                  newEntries.forEach((ne) => {
+                                    const k = `${ne.swimmerKey}|${ne.eventKey}`;
+                                    if (!mergedMap.has(k) || ne.seconds < mergedMap.get(k).seconds) {
+                                      mergedMap.set(k, ne);
+                                    }
+                                  });
+                                  const updatedScout = {
+                                    ...activeScout,
+                                    entries: Array.from(mergedMap.values()),
+                                    updatedAt: new Date().toISOString(),
+                                  };
+                                  await persistOpponentScout(updatedScout);
+                                  setScoutPasteText('');
+                                  setBenchmarkStatusMsg(
+                                    `Imported ${newEntries.length} ${scoutGenderView} marks for ${activeScout.teamName} (${updatedScout.entries.length} total scouted times).`
+                                  );
+                                }}
+                                className="flex-1 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition cursor-pointer"
+                              >
+                                Parse &amp; Save Times
+                              </button>
+
+                              {(activeScout.entries || []).some(
+                                (e) => e.gender === scoutGenderView
+                              ) && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const remaining = (activeScout.entries || []).filter(
+                                      (e) => e.gender !== scoutGenderView
+                                    );
+                                    await persistOpponentScout({
+                                      ...activeScout,
+                                      entries: remaining,
+                                      updatedAt: new Date().toISOString(),
+                                    });
+                                    setBenchmarkStatusMsg(
+                                      `Cleared ${scoutGenderView} scouted times for ${activeScout.teamName}.`
+                                    );
+                                  }}
+                                  className="px-3 py-2 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-200 cursor-pointer"
+                                >
+                                  Clear {scoutGenderView}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Head-to-Head Event Matchup Comparison Board */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-extrabold text-slate-900">
+                              Head-to-Head Matchup Board: Gettysburg ({scoutOurBasis}) vs.{' '}
+                              {activeScout.teamName} ({scoutGenderView})
+                            </h4>
+                            <span className="text-xs text-slate-500">
+                              Top 3 per team ranked head-to-head
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {dualEventList.map((baseEv) => {
+                              const fullEvLabel = `${scoutGenderView} ${baseEv}`;
+                              const evKey = fullEvLabel.toLowerCase();
+                              const isRelay = baseEv.toLowerCase().includes('relay');
+
+                              const ourTop = [];
+                              if (!isRelay) {
+                                const bestByAth = new Map();
+                                activeOurRoster.forEach((ath) => {
+                                  const swKey = normalizeSwimmerKey(ath.canonicalName);
+                                  const pool = historicalRecords.filter((r) => {
+                                    if (r.isOfficial === false || r.eventKey !== evKey) return false;
+                                    const m = resolveMasterAthlete(r.swimmerName);
+                                    const k = normalizeSwimmerKey(
+                                      m ? m.canonicalName : r.swimmerName
+                                    );
+                                    if (k !== swKey) return false;
+                                    if (scoutOurBasis === 'SB') {
+                                      return Boolean(r.dateObj && r.dateObj >= seasonStart);
+                                    }
+                                    return true;
+                                  });
+                                  if (pool.length > 0) {
+                                    const best = pool.reduce((b, c) =>
+                                      c.seconds < b.seconds ? c : b
+                                    );
+                                    bestByAth.set(swKey, {
+                                      name: ath.canonicalName,
+                                      time: best.time,
+                                      seconds: best.seconds,
+                                      team: 'Gettysburg',
+                                      color: '#0284c7',
+                                    });
+                                  }
+                                });
+                                ourTop.push(
+                                  ...Array.from(bestByAth.values())
+                                    .sort((a, b) => a.seconds - b.seconds)
+                                    .slice(0, 3)
+                                );
+                              } else {
+                                historicalRecords
+                                  .filter((r) => r.isOfficial !== false && r.eventKey === evKey)
+                                  .sort((a, b) => a.seconds - b.seconds)
+                                  .slice(0, 2)
+                                  .forEach((rel, i) => {
+                                    ourTop.push({
+                                      name: `Gettysburg "${i === 0 ? 'A' : 'B'}"`,
+                                      time: rel.time,
+                                      seconds: rel.seconds,
+                                      team: 'Gettysburg',
+                                      color: '#0284c7',
+                                    });
+                                  });
+                              }
+
+                              const oppTop = (activeScout.entries || [])
+                                .filter((e) => e.eventKey === evKey)
+                                .sort((a, b) => a.seconds - b.seconds)
+                                .slice(0, isRelay ? 2 : 3)
+                                .map((e) => ({
+                                  name: e.classYear ? `${e.swimmerName} (${e.classYear})` : e.swimmerName,
+                                  time: e.time,
+                                  seconds: e.seconds,
+                                  team: activeScout.teamName,
+                                  color: activeScout.color || '#e11d48',
+                                }));
+
+                              const combined = [...ourTop, ...oppTop].sort(
+                                (a, b) => a.seconds - b.seconds
+                              );
+                              const isSwingRace =
+                                combined.length >= 2 &&
+                                Math.abs(combined[0].seconds - combined[1].seconds) <= 0.65 &&
+                                combined[0].team !== combined[1].team;
+
+                              return (
+                                <div
+                                  key={evKey}
+                                  className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs"
+                                >
+                                  <div className="bg-slate-100 px-3.5 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
+                                    <span className="font-extrabold text-xs text-slate-900">
+                                      {fullEvLabel}
+                                    </span>
+                                    {isSwingRace && (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                        Swing Race (≤0.65s)
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {combined.length === 0 ? (
+                                    <div className="p-3.5 text-[11px] text-slate-400 italic">
+                                      No marks recorded yet for this event.
+                                    </div>
+                                  ) : (
+                                    <div className="divide-y divide-slate-100 text-xs">
+                                      {combined.map((item, idx) => (
+                                        <div
+                                          key={`${item.team}-${item.name}-${idx}`}
+                                          style={{ boxShadow: `inset 4px 0 0 ${item.color}` }}
+                                          className="px-3.5 py-2 flex items-center justify-between gap-2"
+                                        >
+                                          <div className="min-w-0">
+                                            <span className="font-mono font-bold text-slate-400 mr-2">
+                                              #{idx + 1}
+                                            </span>
+                                            <span className="font-bold text-slate-900">
+                                              {item.name}
+                                            </span>
+                                            <span className="text-[11px] text-slate-500 ml-1.5">
+                                              ({item.team})
+                                            </span>
+                                          </div>
+                                          <span className="font-mono font-extrabold text-slate-800 shrink-0">
+                                            {item.time}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
                               );
                             })}
                           </div>
