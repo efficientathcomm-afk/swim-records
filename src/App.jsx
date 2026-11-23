@@ -2005,6 +2005,66 @@ export default function App() {
     });
     if (defaultMeetDate) distinctDatesSet.add(defaultMeetDate);
     const meetDays = Array.from(distinctDatesSet).sort((a, b) => a.localeCompare(b));
+
+    const matchedComp = resolveMasterCompetition(meetComp, defaultMeetDate);
+    const finalComp = matchedComp ? matchedComp.canonicalName : meetComp;
+    const finalLoc = matchedComp?.defaultLocation || meetLoc;
+
+    const existingHashes = new Set(
+      historicalRecords.map(
+        (r) =>
+          `${r.swimmerKey}|${r.eventKey}|${r.seconds.toFixed(2)}|${r.date}|${r.round || 'Finals'}|${r.place}`
+      )
+    );
+
+    const rows = [];
+    const unmatchedAthletesMap = new Map();
+    const unmatchedEventsMap = new Map();
+
+    const registerSwimmerAndEvent = (rawDisplaySwimmer, genderLabel, rawEventLabel) => {
+      const matchedAth = resolveMasterAthlete(rawDisplaySwimmer);
+      const finalName = matchedAth ? matchedAth.canonicalName : rawDisplaySwimmer;
+      if (!matchedAth && rawDisplaySwimmer) {
+        const aKey = normalizeSwimmerKey(rawDisplaySwimmer);
+        if (!unmatchedAthletesMap.has(aKey)) {
+          unmatchedAthletesMap.set(aKey, {
+            rawName: rawDisplaySwimmer,
+            inferredGender: genderLabel === 'Men' ? 'Men' : 'Women',
+          });
+        }
+      }
+
+      const matchedEv = resolveMasterEvent(rawEventLabel, genderLabel);
+      const finalEvKey = matchedEv
+        ? matchedEv.eventKey
+        : normalizeEventKey(rawEventLabel, genderLabel);
+      const finalEvLabel = matchedEv ? matchedEv.canonicalName : rawEventLabel;
+      if (!matchedEv && rawEventLabel) {
+        const eKey = `${rawEventLabel.toLowerCase()}|${genderLabel}`;
+        if (!unmatchedEventsMap.has(eKey)) {
+          unmatchedEventsMap.set(eKey, {
+            rawEvent: rawEventLabel,
+            genderHint: genderLabel,
+          });
+        }
+      }
+
+      return { finalName, finalEvKey, finalEvLabel };
+    };
+
+    const resolveRowDate = (rowId, evNumber, naturalDate) => {
+      if (meetDateOverrides[`row:${rowId}`]) {
+        return normalizeDateIso(meetDateOverrides[`row:${rowId}`]);
+      }
+      if (evNumber && meetDateOverrides[`ev:${evNumber}`]) {
+        return normalizeDateIso(meetDateOverrides[`ev:${evNumber}`]);
+      }
+      if (matchedComp?.date) {
+        return normalizeDateIso(matchedComp.date);
+      }
+      return naturalDate;
+    };
+
     // 1. Individual swims (Prelims + Finals extracted cleanly per round)
     const isValidTimeStr = (t) =>
       Boolean(t) && !['NT', 'DQ', 'SCR', 'NS'].includes(String(t).toUpperCase());
