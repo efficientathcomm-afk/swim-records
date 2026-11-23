@@ -591,73 +591,80 @@ function parseSDIFContent(content) {
           ? formatSdifDate(rawSwimDate)
           : '';
 
-      // Extract swim times/scores (e.g., 5:08.46Y, 22.03Y, or 263.05) from the SDIF D0 time block (cols 93-132)
-      const timeBlock = line.slice(92, 132);
-      const timeTokens = timeBlock.match(/(?:\d+:)?\d+\.\d{1,2}[A-Z]?/gi) || [];
-      const seedTimeRaw = timeTokens[0] || '';
-      const prelimTimeRaw = timeTokens.length >= 2 ? timeTokens[1] : '';
-      const finalsTimeRaw =
-        timeTokens.length >= 3 ? timeTokens[timeTokens.length - 1] : '';
-      const courseCode =
-        (finalsTimeRaw || prelimTimeRaw || seedTimeRaw).slice(-1) || sliceCol(line, 132, 133);
-
       const isDiving = strokeCode === '6' || /H$/i.test(distance);
       const isExhibition =
         sliceCol(line, 151, 160).toUpperCase().includes('X') ||
         (parseInt(eventNumber, 10) || 0) >= 100;
       const isTimeTrial = (parseInt(eventNumber, 10) || 0) >= 100;
 
-      // Exact 1-based SDIF D0 Heat / Lane / Place / Points (supports 10-lane pools without spaces):
-      // Col 134: Prelim Heat | Cols 135-136: Prelim Lane
-      // Col 138: Finals Heat | Cols 139-140: Finals Lane
-      // Cols 141-143: Prelim Place | Cols 144-146: Finals Place | Cols 147-152: Points
-      const parseIntField = (s) => {
-        const clean = String(s || '').replace(/\./g, '').trim();
-        return /^\d+$/.test(clean) ? parseInt(clean, 10) : 0;
+      // Extract time/score tokens from Hy-Tek WMM 8.0 D0 time block (cols 95-131)
+      const timeBlock = line.slice(94, 131);
+      const tokenMatches = isDiving
+        ? Array.from(timeBlock.matchAll(/\b\d{1,3}\.\d{1,2}[A-Z]?\b/gi)).map((m) => m[0].trim())
+        : Array.from(
+            timeBlock.matchAll(/\b(?:(?:\d+:)?\d+\.\d{1,2}|NS|DQ|SCR)[A-Z]?\b/gi)
+          ).map((m) => m[0].trim());
+
+      // In prelims/finals D0 records, the time block has [Seed, Prelim, (optional Swim-Off), Finals]
+      const seedTimeRaw = tokenMatches[0] || '';
+      let prelimTimeRaw = '';
+      let finalsTimeRaw = '';
+
+      if (tokenMatches.length >= 3) {
+        prelimTimeRaw = tokenMatches[1];
+        finalsTimeRaw = tokenMatches[tokenMatches.length - 1];
+      } else if (tokenMatches.length === 2) {
+        // Check if the second token sits in the Finals column (index >= 20 inside timeBlock)
+        const secondMatch = isDiving
+          ? Array.from(timeBlock.matchAll(/\b\d{1,3}\.\d{1,2}[A-Z]?\b/gi))[1]
+          : Array.from(
+              timeBlock.matchAll(/\b(?:(?:\d+:)?\d+\.\d{1,2}|NS|DQ|SCR)[A-Z]?\b/gi)
+            )[1];
+        if (secondMatch && secondMatch.index >= 18) {
+          finalsTimeRaw = tokenMatches[1];
+        } else {
+          prelimTimeRaw = tokenMatches[1];
+        }
+      }
+
+      const courseCode =
+        (finalsTimeRaw || prelimTimeRaw || seedTimeRaw).slice(-1) || sliceCol(line, 132, 133);
+
+      // Placement & points block sits between Finals time and the 4-digit division code (cols 129-149)
+      const tailSlice = line.slice(128, 149).trim();
+      const tailTokens = tailSlice ? tailSlice.split(/\s+/).filter(Boolean) : [];
+
+      const parseNum = (val) => {
+        if (!val) return null;
+        const cleaned = String(val).replace(/\.$/, '').trim();
+        return /^\d+$/.test(cleaned) ? parseInt(cleaned, 10) : null;
       };
 
-      const pHeatNum = parseIntField(sliceCol(line, 134, 134));
-      const pLaneNum = parseIntField(sliceCol(line, 135, 136));
-      const fHeatNum = parseIntField(sliceCol(line, 138, 138));
-      const fLaneNum = parseIntField(sliceCol(line, 139, 140));
-      const pPlaceNum = parseIntField(sliceCol(line, 141, 143));
-      const fPlaceNum = parseIntField(sliceCol(line, 144, 146));
-      const ptsRaw = sliceCol(line, 147, 152);
-      const ptsVal = parseFloat(ptsRaw);
-      const points = !Number.isNaN(ptsVal) && ptsVal > 0 ? ptsVal : 0;
+      const pHeatNum = parseNum(tailTokens[0]);
+      const pLaneNum = parseNum(tailTokens[1]);
+      const fHeatNum = parseNum(tailTokens[2]);
+      const fLaneNum = parseNum(tailTokens[3]);
 
-      const prelimHeat = pHeatNum > 0 ? String(pHeatNum) : '';
-      const prelimLane = pLaneNum > 0 ? String(pLaneNum) : '';
-      const finalsHeat = fHeatNum > 0 ? String(fHeatNum) : '';
-      const finalsLane = fLaneNum > 0 ? String(fLaneNum) : '';
-      const prelimPlace = pPlaceNum > 0 ? pPlaceNum : null;
-      const finalsPlace = fPlaceNum > 0 ? fPlaceNum : null;
+      // In Hy-Tek championship CL2 files, tailTokens[4] is Prelim Place and
+      // tailTokens[5] is Finals Place (e.g., "11 11" or "3  5").
+      const pPlaceNum = parseNum(tailTokens[4]);
+      const fPlaceNum = parseNum(tailTokens[5]);
 
-      const place = finalsTimeRaw ? finalsPlace : prelimPlace;
-      const heat = finalsTimeRaw ? finalsHeat || prelimHeat : prelimHeat || finalsHeat;
-      const lane = finalsTimeRaw ? finalsLane || prelimLane : prelimLane || finalsLane;
+      const pointsToken = tailTokens[6] || '';
+      const pointsMatch = pointsToken.match(/^(\d+(?:\.\d+)?)\.?$/);
+      const points =
+        pointsMatch && (pointsToken.includes('.') || parseFloat(pointsMatch[1]) <= 60)
+          ? parseFloat(pointsMatch[1])
+          : 0;
 
-      const strokeName = IND_STROKE_MAP[strokeCode] || STROKE_MAP[strokeCode] || `Stroke ${strokeCode}`;
-      const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
-      const distDisplay = isDiving
-        ? distance.toUpperCase() === '1H'
-          ? '1M'
-          : distance.toUpperCase() === '3H'
-          ? '3M'
-          : distance
-        : distance;
-      const eventLabel = isDiving
-        ? `${genderLabel} ${distDisplay} Diving${isTimeTrial ? ' (Time Trial)' : ''}`
-        : `${genderLabel} ${distDisplay} ${strokeName}${isTimeTrial ? ' (Time Trial)' : ''}`;
-
-      const parseScoreOrTime = (raw) => {
-        if (!raw) return null;
+      const parseScoreOrTime = (valStr) => {
+        if (!valStr) return null;
+        const cleanVal = String(valStr).replace(/[A-Z]+$/i, '').trim();
         if (isDiving) {
-          const clean = raw.replace(/[A-Z]+$/i, '').trim();
-          const v = parseFloat(clean);
-          return Number.isNaN(v) ? null : v;
+          const num = parseFloat(cleanVal);
+          return Number.isNaN(num) ? null : num;
         }
-        return timeToSeconds(raw);
+        return timeToSeconds(cleanVal);
       };
 
       const parsedFinalSec = parseScoreOrTime(finalsTimeRaw);
@@ -677,6 +684,33 @@ function parseSDIFContent(content) {
         : prelimTimeRaw
         ? 'Prelims'
         : 'Finals';
+
+      const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
+      const strokeName = isDiving ? 'Diving' : IND_STROKE_MAP[strokeCode] || 'Event';
+      const distDisplay = isDiving
+        ? `${parseInt(distance, 10) || 1}m`
+        : `${parseInt(distance, 10) || distance}`;
+      const eventLabel = `${genderLabel} ${distDisplay} ${strokeName}`.trim();
+
+      const heat = fHeatNum ? String(fHeatNum) : pHeatNum ? String(pHeatNum) : '';
+      const lane = fLaneNum ? String(fLaneNum) : pLaneNum ? String(pLaneNum) : '';
+      const place = fPlaceNum || null;
+      const prelimPlace = pPlaceNum || null;
+      const prelimHeat = pHeatNum ? String(pHeatNum) : '';
+      const prelimLane = pLaneNum ? String(pLaneNum) : '';
+      const finalsHeat = fHeatNum ? String(fHeatNum) : '';
+      const finalsLane = fLaneNum ? String(fLaneNum) : '';
+
+      const prelimSecVal = isDiving
+        ? parsedPrelimSec
+        : parsedPrelimSec !== null && isFinite(parsedPrelimSec)
+        ? parsedPrelimSec
+        : null;
+      const finalsSecVal = isDiving
+        ? parsedFinalSec
+        : parsedFinalSec !== null && isFinite(parsedFinalSec)
+        ? parsedFinalSec
+        : null;
 
       const record = {
         id: `ind-${i}-${swimmerName}-${eventNumber}`,
@@ -706,6 +740,8 @@ function parseSDIFContent(content) {
         prelimLane,
         finalsOnlyTime: finalsTimeRaw || '',
         finalsOnlySeconds: parsedFinalSec === null ? Infinity : parsedFinalSec,
+        prelimDisplaySec: prelimSecVal !== null ? prelimSecVal : Infinity,
+        finalsDisplaySec: finalsSecVal !== null ? finalsSecVal : Infinity,
         finalsHeat,
         finalsLane,
         finalsTime: primaryTimeStr,
@@ -4825,49 +4861,152 @@ const rRowId = `cl2-lo-${entry.id}`;
 
   const groupedIndividualEvents = useMemo(() => {
     const groupsMap = new Map();
-    filteredMeetIndividuals.forEach((row) => {
-      const key = `${row.eventNumber}-${row.eventLabel}`;
-      if (!groupsMap.has(key)) {
-        groupsMap.set(key, {
-          key,
-          eventNumber: row.eventNumber,
-          eventLabel: row.eventLabel,
-          course: row.course,
-          swims: [],
-        });
+    const dir = sortConfig.direction === 'asc' ? 1 : -1;
+
+    const sortSwimsForRound = (list, roundKind) => {
+      return [...list].sort((a, b) => {
+        if (sortConfig.key === 'swimmerName') {
+          return a.swimmerName.localeCompare(b.swimmerName) * dir;
+        }
+        if (sortConfig.key === 'teamName') {
+          return a.teamName.localeCompare(b.teamName) * dir;
+        }
+        if (sortConfig.key === 'time') {
+          const tA = roundKind === 'prelims' ? a.prelimDisplaySec : a.finalsDisplaySec;
+          const tB = roundKind === 'prelims' ? b.prelimDisplaySec : b.finalsDisplaySec;
+          return (tA - tB) * dir;
+        }
+        if (sortConfig.key === 'place') {
+          const pA =
+            roundKind === 'prelims'
+              ? (a.prelimPlace ?? 9999)
+              : (a.place ?? 9999);
+          const pB =
+            roundKind === 'prelims'
+              ? (b.prelimPlace ?? 9999)
+              : (b.place ?? 9999);
+          return (pA - pB) * dir;
+        }
+
+        if (roundKind === 'prelims') {
+          const pA = a.prelimPlace ?? 9999;
+          const pB = b.prelimPlace ?? 9999;
+          if (pA !== pB) return pA - pB;
+          if (a.isDiving) return (b.prelimDisplaySec || 0) - (a.prelimDisplaySec || 0);
+          return a.prelimDisplaySec - b.prelimDisplaySec;
+        }
+
+        // Finals order: A Final (heat 1) -> B Final (heat 2) -> C Final (heat 3), then within-heat/final place
+        const getFinalTier = (row) => {
+          const h = parseInt(row.finalsHeat, 10);
+          if (h === 1) return 1;
+          if (h === 2) return 2;
+          if (h === 3) return 3;
+          return 4;
+        };
+        const tierA = getFinalTier(a);
+        const tierB = getFinalTier(b);
+        if (tierA !== tierB) return tierA - tierB;
+        const pA = a.place ?? 9999;
+        const pB = b.place ?? 9999;
+        if (pA !== pB) return pA - pB;
+        if (a.isDiving) return (b.finalsDisplaySec || 0) - (a.finalsDisplaySec || 0);
+        return a.finalsDisplaySec - b.finalsDisplaySec;
+      });
+    };
+
+    const getFinalSectionLabel = (row, distinctFinalHeatCount) => {
+      const h = parseInt(row.finalsHeat, 10);
+      if (distinctFinalHeatCount <= 1) {
+        return h === 2 ? 'B FINALS' : h === 3 ? 'C FINALS' : 'A FINALS';
       }
-      groupsMap.get(key).swims.push(row);
+      if (h === 1) return 'A FINALS';
+      if (h === 2) return 'B FINALS';
+      if (h === 3) return 'C FINALS';
+      return h ? `FINAL HEAT ${h}` : 'FINALS';
+    };
+
+    filteredMeetIndividuals.forEach((row) => {
+      const baseKey = `${row.eventNumber}-${row.eventLabel}`;
+      const hasPrelim = Boolean(row.prelimTime);
+      const hasFinal = Boolean(row.finalsOnlyTime) || (!hasPrelim && !row.finalsOnlyTime);
+
+      if (hasPrelim) {
+        const pKey = `${baseKey}-PRELIMS`;
+        if (!groupsMap.has(pKey)) {
+          groupsMap.set(pKey, {
+            key: pKey,
+            roundKind: 'prelims',
+            eventNumber: row.eventNumber,
+            eventLabel: row.eventLabel,
+            course: row.course,
+            swims: [],
+          });
+        }
+        groupsMap.get(pKey).swims.push(row);
+      }
+
+      if (hasFinal) {
+        const fKey = `${baseKey}-FINALS`;
+        if (!groupsMap.has(fKey)) {
+          groupsMap.set(fKey, {
+            key: fKey,
+            roundKind: 'finals',
+            eventNumber: row.eventNumber,
+            eventLabel: row.eventLabel,
+            course: row.course,
+            swims: [],
+          });
+        }
+        groupsMap.get(fKey).swims.push(row);
+      }
     });
 
     const groups = Array.from(groupsMap.values());
     groups.sort((a, b) => {
-      const dir = sortConfig.key === 'eventNumber' && sortConfig.direction === 'desc' ? -1 : 1;
-      return (a.eventNumber - b.eventNumber) * dir;
+      const evDiff = (a.eventNumber - b.eventNumber) * dir;
+      if (evDiff !== 0) return evDiff;
+      if (a.roundKind === b.roundKind) return 0;
+      return a.roundKind === 'prelims' ? -1 : 1;
     });
 
     groups.forEach((group) => {
-      group.swims.sort((a, b) => {
-        const dir = sortConfig.direction === 'asc' ? 1 : -1;
-        if (sortConfig.key === 'swimmerName') return a.swimmerName.localeCompare(b.swimmerName) * dir;
-        if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
-        if (sortConfig.key === 'time') return (a.timeSeconds - b.timeSeconds) * dir;
-        if (sortConfig.key === 'place') {
-          const pA = a.place ?? 9999;
-          const pB = b.place ?? 9999;
-          return (pA - pB) * dir;
-        }
-        // Default: Finalists (with finalsOnlyTime) ranked by Finals Place ahead of Prelims-only swimmers ranked by Prelim Place
-        const hasFinalsA = Boolean(a.finalsOnlyTime);
-        const hasFinalsB = Boolean(b.finalsOnlyTime);
-        if (hasFinalsA !== hasFinalsB) return hasFinalsA ? -1 : 1;
-        const pA = a.place ?? a.prelimPlace ?? 9999;
-        const pB = b.place ?? b.prelimPlace ?? 9999;
-        if (pA !== pB) return pA - pB;
-        if (a.isDiving) return (b.timeSeconds || 0) - (a.timeSeconds || 0);
-        return a.timeSeconds - b.timeSeconds;
-      });
+      const isPrelimCard = group.roundKind === 'prelims';
+      group.swims = sortSwimsForRound(group.swims, group.roundKind);
 
-      const validTimes = group.swims.map((r) => r.timeSeconds).filter((t) => isFinite(t));
+      if (!isPrelimCard) {
+        const finalHeatsSet = new Set(
+          group.swims.map((r) => parseInt(r.finalsHeat, 10)).filter((n) => !Number.isNaN(n) && n > 0)
+        );
+        const distinctFinalHeatCount = finalHeatsSet.size;
+        const sectionsMap = new Map();
+        group.swims.forEach((row) => {
+          const secLabel = getFinalSectionLabel(row, distinctFinalHeatCount);
+          const tier =
+            parseInt(row.finalsHeat, 10) === 1
+              ? 1
+              : parseInt(row.finalsHeat, 10) === 2
+              ? 2
+              : parseInt(row.finalsHeat, 10) === 3
+              ? 3
+              : 4;
+          if (!sectionsMap.has(secLabel)) {
+            sectionsMap.set(secLabel, {
+              label: secLabel,
+              tier,
+              swims: [],
+            });
+          }
+          sectionsMap.get(secLabel).swims.push(row);
+        });
+        group.finalSections = Array.from(sectionsMap.values()).sort((a, b) => a.tier - b.tier);
+      } else {
+        group.finalSections = null;
+      }
+
+      const validTimes = group.swims
+        .map((r) => (isPrelimCard ? r.prelimDisplaySec : r.finalsDisplaySec))
+        .filter((t) => isFinite(t));
       group.fastestTimeSec =
         validTimes.length > 0
           ? group.swims[0]?.isDiving
@@ -5426,6 +5565,7 @@ const rRowId = `cl2-lo-${entry.id}`;
               ? evaluateStandardsForSwim(row.eventLabel, row.finalsTime)
               : [];
             const isPrelimOnly = !row.finalsOnlyTime && Boolean(row.prelimTime);
+            const rowDisplayPlace = row.finalsOnlyTime ? row.place : null;
             const badgesHtml = [
               ...(isPrelimOnly
                 ? ['<span class="badge badge-std">Prelims</span>']
@@ -5522,7 +5662,9 @@ const rRowId = `cl2-lo-${entry.id}`;
               hasSplits ? `onclick="toggleSplitRow('${detailId}', this)"` : ''
             }>
               <td class="center">${
-                row.place ? `<span class="place-badge p-${row.place}">${row.place}</span>` : '—'
+                rowDisplayPlace
+                  ? `<span class="place-badge p-${rowDisplayPlace}">${rowDisplayPlace}</span>`
+                  : '—'
               }</td>
               <td>
                 <div class="sw-name">${escapeHtml(dispName)} ${badgesHtml}</div>
@@ -12906,22 +13048,430 @@ const rRowId = `cl2-lo-${entry.id}`;
                       </div>
                     ) : (
                       groupedIndividualEvents.map((eventGroup) => {
-                        const expandableSwims = eventGroup.swims.filter(
-                          (r) => r.splits && r.splits.length > 0
+                        const isPrelimCard = eventGroup.roundKind === 'prelims';
+                        const expandableSwims = eventGroup.swims.filter((r) =>
+                          isPrelimCard
+                            ? r.prelimSplits && r.prelimSplits.length > 0
+                            : (r.finalsSplits && r.finalsSplits.length > 0) ||
+                              (r.splits && r.splits.length > 0)
                         );
                         const allExpanded =
                           expandableSwims.length > 0 &&
-                          expandableSwims.every((r) => expandedRows.has(r.id));
+                          expandableSwims.every((r) =>
+                            expandedRows.has(`${r.id}-${eventGroup.roundKind}`)
+                          );
+
+                        const renderIndividualSwimRow = (row) => {
+                          const rowToggleKey = `${row.id}-${eventGroup.roundKind}`;
+                          const roundSplits = isPrelimCard
+                            ? row.prelimSplits || []
+                            : row.finalsSplits && row.finalsSplits.length > 0
+                            ? row.finalsSplits
+                            : row.splits || [];
+                          const hasSplits = roundSplits.length > 0;
+                          const isExpanded = expandedRows.has(rowToggleKey);
+                          const splitAnalysis = isExpanded
+                            ? calculateSplitBreakdown(
+                                roundSplits,
+                                row.distance,
+                                row.splitInterval,
+                                row.splitType
+                              )
+                            : null;
+
+                          const activeSec = isPrelimCard
+                            ? row.prelimDisplaySec
+                            : row.finalsDisplaySec;
+                          const behindSec =
+                            isFinite(activeSec) && isFinite(eventGroup.fastestTimeSec)
+                              ? row.isDiving
+                                ? eventGroup.fastestTimeSec - activeSec
+                                : activeSec - eventGroup.fastestTimeSec
+                              : Infinity;
+
+                          const displaySwimmer = formatSwimmerDisplay(
+                            row.swimmerName,
+                            row.preferredFirst
+                          );
+                          const isPrimaryProgramRow =
+                            selectedTeam !== 'ALL'
+                              ? row.teamCode === selectedTeam
+                              : String(row.teamName || '')
+                                  .toLowerCase()
+                                  .includes('gettysburg') ||
+                                String(row.teamCode || '')
+                                  .toLowerCase()
+                                  .includes('gett');
+
+                          const activeTimeStr = isPrelimCard
+                            ? row.prelimTime
+                            : row.finalsOnlyTime || row.finalsTime;
+
+                          const tags =
+                            isPrimaryProgramRow && !row.isDiving && !isPrelimCard
+                              ? benchmarkIndex.evaluateSwim(
+                                  displaySwimmer,
+                                  row.eventLabel,
+                                  activeTimeStr,
+                                  row.classYear
+                                )
+                              : [];
+                          const hitStds =
+                            !row.isDiving && !isPrelimCard
+                              ? evaluateStandardsForSwim(row.eventLabel, activeTimeStr)
+                              : [];
+                          const teamHex = getTeamHexColor(row.teamCode, row.teamName);
+                          const effectiveDisplayPlace = isPrelimCard
+                            ? row.prelimPlace
+                            : row.place;
+                          const displayHeat = isPrelimCard ? row.prelimHeat : row.finalsHeat;
+                          const displayLane = isPrelimCard ? row.prelimLane : row.finalsLane;
+                          const displayPts = isPrelimCard ? 0 : row.points;
+
+                          return (
+                            <React.Fragment key={rowToggleKey}>
+                              <tr
+                                onClick={() => hasSplits && toggleRow(rowToggleKey)}
+                                style={{
+                                  boxShadow: `inset 4px 0 0 ${teamHex}`,
+                                }}
+                                className={`transition ${
+                                  hasSplits
+                                    ? 'cursor-pointer hover:bg-cyan-50/40'
+                                    : 'hover:bg-slate-50/70'
+                                } ${isExpanded ? 'bg-cyan-50/50' : ''}`}
+                              >
+                                <td className="py-3 pl-4 pr-2 text-slate-400">
+                                  {hasSplits && (
+                                    <button
+                                      type="button"
+                                      aria-label="Toggle splits"
+                                      className="p-1 rounded hover:bg-slate-200/60 text-cyan-600"
+                                    >
+                                      {isExpanded ? (
+                                        <ChevronDown className="w-4 h-4" />
+                                      ) : (
+                                        <ChevronRight className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3 text-center">
+                                  {effectiveDisplayPlace ? (
+                                    <span
+                                      className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+                                        effectiveDisplayPlace === 1
+                                          ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                          : effectiveDisplayPlace === 2
+                                          ? 'bg-slate-200 text-slate-800 border border-slate-300'
+                                          : effectiveDisplayPlace === 3
+                                          ? 'bg-orange-100 text-orange-800 border border-orange-300'
+                                          : 'bg-slate-100 text-slate-600'
+                                      }`}
+                                    >
+                                      {effectiveDisplayPlace}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 text-xs">—</span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3">
+                                  <div className="font-semibold text-slate-900 flex flex-wrap items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openSwimmerProfile(
+                                          displaySwimmer,
+                                          normalizeEventKey(row.eventLabel)
+                                        );
+                                      }}
+                                      className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
+                                    >
+                                      {displaySwimmer}
+                                    </button>
+                                    {row.isExhibition && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">
+                                        EXH
+                                      </span>
+                                    )}
+                                    {tags.map((t, i) => (
+                                      <span
+                                        key={i}
+                                        className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
+                                      >
+                                        {t.label}
+                                      </span>
+                                    ))}
+                                    {hitStds.map((s) => (
+                                      <span
+                                        key={s.id}
+                                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${getStandardBadgeStyle(
+                                          s.label
+                                        )}`}
+                                      >
+                                        {s.label}
+                                      </span>
+                                    ))}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                                    {row.classYear && <span>Class: {row.classYear}</span>}
+                                    {(displayHeat || displayLane) && (
+                                      <span className="font-mono text-slate-400">
+                                        {displayHeat ? `Heat ${displayHeat}` : ''}
+                                        {displayHeat && displayLane ? ' • ' : ''}
+                                        {displayLane ? `Lane ${displayLane}` : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3">
+                                  <div className="text-slate-700 font-medium">{row.teamName}</div>
+                                </td>
+                                <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
+                                  {activeTimeStr || '—'}
+                                </td>
+                                <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
+                                  {isFinite(behindSec) ? (
+                                    behindSec < 0.005 ? (
+                                      <span className="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/80">
+                                        Leader
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-500">
+                                        {row.isDiving
+                                          ? `-${behindSec.toFixed(2)}`
+                                          : `+${behindSec.toFixed(2)}s`}
+                                      </span>
+                                    )
+                                  ) : (
+                                    <span className="text-slate-400">—</span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3 text-center font-mono text-xs tabular-nums">
+                                  {!isPrelimCard && displayPts > 0 ? (
+                                    <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
+                                      {displayPts}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-300">—</span>
+                                  )}
+                                </td>
+                                <td className="py-3 pl-3 pr-5 text-right">
+                                  {hasSplits ? (
+                                    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200/80">
+                                      {roundSplits.length} splits
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-slate-400">No splits</span>
+                                  )}
+                                </td>
+                              </tr>
+
+                              {/* Expanded Split Breakdown Drawer */}
+                              {isExpanded && hasSplits && splitAnalysis && (
+                                <tr className="bg-slate-50/95 border-b border-slate-200">
+                                  <td colSpan={8} className="px-4 sm:px-6 py-4">
+                                    <div className="bg-white rounded-xl border border-cyan-200/90 p-4 sm:p-5 shadow-xs space-y-4">
+                                      <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div className="text-xs font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
+                                          <Timer className="w-4 h-4 text-cyan-600" />
+                                          <span>
+                                            {isPrelimCard ? 'Prelims' : 'Finals'} Split Breakdown (
+                                            {splitAnalysis.stats?.interval || 50}y Intervals) —{' '}
+                                            {displaySwimmer}
+                                          </span>
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                                          {splitAnalysis.stats && (
+                                            <>
+                                              <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-mono">
+                                                Avg Lap:{' '}
+                                                <strong>{splitAnalysis.stats.avgLap}</strong>
+                                              </span>
+                                              {splitAnalysis.stats.halfDiff !== null && (
+                                                <span
+                                                  className={`px-2.5 py-1 rounded-md font-mono font-semibold ${
+                                                    splitAnalysis.stats.halfDiff < 0
+                                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                                      : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                                  }`}
+                                                >
+                                                  {splitAnalysis.stats.halfDiff < 0
+                                                    ? `Negative Split (${splitAnalysis.stats.halfDiff.toFixed(
+                                                        2
+                                                      )}s)`
+                                                    : `2nd Half +${splitAnalysis.stats.halfDiff.toFixed(
+                                                        2
+                                                      )}s`}
+                                                </span>
+                                              )}
+                                            </>
+                                          )}
+                                          {(displayHeat || displayLane) && (
+                                            <span className="text-slate-500 font-mono">
+                                              {displayHeat ? `Heat ${displayHeat}` : ''}{' '}
+                                              {displayLane ? `• Lane ${displayLane}` : ''}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Pacing Bar Visualization */}
+                                      {splitAnalysis.stats && splitAnalysis.rows.length > 1 && (
+                                        <div className="bg-slate-50 rounded-lg p-3 border border-slate-200/70">
+                                          <div className="text-[11px] font-semibold text-slate-500 mb-2 flex items-center justify-between">
+                                            <span className="flex items-center gap-1">
+                                              <TrendingUp className="w-3.5 h-3.5 text-cyan-600" />
+                                              Lap Pacing Comparison (Shorter bar = faster lap)
+                                            </span>
+                                            <span className="flex items-center gap-3">
+                                              <span className="inline-flex items-center gap-1 text-emerald-700">
+                                                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                                Fastest
+                                              </span>
+                                              <span className="inline-flex items-center gap-1 text-amber-700">
+                                                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                                                Slowest
+                                              </span>
+                                            </span>
+                                          </div>
+                                          <div className="flex items-end gap-1.5 h-16 pt-2">
+                                            {splitAnalysis.rows.map((s) => {
+                                              const { minLap, maxLap } = splitAnalysis.stats;
+                                              const range = Math.max(maxLap - minLap, 0.5);
+                                              const norm = isFinite(s.lapSec)
+                                                ? 35 + ((s.lapSec - minLap) / range) * 65
+                                                : 50;
+                                              return (
+                                                <div
+                                                  key={s.index}
+                                                  className="flex-1 flex flex-col items-center gap-1 min-w-[20px]"
+                                                  title={`${s.distanceLabel}: Lap ${s.lap} (Cum ${s.cumulative})`}
+                                                >
+                                                  <div className="w-full flex items-end justify-center h-11">
+                                                    <div
+                                                      style={{
+                                                        height: `${Math.round(norm)}%`,
+                                                      }}
+                                                      className={`w-full max-w-[28px] rounded-t transition-all ${
+                                                        s.isFastest
+                                                          ? 'bg-emerald-500'
+                                                          : s.isSlowest
+                                                          ? 'bg-amber-400'
+                                                          : 'bg-cyan-500/80'
+                                                      }`}
+                                                    />
+                                                  </div>
+                                                  <span className="text-[9px] font-mono text-slate-500">
+                                                    {s.distance}
+                                                  </span>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Structured Split Table */}
+                                      <div className="overflow-x-auto rounded-lg border border-slate-200">
+                                        <table className="w-full text-left border-collapse text-xs">
+                                          <thead>
+                                            <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
+                                              <th className="py-2 px-3">Distance</th>
+                                              <th className="py-2 px-3 text-right">
+                                                Cumulative Time
+                                              </th>
+                                              <th className="py-2 px-3 text-right">
+                                                {splitAnalysis.stats?.interval || 50}y Lap Split
+                                              </th>
+                                              <th className="py-2 px-3 text-right">Pace Note</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-100 font-mono tabular-nums">
+                                            {splitAnalysis.rows.map((s) => (
+                                              <tr
+                                                key={s.index}
+                                                className={
+                                                  s.isFastest
+                                                    ? 'bg-emerald-50/40'
+                                                    : s.isSlowest
+                                                    ? 'bg-amber-50/30'
+                                                    : 'hover:bg-slate-50/80'
+                                                }
+                                              >
+                                                <td className="py-2 px-3 font-sans font-semibold text-slate-700">
+                                                  {s.distanceLabel}
+                                                </td>
+                                                <td className="py-2 px-3 text-right font-bold text-slate-900">
+                                                  {s.cumulative}
+                                                </td>
+                                                <td className="py-2 px-3 text-right font-bold text-cyan-700">
+                                                  {s.lap}
+                                                </td>
+                                                <td className="py-2 px-3 text-right font-sans">
+                                                  {s.isFastest ? (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
+                                                      <Zap className="w-3 h-3" />
+                                                      Fastest Lap
+                                                    </span>
+                                                  ) : s.isSlowest ? (
+                                                    <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800">
+                                                      Slowest Lap
+                                                    </span>
+                                                  ) : splitAnalysis.stats &&
+                                                    isFinite(s.lapSec) ? (
+                                                    <span className="text-[11px] text-slate-400">
+                                                      {s.lapSec - splitAnalysis.stats.avgLapSec >= 0
+                                                        ? `+${(
+                                                            s.lapSec - splitAnalysis.stats.avgLapSec
+                                                          ).toFixed(2)}s vs avg`
+                                                        : `${(
+                                                            s.lapSec - splitAnalysis.stats.avgLapSec
+                                                          ).toFixed(2)}s vs avg`}
+                                                    </span>
+                                                  ) : (
+                                                    '—'
+                                                  )}
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        };
 
                         return (
                           <div
                             key={eventGroup.key}
                             className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
                           >
-                            <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+                            <div
+                              className={`${
+                                isPrelimCard
+                                  ? 'bg-slate-800'
+                                  : 'bg-slate-900'
+                              } text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3`}
+                            >
                               <div className="flex items-center gap-3">
                                 <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
                                   Event #{eventGroup.eventNumber}
+                                </span>
+                                <span
+                                  className={`text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                                    isPrelimCard
+                                      ? 'bg-indigo-500/20 text-indigo-200 border-indigo-400/30'
+                                      : 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30'
+                                  }`}
+                                >
+                                  {isPrelimCard ? 'Prelims' : 'Finals'}
                                 </span>
                                 <div>
                                   <h3 className="text-base font-bold tracking-tight">
@@ -12931,6 +13481,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                                     {eventGroup.swims.length}{' '}
                                     {eventGroup.swims.length === 1 ? 'Swimmer' : 'Swimmers'} •{' '}
                                     {eventGroup.course}
+                                    {isPrelimCard ? ' • Unscored Prelims' : ''}
                                   </p>
                                 </div>
                               </div>
@@ -12938,7 +13489,17 @@ const rRowId = `cl2-lo-${entry.id}`;
                               {expandableSwims.length > 0 && (
                                 <button
                                   type="button"
-                                  onClick={() => toggleAllIndividualsInEvent(eventGroup.swims)}
+                                  onClick={() => {
+                                    const ids = expandableSwims.map(
+                                      (r) => `${r.id}-${eventGroup.roundKind}`
+                                    );
+                                    setExpandedRows((prev) => {
+                                      const next = new Set(prev);
+                                      if (allExpanded) ids.forEach((id) => next.delete(id));
+                                      else ids.forEach((id) => next.add(id));
+                                      return next;
+                                    });
+                                  }}
                                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition cursor-pointer"
                                 >
                                   {allExpanded ? (
@@ -12993,16 +13554,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                                       className="py-3 px-3 text-right cursor-pointer hover:text-slate-900 select-none"
                                     >
                                       <div className="flex items-center justify-end gap-1">
-                                        <span>Prelims</span>
-                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                      </div>
-                                    </th>
-                                    <th
-                                      onClick={() => handleSort('time')}
-                                      className="py-3 px-3 text-right cursor-pointer hover:text-slate-900 select-none"
-                                    >
-                                      <div className="flex items-center justify-end gap-1">
-                                        <span>Finals</span>
+                                        <span>{isPrelimCard ? 'Prelims Time' : 'Finals Time'}</span>
                                         <ArrowUpDown className="w-3 h-3 text-slate-400" />
                                       </div>
                                     </th>
@@ -13012,499 +13564,21 @@ const rRowId = `cl2-lo-${entry.id}`;
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 text-sm">
-                                  {eventGroup.swims.map((row) => {
-                                    const hasFinalsSplits =
-                                      row.finalsSplits && row.finalsSplits.length > 0;
-                                    const hasPrelimSplits =
-                                      row.prelimSplits && row.prelimSplits.length > 0;
-                                    const hasSplits =
-                                      hasFinalsSplits ||
-                                      hasPrelimSplits ||
-                                      (row.splits && row.splits.length > 0);
-                                    const isExpanded = expandedRows.has(row.id);
-                                    const primarySplitArr = hasFinalsSplits
-                                      ? row.finalsSplits
-                                      : hasPrelimSplits
-                                      ? row.prelimSplits
-                                      : row.splits;
-                                    const splitAnalysis = isExpanded
-                                      ? calculateSplitBreakdown(
-                                          primarySplitArr,
-                                          row.distance,
-                                          row.splitInterval,
-                                          row.splitType
-                                        )
-                                      : null;
-                                    const prelimSplitAnalysis =
-                                      isExpanded && hasFinalsSplits && hasPrelimSplits
-                                        ? calculateSplitBreakdown(
-                                            row.prelimSplits,
-                                            row.distance,
-                                            row.splitInterval,
-                                            row.splitType
-                                          )
-                                        : null;
-                                    const behindSec =
-                                      isFinite(row.timeSeconds) &&
-                                      isFinite(eventGroup.fastestTimeSec)
-                                        ? row.isDiving
-                                          ? eventGroup.fastestTimeSec - row.timeSeconds
-                                          : row.timeSeconds - eventGroup.fastestTimeSec
-                                        : Infinity;
-                                    const displaySwimmer = formatSwimmerDisplay(
-                                      row.swimmerName,
-                                      row.preferredFirst
-                                    );
-                                    const isPrimaryProgramRow =
-                                      selectedTeam !== 'ALL'
-                                        ? row.teamCode === selectedTeam
-                                        : String(row.teamName || '')
-                                            .toLowerCase()
-                                            .includes('gettysburg') ||
-                                          String(row.teamCode || '')
-                                            .toLowerCase()
-                                            .includes('gett');
-                                    const tags =
-                                      isPrimaryProgramRow && !row.isDiving
-                                        ? benchmarkIndex.evaluateSwim(
-                                            displaySwimmer,
-                                            row.eventLabel,
-                                            row.finalsTime,
-                                            row.classYear
-                                          )
-                                        : [];
-                                    const hitStds = !row.isDiving
-                                      ? evaluateStandardsForSwim(row.eventLabel, row.finalsTime)
-                                      : [];
-                                    const teamHex = getTeamHexColor(row.teamCode, row.teamName);
-                                    const effectiveDisplayPlace =
-                                      row.finalsOnlyTime ? row.place : row.prelimPlace ?? row.place;
-                            
-                                    return (
-                                      <React.Fragment key={row.id}>
-                                        <tr
-                                          onClick={() => hasSplits && toggleRow(row.id)}
-                                          style={{
-                                            boxShadow: `inset 4px 0 0 ${teamHex}`,
-                                          }}
-                                          className={`transition ${
-                                            hasSplits
-                                              ? 'cursor-pointer hover:bg-cyan-50/40'
-                                              : 'hover:bg-slate-50/70'
-                                          } ${isExpanded ? 'bg-cyan-50/50' : ''}`}
-                                        >
-                                          <td className="py-3 pl-4 pr-2 text-slate-400">
-                                            {hasSplits && (
-                                              <button
-                                                type="button"
-                                                aria-label="Toggle splits"
-                                                className="p-1 rounded hover:bg-slate-200/60 text-cyan-600"
-                                              >
-                                                {isExpanded ? (
-                                                  <ChevronDown className="w-4 h-4" />
-                                                ) : (
-                                                  <ChevronRight className="w-4 h-4" />
-                                                )}
-                                              </button>
-                                            )}
-                                          </td>
-                                          <td className="py-3 px-3 text-center">
-                                            {effectiveDisplayPlace ? (
-                                              <span
-                                                className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
-                                                  effectiveDisplayPlace === 1
-                                                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                                                    : effectiveDisplayPlace === 2
-                                                    ? 'bg-slate-200 text-slate-800 border border-slate-300'
-                                                    : effectiveDisplayPlace === 3
-                                                    ? 'bg-orange-100 text-orange-800 border border-orange-300'
-                                                    : 'bg-slate-100 text-slate-600'
-                                                }`}
-                                              >
-                                                {effectiveDisplayPlace}
-                                              </span>
-                                            ) : (
-                                              <span className="text-slate-400 text-xs">—</span>
-                                            )}
-                                          </td>
-                                          <td className="py-3 px-3">
-                                            <div className="font-semibold text-slate-900 flex flex-wrap items-center gap-1.5">
-                                              <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  openSwimmerProfile(
-                                                    displaySwimmer,
-                                                    normalizeEventKey(row.eventLabel)
-                                                  );
-                                                }}
-                                                className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
-                                              >
-                                                {displaySwimmer}
-                                              </button>
-                                              {row.isExhibition && (
-                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">
-                                                  EXH
-                                                </span>
-                                              )}
-                                              {tags.map((t, i) => (
-                                                <span
-                                                  key={i}
-                                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900"
-                                                >
-                                                  {t.label}
-                                                </span>
-                                              ))}
-                                              {hitStds.map((s) => (
-                                                <span
-                                                  key={s.id}
-                                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${getStandardBadgeStyle(
-                                                    s.label
-                                                  )}`}
-                                                >
-                                                  {s.label}
-                                                </span>
-                                              ))}
-                                            </div>
-                                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-                                              {row.classYear && <span>Class: {row.classYear}</span>}
-                                              {row.prelimHeat && row.finalsHeat ? (
-                                                <span className="font-mono text-slate-400">
-                                                  Prelim H{row.prelimHeat}/L{row.prelimLane} • Final H
-                                                  {row.finalsHeat}/L{row.finalsLane}
-                                                </span>
-                                              ) : (
-                                                (row.heat || row.lane) && (
-                                                  <span className="font-mono text-slate-400">
-                                                    {row.heat ? `Heat ${row.heat}` : ''}
-                                                    {row.heat && row.lane ? ' • ' : ''}
-                                                    {row.lane ? `Lane ${row.lane}` : ''}
-                                                  </span>
-                                                )
-                                              )}
-                                            </div>
-                                          </td>
-                                          <td className="py-3 px-3">
-                                            <div className="text-slate-700 font-medium">
-                                              {row.teamName}
-                                            </div>
-                                          </td>
-                                          <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
-                                            {row.prelimTime ? (
-                                              <div>
-                                                <span className="font-semibold text-slate-700">
-                                                  {row.prelimTime}
-                                                </span>
-                                                {row.prelimPlace && (
-                                                  <span className="ml-1 text-[10px] text-slate-400">
-                                                    (#{row.prelimPlace})
-                                                  </span>
-                                                )}
-                                              </div>
-                                            ) : (
-                                              <span className="text-slate-300">—</span>
-                                            )}
-                                          </td>
-                                          <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
-                                            {row.finalsOnlyTime ? (
-                                              row.finalsOnlyTime
-                                            ) : row.prelimTime ? (
-                                              <span className="text-xs font-medium text-slate-400">
-                                                Prelims Only
-                                              </span>
-                                            ) : (
-                                              row.finalsTime
-                                            )}
-                                          </td>
-                                          <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
-                                            {isFinite(behindSec) ? (
-                                              behindSec < 0.005 ? (
-                                                <span className="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/80">
-                                                  Leader
-                                                </span>
-                                              ) : (
-                                                <span className="text-slate-500">
-                                                  {row.isDiving
-                                                    ? `-${behindSec.toFixed(2)}`
-                                                    : `+${behindSec.toFixed(2)}s`}
-                                                </span>
-                                              )
-                                            ) : (
-                                              <span className="text-slate-400">—</span>
-                                            )}
-                                          </td>
-                                          <td className="py-3 px-3 text-center font-mono text-xs tabular-nums">
-                                            {row.points > 0 ? (
-                                              <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
-                                                {row.points}
-                                              </span>
-                                            ) : (
-                                              <span className="text-slate-300">—</span>
-                                            )}
-                                          </td>
-                                          <td className="py-3 pl-3 pr-5 text-right">
-                                            {hasSplits ? (
-                                              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200/80">
-                                                {hasFinalsSplits && hasPrelimSplits
-                                                  ? `F (${row.finalsSplits.length}) / P (${row.prelimSplits.length})`
-                                                  : `${primarySplitArr.length} splits`}
-                                              </span>
-                                            ) : (
-                                              <span className="text-xs text-slate-400">
-                                                No splits
-                                              </span>
-                                            )}
-                                          </td>
-                                        </tr>
-
-                                        {/* Expanded Individual Split Breakdown Drawer */}
-                                        {isExpanded && hasSplits && splitAnalysis && (
-                                          <tr className="bg-slate-50/95 border-b border-slate-200">
-                                            <td colSpan={9} className="px-4 sm:px-6 py-4">
-                                              <div className="bg-white rounded-xl border border-cyan-200/90 p-4 sm:p-5 shadow-xs space-y-4">
-                                                <div className="flex flex-wrap items-center justify-between gap-3">
-                                                  <div className="text-xs font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
-                                                    <Timer className="w-4 h-4 text-cyan-600" />
-                                                    <span>
-                                                      {hasFinalsSplits
-                                                        ? 'Finals '
-                                                        : hasPrelimSplits
-                                                        ? 'Prelims '
-                                                        : ''}
-                                                      Split Breakdown (
-                                                      {splitAnalysis.stats?.interval || 50}y
-                                                      Intervals) — {displaySwimmer}
-                                                    </span>
-                                                  </div>
-
-                                                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                                                    {splitAnalysis.stats && (
-                                                      <>
-                                                        <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-mono">
-                                                          Avg Lap:{' '}
-                                                          <strong>
-                                                            {splitAnalysis.stats.avgLap}
-                                                          </strong>
-                                                        </span>
-                                                        {splitAnalysis.stats.halfDiff !== null && (
-                                                          <span
-                                                            className={`px-2.5 py-1 rounded-md font-mono font-semibold ${
-                                                              splitAnalysis.stats.halfDiff < 0
-                                                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                                                : 'bg-amber-50 text-amber-800 border border-amber-200'
-                                                            }`}
-                                                          >
-                                                            {splitAnalysis.stats.halfDiff < 0
-                                                              ? `Negative Split (${splitAnalysis.stats.halfDiff.toFixed(
-                                                                  2
-                                                                )}s)`
-                                                              : `2nd Half +${splitAnalysis.stats.halfDiff.toFixed(
-                                                                  2
-                                                                )}s`}
-                                                          </span>
-                                                        )}
-                                                      </>
-                                                    )}
-                                                    {(row.heat || row.lane) && (
-                                                      <span className="text-slate-500 font-mono">
-                                                        {row.heat ? `Heat ${row.heat}` : ''}{' '}
-                                                        {row.lane ? `• Lane ${row.lane}` : ''}
-                                                      </span>
-                                                    )}
-                                                  </div>
-                                                </div>
-
-                                                {/* Pacing Bar Visualization */}
-                                                {splitAnalysis.stats &&
-                                                  splitAnalysis.rows.length > 1 && (
-                                                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-200/70">
-                                                      <div className="text-[11px] font-semibold text-slate-500 mb-2 flex items-center justify-between">
-                                                        <span className="flex items-center gap-1">
-                                                          <TrendingUp className="w-3.5 h-3.5 text-cyan-600" />
-                                                          Lap Pacing Comparison (Shorter bar =
-                                                          faster lap)
-                                                        </span>
-                                                        <span className="flex items-center gap-3">
-                                                          <span className="inline-flex items-center gap-1 text-emerald-700">
-                                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                                                            Fastest
-                                                          </span>
-                                                          <span className="inline-flex items-center gap-1 text-amber-700">
-                                                            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                                                            Slowest
-                                                          </span>
-                                                        </span>
-                                                      </div>
-                                                      <div className="flex items-end gap-1.5 h-16 pt-2">
-                                                        {splitAnalysis.rows.map((s) => {
-                                                          const { minLap, maxLap } =
-                                                            splitAnalysis.stats;
-                                                          const range = Math.max(
-                                                            maxLap - minLap,
-                                                            0.5
-                                                          );
-                                                          const norm = isFinite(s.lapSec)
-                                                            ? 35 +
-                                                              ((s.lapSec - minLap) / range) * 65
-                                                            : 50;
-                                                          return (
-                                                            <div
-                                                              key={s.index}
-                                                              className="flex-1 flex flex-col items-center gap-1 min-w-[20px]"
-                                                              title={`${s.distanceLabel}: Lap ${s.lap} (Cum ${s.cumulative})`}
-                                                            >
-                                                              <div className="w-full flex items-end justify-center h-11">
-                                                                <div
-                                                                  style={{
-                                                                    height: `${Math.round(norm)}%`,
-                                                                  }}
-                                                                  className={`w-full max-w-[28px] rounded-t transition-all ${
-                                                                    s.isFastest
-                                                                      ? 'bg-emerald-500'
-                                                                      : s.isSlowest
-                                                                      ? 'bg-amber-400'
-                                                                      : 'bg-cyan-500/80'
-                                                                  }`}
-                                                                />
-                                                              </div>
-                                                              <span className="text-[9px] font-mono text-slate-500">
-                                                                {s.distance}
-                                                              </span>
-                                                            </div>
-                                                          );
-                                                        })}
-                                                      </div>
-                                                    </div>
-                                                  )}
-
-                                                {/* Structured Split Table */}
-                                                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                                                  <table className="w-full text-left border-collapse text-xs">
-                                                    <thead>
-                                                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
-                                                        <th className="py-2 px-3">Distance</th>
-                                                        <th className="py-2 px-3 text-right">
-                                                          Cumulative Time
-                                                        </th>
-                                                        <th className="py-2 px-3 text-right">
-                                                          {splitAnalysis.stats?.interval || 50}y Lap
-                                                          Split
-                                                        </th>
-                                                        <th className="py-2 px-3 text-right">
-                                                          Pace Note
-                                                        </th>
-                                                      </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-100 font-mono tabular-nums">
-                                                      {splitAnalysis.rows.map((s) => (
-                                                        <tr
-                                                          key={s.index}
-                                                          className={
-                                                            s.isFastest
-                                                              ? 'bg-emerald-50/40'
-                                                              : s.isSlowest
-                                                              ? 'bg-amber-50/30'
-                                                              : 'hover:bg-slate-50/80'
-                                                          }
-                                                        >
-                                                          <td className="py-2 px-3 font-sans font-semibold text-slate-700">
-                                                            {s.distanceLabel}
-                                                          </td>
-                                                          <td className="py-2 px-3 text-right font-bold text-slate-900">
-                                                            {s.cumulative}
-                                                          </td>
-                                                          <td className="py-2 px-3 text-right font-bold text-cyan-700">
-                                                            {s.lap}
-                                                          </td>
-                                                          <td className="py-2 px-3 text-right font-sans">
-                                                            {s.isFastest ? (
-                                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
-                                                                <Zap className="w-3 h-3" />
-                                                                Fastest Lap
-                                                              </span>
-                                                            ) : s.isSlowest ? (
-                                                              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800">
-                                                                Slowest Lap
-                                                              </span>
-                                                            ) : splitAnalysis.stats &&
-                                                              isFinite(s.lapSec) ? (
-                                                              <span className="text-[11px] text-slate-400">
-                                                                {s.lapSec -
-                                                                  splitAnalysis.stats.avgLapSec >=
-                                                                0
-                                                                  ? `+${(
-                                                                      s.lapSec -
-                                                                      splitAnalysis.stats.avgLapSec
-                                                                    ).toFixed(2)}s vs avg`
-                                                                  : `${(
-                                                                      s.lapSec -
-                                                                      splitAnalysis.stats.avgLapSec
-                                                                    ).toFixed(2)}s vs avg`}
-                                                              </span>
-                                                            ) : (
-                                                              '—'
-                                                            )}
-                                                          </td>
-                                                        </tr>
-                                                      ))}
-                                                    </tbody>
-                                                  </table>
-                                                </div>
-
-                                                {prelimSplitAnalysis && (
-                                                  <div className="pt-3 border-t border-slate-200 space-y-2">
-                                                    <div className="text-xs font-bold uppercase tracking-wider text-indigo-800 flex items-center justify-between">
-                                                      <span>
-                                                        Prelims Split Breakdown ({row.prelimTime})
-                                                      </span>
-                                                      {prelimSplitAnalysis.stats && (
-                                                        <span className="font-mono text-slate-600 normal-case font-normal">
-                                                          Avg Lap:{' '}
-                                                          <strong>
-                                                            {prelimSplitAnalysis.stats.avgLap}
-                                                          </strong>
-                                                        </span>
-                                                      )}
-                                                    </div>
-                                                    <div className="overflow-x-auto rounded-lg border border-slate-200">
-                                                      <table className="w-full text-left border-collapse text-xs">
-                                                        <thead>
-                                                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
-                                                            <th className="py-1.5 px-3">Distance</th>
-                                                            <th className="py-1.5 px-3 text-right">
-                                                              Cumulative Time
-                                                            </th>
-                                                            <th className="py-1.5 px-3 text-right">
-                                                              Lap Split
-                                                            </th>
-                                                          </tr>
-                                                        </thead>
-                                                        <tbody className="divide-y divide-slate-100 font-mono tabular-nums">
-                                                          {prelimSplitAnalysis.rows.map((s) => (
-                                                            <tr key={`p-${s.index}`}>
-                                                              <td className="py-1.5 px-3 font-sans font-semibold text-slate-700">
-                                                                {s.distanceLabel}
-                                                              </td>
-                                                              <td className="py-1.5 px-3 text-right font-bold text-slate-900">
-                                                                {s.cumulative}
-                                                              </td>
-                                                              <td className="py-1.5 px-3 text-right font-bold text-indigo-700">
-                                                                {s.lap}
-                                                              </td>
-                                                            </tr>
-                                                          ))}
-                                                        </tbody>
-                                                      </table>
-                                                    </div>
-                                                  </div>
-                                                )}
-                                              </div>
+                                  {!isPrelimCard && eventGroup.finalSections
+                                    ? eventGroup.finalSections.map((sec) => (
+                                        <React.Fragment key={sec.label}>
+                                          <tr className="bg-slate-100/90 border-y border-slate-200">
+                                            <td
+                                              colSpan={8}
+                                              className="py-2 px-4 text-xs font-black uppercase tracking-wider text-slate-800"
+                                            >
+                                              {sec.label}
                                             </td>
                                           </tr>
-                                        )}
-                                      </React.Fragment>
-                                    );
-                                  })}
+                                          {sec.swims.map((row) => renderIndividualSwimRow(row))}
+                                        </React.Fragment>
+                                      ))
+                                    : eventGroup.swims.map((row) => renderIndividualSwimRow(row))}
                                 </tbody>
                               </table>
                             </div>
