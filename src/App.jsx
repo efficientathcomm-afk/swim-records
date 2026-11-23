@@ -676,75 +676,75 @@ function parseSDIFContent(content) {
           (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4])));
 
       if (isPrelimFinalsFormat) {
-        // Tail tokens in prelim+finals format:
-        // [pHeatLane (e.g. "410" or "4 6"), fHeat, fLane, pPlace, fPlace, points]
-        let idx = 0;
-        const tok0 = tailTokens[idx++] || '';
-        if (/^\d{3,}$/.test(tok0) && Number(tok0.slice(1)) >= 10) {
-          prelimHeat = tok0.slice(0, 1);
-          prelimLane = tok0.slice(1);
+        // Parse the tail tokens directly in order:
+        // [prelimHeat, prelimLane, finalsHeat, finalsLane, prelimPlace, finalsPlace, points]
+        // Note: in a 2-digit lane like "310" (finalsHeat=3, finalsLane=10), the token is "310"
+        const pHeatTok = tailTokens[0] || '';
+        const pLaneTok = tailTokens[1] || '';
+        const fHeatLaneTok = tailTokens[2] || '';
+        const pPlaceTok = tailTokens[3] || '';
+        const fPlaceTok = tailTokens[4] || '';
+        const ptsTok = tailTokens[5] || '';
+
+        prelimHeat = pHeatTok && pHeatTok !== '0' ? pHeatTok : '';
+        prelimLane = pLaneTok && pLaneTok !== '0' ? pLaneTok : '';
+
+        if (/^\d{3,}$/.test(fHeatLaneTok) && Number(fHeatLaneTok.slice(1)) >= 10) {
+          heat = fHeatLaneTok.slice(0, 1);
+          lane = fHeatLaneTok.slice(1);
         } else {
-          prelimHeat = tok0 && tok0 !== '0' ? tok0 : '';
-          const tok1 = tailTokens[idx++] || '';
-          prelimLane = tok1 && tok1 !== '0' ? tok1 : '';
+          heat = fHeatLaneTok && fHeatLaneTok !== '0' ? fHeatLaneTok : '';
+          lane = (tailTokens[2] && /^\d+$/.test(tailTokens[2]) && tailTokens.length >= 7) ? tailTokens[3] : '';
         }
 
-        const fHeatTok = tailTokens[idx++] || '';
-        const fLaneTok = tailTokens[idx++] || '';
-        const pPlaceTok = tailTokens[idx++] || '';
-        const fPlaceTok = tailTokens[idx++] || '';
-        const ptsTok = tailTokens[idx++] || '';
+        // Handle when prelimLane & finalsLane are separate tokens (e.g. "4 3 3 10 10 4 34.")
+        let resolvedPPlaceTok = pPlaceTok;
+        let resolvedFPlaceTok = fPlaceTok;
+        let resolvedPtsTok = ptsTok;
 
-        heat = fHeatTok && fHeatTok !== '0' ? fHeatTok : '';
-        lane = fLaneTok && fLaneTok !== '0' ? fLaneTok : '';
+        if (!(/^\d{3,}$/.test(fHeatLaneTok) && Number(fHeatLaneTok.slice(1)) >= 10) && tailTokens.length >= 7) {
+          lane = tailTokens[3] && tailTokens[3] !== '0' ? tailTokens[3] : '';
+          resolvedPPlaceTok = tailTokens[4] || '';
+          resolvedFPlaceTok = tailTokens[5] || '';
+          resolvedPtsTok = tailTokens[6] || '';
+        }
 
-        const pPlaceRaw = String(pPlaceTok).replace(/\./g, '');
+        const pPlaceRaw = String(resolvedPPlaceTok).replace(/\./g, '');
         prelimPlace = /^\d+$/.test(pPlaceRaw) && pPlaceRaw !== '0' ? parseInt(pPlaceRaw, 10) : null;
-        const fPlaceRaw = String(fPlaceTok).replace(/\./g, '');
+        const fPlaceRaw = String(resolvedFPlaceTok).replace(/\./g, '');
         place = /^\d+$/.test(fPlaceRaw) && fPlaceRaw !== '0' ? parseInt(fPlaceRaw, 10) : null;
-        points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
+        points = /^\d+\.$/.test(resolvedPtsTok) ? parseFloat(resolvedPtsTok) : 0;
       } else {
-        heat = tailTokens[0] || '';
-        lane = tailTokens[1] || '';
-        const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
-        place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
-        const pointsToken = tailTokens[3] || '';
+        const fHeatRaw = tailZone.slice(0, 2).trim();
+        const fLaneRaw = tailZone.slice(2, 4).trim();
+        const remainderClean = tailZone
+          .slice(4)
+          .replace(/\s+\d{4}\s*$/, '')
+          .replace(/\s+0\d\s*$/, '')
+          .trim();
+        const remTokens = remainderClean ? remainderClean.split(/\s+/) : [];
+
+        heat = fHeatRaw && fHeatRaw !== '0' ? fHeatRaw : '';
+        lane = fLaneRaw && fLaneRaw !== '0' ? fLaneRaw : '';
+        const placeRaw = (remTokens[0] || '').replace(/\./g, '');
+        place = /^\d+$/.test(placeRaw) && placeRaw !== '0' ? parseInt(placeRaw, 10) : null;
+        const pointsToken = remTokens[1] || '';
         points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
       }
 
-      const strokeName = STROKE_MAP[strokeCode] || 'Unknown';
-      const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
+      const strokeName = STROKE_MAP[strokeCode] || `Stroke ${strokeCode}`;
+      const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
-      const effectiveFinalsTime = isSwimOffEvent
-        ? swimOffTimeRaw || prelimTimeRaw || seedTimeRaw || 'NT'
-        : finalsTimeRaw || prelimTimeRaw || 'NT';
-      const parsedSec = timeToSeconds(effectiveFinalsTime);
+      const effectiveFinalsOrSwimOff = finalsTimeRaw || swimOffTimeRaw;
+      const parsedSec = timeToSeconds(effectiveFinalsOrSwimOff);
       const parsedPrelimSec = timeToSeconds(prelimTimeRaw);
       const parsedSeedSec = timeToSeconds(seedTimeRaw);
+      const displayFallbackTime = effectiveFinalsOrSwimOff || prelimTimeRaw || 'NT';
+      const displayFallbackSec =
+        parsedSec !== null ? parsedSec : parsedPrelimSec !== null ? parsedPrelimSec : Infinity;
 
-      if (swimmerName && teamsMap.has(teamCode)) {
-        const roster = teamsMap.get(teamCode).swimmers;
-        if (!roster.has(swimmerName)) {
-          roster.set(swimmerName, {
-            name: swimmerName,
-            preferredFirst: '',
-            gender: genderLabel,
-            classYear: resolvedClass,
-            events: [eventLabel],
-          });
-        } else {
-          const existingSw = roster.get(swimmerName);
-          if (!existingSw.events.includes(eventLabel)) {
-            existingSw.events.push(eventLabel);
-          }
-          if (!existingSw.classYear && resolvedClass) {
-            existingSw.classYear = resolvedClass;
-          }
-        }
-      }
-
-      const d0Obj = {
-        id: `ind-${i}-${teamCode}-${eventNumber}`,
+      const record = {
+        id: `ind-${i}-${swimmerName}-${eventNumber}`,
         type: 'individual',
         teamCode,
         teamName: teamsMap.get(teamCode)?.name || teamCode,
@@ -758,7 +758,7 @@ function parseSDIFContent(content) {
         strokeName,
         eventNumber: parsedEventNum,
         isSwimOff: isSwimOffEvent,
-        isExhibition,
+        isExhibition: isExhibition || (prelimPlace === null && place === null && tailTokens[4] === '0'),
         eventLabel,
         swimDate: swimIsoDate || meetInfo.isoDate || '',
         seedTime: seedTimeRaw || '',
@@ -769,13 +769,13 @@ function parseSDIFContent(content) {
         prelimLane,
         prelimPlace,
         swimOffTime: swimOffTimeRaw || '',
-        finalsOnlyTime: finalsTimeRaw || '',
-        finalsTime: effectiveFinalsTime,
-        timeSeconds: parsedSec === null ? Infinity : parsedSec,
+        finalsOnlyTime: effectiveFinalsOrSwimOff || '',
+        finalsTime: displayFallbackTime,
+        timeSeconds: displayFallbackSec,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
         heat,
         lane,
-        place,
+        place: place || null,
         points,
         splitInterval: 50,
         splitType: 'C',
@@ -787,82 +787,60 @@ function parseSDIFContent(content) {
         finalsSplits: [],
       };
 
-      individualResults.push(d0Obj);
-      lastD0 = d0Obj;
+      individualResults.push(record);
+      lastD0 = record;
       lastRecordType = 'D0';
+
+      if (!teamsMap.has(teamCode)) {
+        teamsMap.set(teamCode, {
+          code: teamCode,
+          name: teamCode,
+          city: '',
+          state: '',
+          swimmers: new Map(),
+        });
+      }
+      const roster = teamsMap.get(teamCode).swimmers;
+      if (!roster.has(swimmerName)) {
+        roster.set(swimmerName, {
+          name: swimmerName,
+          preferredFirst: '',
+          gender: genderLabel,
+          classYear: record.classYear,
+          events: [],
+        });
+      }
+      roster.get(swimmerName).events.push(`${distance} ${strokeName} (${displayFallbackTime})`);
+    } else if (recType === 'D3') {
+      // Cols 17-31 hold Preferred First Name directly after the 14-char swimmer ID/checksum (cols 3-16)
+      const prefFirst = sliceCol(line, 17, 31).trim();
+      if (prefFirst && lastD0) {
+        lastD0.preferredFirst = prefFirst;
+        const roster = teamsMap.get(lastD0.teamCode)?.swimmers;
+        if (roster && roster.has(lastD0.swimmerName)) {
+          roster.get(lastD0.swimmerName).preferredFirst = prefFirst;
+        }
+      }
     } else if (recType === 'E0') {
-      const rawTeamSlice = sliceCol(line, 4, 9);
-      let teamCode = currentTeamContext || rawTeamSlice || 'UNAT';
-      if (!currentTeamContext && rawTeamSlice) {
-        for (const [registeredCode] of teamsMap.entries()) {
-          if (registeredCode === rawTeamSlice || registeredCode.startsWith(rawTeamSlice)) {
-            teamCode = registeredCode;
-            break;
-          }
-        }
-      }
+      const relayLetter = sliceCol(line, 12, 12) || 'A';
+      const teamCode = sliceCol(line, 13, 18) || currentTeamContext || 'UNAT';
+      const genderCode = sliceCol(line, 21, 21);
+      const distance = sliceCol(line, 23, 25);
+      const strokeCode = sliceCol(line, 26, 26);
+      const eventNumber = sliceCol(line, 27, 30);
+      const rawRelayDate = sliceCol(line, 39, 46);
+      const relayIsoDate =
+        /^\d{8}$/.test(rawRelayDate) && rawRelayDate !== '00000000'
+          ? formatSdifDate(rawRelayDate)
+          : '';
+      const seedTimeRaw = sliceCol(line, 47, 54) || sliceCol(line, 59, 67);
+      const prelimTimeRaw = sliceCol(line, 56, 63);
+      const finalsTimeRaw = sliceCol(line, 72, 80);
+      const courseCode = sliceCol(line, 81, 81);
 
-      const genderCode = sliceCol(line, 67, 67) || sliceCol(line, 66, 66);
-      const distance = sliceCol(line, 68, 71);
-      const strokeCode = sliceCol(line, 72, 72);
-      const eventNumber = sliceCol(line, 73, 76);
-
-      const postEventSegment = line.slice(80);
-      const dateMatch = postEventSegment.match(/(\d{8})/);
-      const afterDateIdx = dateMatch ? 80 + dateMatch.index + 8 : 94;
-      const timeZoneStr = line.slice(afterDateIdx, afterDateIdx + 38);
-      const afterFinalsMatch = line.slice(afterDateIdx).match(
-        /(?:(?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi
-      );
-      let tailZone = line.slice(afterDateIdx + 38, afterDateIdx + 68);
-      if (afterFinalsMatch && afterFinalsMatch.length > 0) {
-        const lastTok = afterFinalsMatch[afterFinalsMatch.length - 1];
-        const lastTokPos = line.slice(afterDateIdx).lastIndexOf(lastTok);
-        if (lastTokPos >= 0) {
-          tailZone = line.slice(
-            afterDateIdx + lastTokPos + lastTok.length,
-            afterDateIdx + lastTokPos + lastTok.length + 34
-          );
-        }
-      }
-
-      const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
-      const tailTokens = cleanedTail ? cleanedTail.split(/\s+/) : [];
-
-      const timeTokens = Array.from(
-        timeZoneStr.matchAll(/((?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
-      ).map((m) => ({
-        full: `${m[1]}${m[2] || ''}`.toUpperCase(),
-        clean: m[1].toUpperCase(),
-        course: (m[2] || '').toUpperCase(),
-      }));
-
-      let seedTimeRaw = '';
-      let prelimTimeRaw = '';
-      let finalsTimeRaw = '';
-      let courseCode = '';
-
-      if (timeTokens.length >= 3) {
-        seedTimeRaw = timeTokens[0].clean;
-        prelimTimeRaw = timeTokens[1].clean;
-        finalsTimeRaw = timeTokens[timeTokens.length - 1].clean;
-        courseCode =
-          timeTokens[timeTokens.length - 1].course || timeTokens[1].course || timeTokens[0].course;
-      } else if (timeTokens.length === 2) {
-        const hasPrelimTail = tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]);
-        if (hasPrelimTail) {
-          seedTimeRaw = timeTokens[0].clean;
-          prelimTimeRaw = timeTokens[1].clean;
-          courseCode = timeTokens[1].course || timeTokens[0].course;
-        } else {
-          seedTimeRaw = timeTokens[0].clean;
-          finalsTimeRaw = timeTokens[1].clean;
-          courseCode = timeTokens[1].course || timeTokens[0].course;
-        }
-      } else if (timeTokens.length === 1) {
-        finalsTimeRaw = timeTokens[0].clean;
-        courseCode = timeTokens[0].course;
-      }
+      const tailZone = line.slice(81, 125).replace(/\s+\d{4}[A-Z]?\s*$/, '').trim();
+      const tailTokens = tailZone ? tailZone.split(/\s+/) : [];
+      const hasPrelimRel = Boolean(prelimTimeRaw) || tailTokens.length >= 6;
 
       let heat = '';
       let lane = '';
@@ -870,13 +848,13 @@ function parseSDIFContent(content) {
       let prelimPlace = null;
       let points = 0;
 
-      if (prelimTimeRaw || (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]))) {
-        heat = tailTokens[2] && tailTokens[2] !== '0' ? tailTokens[2] : '';
-        lane = tailTokens[3] && tailTokens[3] !== '0' ? tailTokens[3] : '';
-        const pPlaceRaw = (tailTokens[4] || '').replace(/\./g, '');
-        prelimPlace = /^\d+$/.test(pPlaceRaw) && pPlaceRaw !== '0' ? parseInt(pPlaceRaw, 10) : null;
-        const fPlaceRaw = (tailTokens[5] || '').replace(/\./g, '');
-        place = /^\d+$/.test(fPlaceRaw) && fPlaceRaw !== '0' ? parseInt(fPlaceRaw, 10) : null;
+      if (hasPrelimRel && tailTokens.length >= 5) {
+        heat = tailTokens[2] && tailTokens[2] !== '0' ? tailTokens[2] : tailTokens[0] || '';
+        lane = tailTokens[3] && tailTokens[3] !== '0' ? tailTokens[3] : tailTokens[1] || '';
+        const pPlRaw = (tailTokens[4] || '').replace(/\./g, '');
+        prelimPlace = /^\d+$/.test(pPlRaw) && pPlRaw !== '0' ? parseInt(pPlRaw, 10) : null;
+        const fPlRaw = (tailTokens[5] || '').replace(/\./g, '');
+        place = /^\d+$/.test(fPlRaw) && fPlRaw !== '0' ? parseInt(fPlRaw, 10) : null;
         const ptsTok = tailTokens[6] || '';
         points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
       } else {
@@ -887,15 +865,6 @@ function parseSDIFContent(content) {
         const pointsToken = tailTokens[3] || '';
         points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
       }
-
-      const rawRelayLetter = sliceCol(line, 11, 11);
-      const relayLetter = /^[A-Z0-9]$/i.test(rawRelayLetter)
-        ? rawRelayLetter.toUpperCase()
-        : 'A';
-      const relayDateMatch = line.slice(35, 50).match(/(\d{8})/);
-      const rawRelayDate = relayDateMatch ? relayDateMatch[1] : '';
-      const relayIsoDate =
-        rawRelayDate && rawRelayDate !== '00000000' ? formatSdifDate(rawRelayDate) : '';
 
       const strokeName = STROKE_MAP[strokeCode] || 'Relay';
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
@@ -4933,16 +4902,14 @@ export default function App() {
       .map(([label, num]) => ({ label, num }));
   }, [parsedData, meetSubTab]);
 
-  // Helper to resolve A / B / C Final tier where the highest final heat is A Final
-  // (e.g. 3-heat final: Heat 3 = A FINALS, Heat 2 = B FINALS, Heat 1 = C FINALS)
+  // Helper to resolve A / B / C Final tier from heat number (1 = A, 2 = B, 3 = C) or overall place
   const getFinalHeatTierInfo = (heatStr, placeNum, maxHeatNum) => {
     const hNum = parseInt(heatStr, 10);
     if (!Number.isNaN(hNum) && maxHeatNum >= 2) {
-      const rankFromTop = maxHeatNum - hNum + 1;
-      if (rankFromTop === 1) return { tierRank: 1, label: 'A FINALS' };
-      if (rankFromTop === 2) return { tierRank: 2, label: 'B FINALS' };
-      if (rankFromTop === 3) return { tierRank: 3, label: 'C FINALS' };
-      return { tierRank: rankFromTop, label: `FINAL HEAT ${hNum}` };
+      if (hNum === 1) return { tierRank: 1, label: 'A FINALS' };
+      if (hNum === 2) return { tierRank: 2, label: 'B FINALS' };
+      if (hNum === 3) return { tierRank: 3, label: 'C FINALS' };
+      return { tierRank: hNum, label: `FINAL HEAT ${hNum}` };
     }
     if (typeof placeNum === 'number' && placeNum > 0 && maxHeatNum >= 2) {
       if (placeNum <= 10) return { tierRank: 1, label: 'A FINALS' };
