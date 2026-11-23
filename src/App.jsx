@@ -578,37 +578,31 @@ function parseSDIFContent(content) {
       const distance = sliceCol(line, 68, 71);
       const strokeCode = sliceCol(line, 72, 72);
       const eventNumber = sliceCol(line, 73, 76);
-      const rawSwimDate = sliceCol(line, 95, 102);
+      const parsedEventNum = parseInt(eventNumber, 10) || eventNumber;
+      const isSwimOffEvent = typeof parsedEventNum === 'number' && parsedEventNum >= 900;
+
+      // Cols 86-93 hold Swim Date (MMDDYYYY) in standard Hy-Tek D0 lines (fallback 95-102)
+      const rawSwimDate = sliceCol(line, 86, 93) || sliceCol(line, 95, 102);
       const swimIsoDate =
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
 
-      // Dual-meet D0: Seed (103-110), Finals (116-123), Course (124), Tail (125-152)
-      // Invitational Prelims/Finals D0: Seed (104-111), Prelim (113-120), Swim-Off (122-129), Finals (131-138), Tail (139-162)
-      const seedTimeRaw = sliceCol(line, 103, 111);
-      const col112to120 = sliceCol(line, 112, 120);
-      const col130to138 = sliceCol(line, 130, 138);
-      const hasExtendedTimeSlots =
-        line.length >= 139 &&
-        (/[\d:.]/.test(col112to120) || /[\d:.]/.test(col130to138)) &&
-        !['Y', 'S', 'L'].includes(sliceCol(line, 124, 124));
-
-      let prelimTimeRaw = '';
-      let finalsTimeRaw = '';
-      let courseCode = '';
-      let tailZone = '';
-
-      if (hasExtendedTimeSlots) {
-        prelimTimeRaw = col112to120;
-        finalsTimeRaw = col130to138;
-        courseCode = sliceCol(line, 138, 138) || sliceCol(line, 120, 120);
-        tailZone = line.slice(138, 162);
-      } else {
-        finalsTimeRaw = sliceCol(line, 116, 123);
-        courseCode = sliceCol(line, 124, 124);
-        tailZone = line.slice(125, 152);
-      }
+      // Exact 1-based Hy-Tek D0 time slots after Col 93:
+      // Cols 95-102: Seed Time (8 chars)
+      // Cols 104-111: Prelim Time (8 chars)
+      // Cols 113-122: Swim-Off Time (10 chars)
+      // Cols 124-131: Finals Time (8 chars)
+      const seedTimeRaw = sliceCol(line, 95, 102);
+      const prelimTimeRaw = sliceCol(line, 104, 111);
+      const swimOffTimeRaw = sliceCol(line, 113, 122);
+      const finalsTimeRaw = sliceCol(line, 124, 131);
+      const courseCode =
+        sliceCol(line, 131, 131) ||
+        sliceCol(line, 120, 120) ||
+        sliceCol(line, 111, 111) ||
+        sliceCol(line, 124, 124);
+      const tailZone = line.slice(131, 162);
 
       // Stop before trailing division/status code (e.g. '0100' or '01' at end of line)
       const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
@@ -623,8 +617,9 @@ function parseSDIFContent(content) {
       let points = 0;
 
       const isPrelimFinalsFormat =
-        Boolean(prelimTimeRaw) ||
-        (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]));
+        !isSwimOffEvent &&
+        (Boolean(prelimTimeRaw) ||
+          (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4])));
 
       if (isPrelimFinalsFormat) {
         prelimHeat = tailTokens[0] || '';
@@ -649,10 +644,11 @@ function parseSDIFContent(content) {
       const strokeName = STROKE_MAP[strokeCode] || `Stroke ${strokeCode}`;
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
-      const parsedSec = timeToSeconds(finalsTimeRaw);
+      const effectiveFinalsOrSwimOff = finalsTimeRaw || swimOffTimeRaw;
+      const parsedSec = timeToSeconds(effectiveFinalsOrSwimOff);
       const parsedPrelimSec = timeToSeconds(prelimTimeRaw);
       const parsedSeedSec = timeToSeconds(seedTimeRaw);
-      const displayFallbackTime = finalsTimeRaw || prelimTimeRaw || 'NT';
+      const displayFallbackTime = effectiveFinalsOrSwimOff || prelimTimeRaw || 'NT';
       const displayFallbackSec =
         parsedSec !== null ? parsedSec : parsedPrelimSec !== null ? parsedPrelimSec : Infinity;
 
@@ -669,7 +665,8 @@ function parseSDIFContent(content) {
         distance: parseInt(distance, 10) || distance,
         strokeCode,
         strokeName,
-        eventNumber: parseInt(eventNumber, 10) || eventNumber,
+        eventNumber: parsedEventNum,
+        isSwimOff: isSwimOffEvent,
         eventLabel,
         swimDate: swimIsoDate || meetInfo.isoDate || '',
         seedTime: seedTimeRaw || '',
@@ -679,7 +676,8 @@ function parseSDIFContent(content) {
         prelimHeat,
         prelimLane,
         prelimPlace,
-        finalsOnlyTime: finalsTimeRaw || '',
+        swimOffTime: swimOffTimeRaw || '',
+        finalsOnlyTime: effectiveFinalsOrSwimOff || '',
         finalsTime: displayFallbackTime,
         timeSeconds: displayFallbackSec,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
@@ -2193,8 +2191,7 @@ export default function App() {
           });
         }
       }
-
-      // B. Finals Swim (true finals time + overall finals place)
+      // B. Finals or Swim-Off Swim (true finals/swim-off time + overall place)
       const effectiveFinalsStr = entry.prelimTime ? entry.finalsOnlyTime : entry.finalsTime;
       if (isValidTimeStr(effectiveFinalsStr)) {
         const fSec = timeToSeconds(effectiveFinalsStr);
@@ -2203,13 +2200,14 @@ export default function App() {
             entry.finalsSplits && entry.finalsSplits.length > 0
               ? entry.finalsSplits
               : entry.splits;
+          const isSwimOffRow = Boolean(entry.isSwimOff || entry.swimOffTime);
           pushRoundSwim({
-            roundName: 'Finals',
+            roundName: isSwimOffRow ? 'Swim-Off' : 'Finals',
             rawTime: effectiveFinalsStr,
             secVal: fSec,
-            placeVal: entry.place,
+            placeVal: isSwimOffRow ? '' : entry.place,
             splitsArr: fSplits,
-            idSuffix: 'F',
+            idSuffix: isSwimOffRow ? 'SO' : 'F',
           });
         }
       }
