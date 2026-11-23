@@ -716,6 +716,178 @@ function parseSDIFContent(content) {
         points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
       }
 
+      const strokeName = STROKE_MAP[strokeCode] || 'Freestyle';
+      const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
+      const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
+      const effectiveFinalsTime = isSwimOffEvent
+        ? swimOffTimeRaw || finalsTimeRaw || prelimTimeRaw || 'NT'
+        : finalsTimeRaw || prelimTimeRaw || 'NT';
+      const parsedFinalsSec = timeToSeconds(effectiveFinalsTime);
+      const parsedPrelimSec = timeToSeconds(prelimTimeRaw);
+      const parsedSeedSec = timeToSeconds(seedTimeRaw);
+      const prefFirst = sliceCol(line, 121, 130);
+
+      const d0Obj = {
+        id: `ind-${i}-${teamCode}-${eventNumber}`,
+        type: 'individual',
+        teamCode,
+        teamName: teamsMap.get(teamCode)?.name || teamCode,
+        swimmerName,
+        preferredFirst: prefFirst,
+        classYear: resolvedClass,
+        genderCode,
+        genderLabel,
+        distance: parseInt(distance, 10) || distance,
+        strokeCode,
+        strokeName,
+        eventNumber: parseInt(eventNumber, 10) || eventNumber,
+        eventLabel,
+        swimDate: swimIsoDate || meetInfo.isoDate || '',
+        isSwimOff: isSwimOffEvent,
+        isExhibition,
+        seedTime: seedTimeRaw || '',
+        seedSeconds: parsedSeedSec === null ? Infinity : parsedSeedSec,
+        prelimTime: prelimTimeRaw || '',
+        prelimSeconds: parsedPrelimSec === null ? Infinity : parsedPrelimSec,
+        prelimHeat,
+        prelimLane,
+        prelimPlace,
+        swimOffTime: swimOffTimeRaw || '',
+        finalsOnlyTime: finalsTimeRaw || '',
+        finalsTime: effectiveFinalsTime,
+        timeSeconds:
+          parsedFinalsSec !== null
+            ? parsedFinalsSec
+            : parsedPrelimSec !== null
+            ? parsedPrelimSec
+            : Infinity,
+        course: COURSE_MAP[courseCode] || courseCode || 'SCY',
+        heat,
+        lane,
+        place,
+        points,
+        splitInterval: 50,
+        splitType: 'C',
+        splitPages: [],
+        splits: [],
+        prelimSplitPages: [],
+        prelimSplits: [],
+        finalsSplitPages: [],
+        finalsSplits: [],
+      };
+
+      individualResults.push(d0Obj);
+      lastD0 = d0Obj;
+      lastRecordType = 'D0';
+
+      if (teamsMap.has(teamCode) && swimmerName) {
+        const roster = teamsMap.get(teamCode).swimmers;
+        if (!roster.has(swimmerName)) {
+          roster.set(swimmerName, {
+            name: swimmerName,
+            preferredFirst: prefFirst,
+            gender: genderLabel,
+            classYear: resolvedClass,
+            events: [eventLabel],
+          });
+        } else if (!roster.get(swimmerName).events.includes(eventLabel)) {
+          roster.get(swimmerName).events.push(eventLabel);
+        }
+      }
+    } else if (recType === 'E0') {
+      const rawTeamSlice = sliceCol(line, 4, 9);
+      let teamCode = currentTeamContext || rawTeamSlice || 'UNAT';
+      if (!currentTeamContext && rawTeamSlice) {
+        for (const [registeredCode] of teamsMap.entries()) {
+          if (registeredCode === rawTeamSlice || registeredCode.startsWith(rawTeamSlice)) {
+            teamCode = registeredCode;
+            break;
+          }
+        }
+      }
+
+      const relayLetter = sliceCol(line, 11, 11) || 'A';
+      const genderCode = sliceCol(line, 67, 67) || sliceCol(line, 66, 66);
+      const distance = sliceCol(line, 68, 71);
+      const strokeCode = sliceCol(line, 72, 72);
+      const eventNumber = sliceCol(line, 73, 76);
+
+      const postRelaySegment = line.slice(80);
+      const relDateMatch = postRelaySegment.match(/(\d{8})/);
+      const rawRelayDate = relDateMatch ? relDateMatch[1] : '';
+      const relayIsoDate =
+        rawRelayDate && rawRelayDate !== '00000000' ? formatSdifDate(rawRelayDate) : '';
+
+      const relAfterDateIdx = relDateMatch ? 80 + relDateMatch.index + 8 : 94;
+      const relTimeZoneStr = line.slice(relAfterDateIdx, relAfterDateIdx + 38);
+      const relTimeTokens = Array.from(
+        relTimeZoneStr.matchAll(/((?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
+      ).map((m) => ({
+        clean: m[1].toUpperCase(),
+        course: (m[2] || '').toUpperCase(),
+      }));
+
+      let seedTimeRaw = '';
+      let prelimTimeRaw = '';
+      let finalsTimeRaw = '';
+      let courseCode = '';
+      if (relTimeTokens.length >= 3) {
+        seedTimeRaw = relTimeTokens[0].clean;
+        prelimTimeRaw = relTimeTokens[1].clean;
+        finalsTimeRaw = relTimeTokens[relTimeTokens.length - 1].clean;
+        courseCode = relTimeTokens[relTimeTokens.length - 1].course || relTimeTokens[0].course;
+      } else if (relTimeTokens.length === 2) {
+        seedTimeRaw = relTimeTokens[0].clean;
+        finalsTimeRaw = relTimeTokens[1].clean;
+        courseCode = relTimeTokens[1].course || relTimeTokens[0].course;
+      } else if (relTimeTokens.length === 1) {
+        finalsTimeRaw = relTimeTokens[0].clean;
+        courseCode = relTimeTokens[0].course;
+      }
+
+      const relTailMatch = line.slice(relAfterDateIdx).match(
+        /(?:(?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi
+      );
+      let relTailZone = '';
+      if (relTailMatch && relTailMatch.length > 0) {
+        const lastTok = relTailMatch[relTailMatch.length - 1];
+        const lastPos = line.slice(relAfterDateIdx).lastIndexOf(lastTok);
+        if (lastPos >= 0) {
+          relTailZone = line.slice(
+            relAfterDateIdx + lastPos + lastTok.length,
+            relAfterDateIdx + lastPos + lastTok.length + 34
+          );
+        }
+      }
+      const relCleanedTail = relTailZone
+        .replace(/\s+\d{4}[A-Z]?\s*$/i, '')
+        .replace(/\s+0\d[A-Z]?\s*$/i, '')
+        .trim();
+      const relTailTokens = relCleanedTail ? relCleanedTail.split(/\s+/) : [];
+
+      let heat = '';
+      let lane = '';
+      let place = null;
+      let prelimPlace = null;
+      let points = 0;
+
+      if (prelimTimeRaw && relTailTokens.length >= 5) {
+        prelimPlace = /^\d+$/.test((relTailTokens[4] || '').replace(/\./g, ''))
+          ? parseInt((relTailTokens[4] || '').replace(/\./g, ''), 10)
+          : null;
+        heat = relTailTokens[2] && relTailTokens[2] !== '0' ? relTailTokens[2] : '';
+        lane = relTailTokens[3] && relTailTokens[3] !== '0' ? relTailTokens[3] : '';
+        const fPlaceRaw = (relTailTokens[5] || '').replace(/\./g, '');
+        place = /^\d+$/.test(fPlaceRaw) && fPlaceRaw !== '0' ? parseInt(fPlaceRaw, 10) : null;
+        points = /^\d+\.$/.test(relTailTokens[6] || '') ? parseFloat(relTailTokens[6]) : 0;
+      } else {
+        heat = relTailTokens[0] || '';
+        lane = relTailTokens[1] || '';
+        const placeRaw = (relTailTokens[2] || '').replace(/\./g, '');
+        place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
+        points = /^\d+\.$/.test(relTailTokens[3] || '') ? parseFloat(relTailTokens[3]) : 0;
+      }
+
       const strokeName = STROKE_MAP[strokeCode] || 'Relay';
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
