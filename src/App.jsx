@@ -13107,30 +13107,52 @@ export default function App() {
                     ) : (
                       groupedIndividualEvents.map((eventGroup) => {
                         const expandableSwims = eventGroup.swims.filter(
-                          (r) => r.splits && r.splits.length > 0
+                          (r) => r.displaySplits && r.displaySplits.length > 0
                         );
                         const allExpanded =
                           expandableSwims.length > 0 &&
-                          expandableSwims.every((r) => expandedRows.has(r.id));
+                          expandableSwims.every((r) => expandedRows.has(r.displayId));
 
                         return (
                           <div
                             key={eventGroup.key}
                             className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
                           >
-                            <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+                            <div
+                              className={`${
+                                eventGroup.isPrelimCard
+                                  ? 'bg-slate-800 text-white'
+                                  : 'bg-slate-900 text-white'
+                              } px-5 py-3.5 flex flex-wrap items-center justify-between gap-3`}
+                            >
                               <div className="flex items-center gap-3">
                                 <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
                                   Event #{eventGroup.eventNumber}
                                 </span>
                                 <div>
-                                  <h3 className="text-base font-bold tracking-tight">
-                                    {eventGroup.eventLabel}
-                                  </h3>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h3 className="text-base font-bold tracking-tight">
+                                      {eventGroup.eventLabel}
+                                    </h3>
+                                    {eventGroup.roundTag && (
+                                      <span
+                                        className={`text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
+                                          eventGroup.isPrelimCard
+                                            ? 'bg-indigo-500/25 text-indigo-200 border border-indigo-400/40'
+                                            : eventGroup.roundTag === 'Swim-Off'
+                                            ? 'bg-amber-500/25 text-amber-200 border border-amber-400/40'
+                                            : 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
+                                        }`}
+                                      >
+                                        {eventGroup.roundTag}
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-xs text-slate-400">
                                     {eventGroup.swims.length}{' '}
                                     {eventGroup.swims.length === 1 ? 'Swimmer' : 'Swimmers'} •{' '}
                                     {eventGroup.course}
+                                    {eventGroup.isPrelimCard ? ' • Preliminary Round (Unscored)' : ''}
                                   </p>
                                 </div>
                               </div>
@@ -13193,7 +13215,13 @@ export default function App() {
                                       className="py-3 px-3 text-right cursor-pointer hover:text-slate-900 select-none"
                                     >
                                       <div className="flex items-center justify-end gap-1">
-                                        <span>Finals Time</span>
+                                        <span>
+                                          {eventGroup.isPrelimCard
+                                            ? 'Prelim Time'
+                                            : eventGroup.roundTag === 'Swim-Off'
+                                            ? 'Swim-Off Time'
+                                            : 'Finals Time'}
+                                        </span>
                                         <ArrowUpDown className="w-3 h-3 text-slate-400" />
                                       </div>
                                     </th>
@@ -13203,21 +13231,23 @@ export default function App() {
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 text-sm">
-                                  {eventGroup.swims.map((row) => {
-                                    const hasSplits = row.splits && row.splits.length > 0;
-                                    const isExpanded = expandedRows.has(row.id);
+                                  {eventGroup.swims.map((row, rowIdx) => {
+                                    const rowSplits = row.displaySplits || [];
+                                    const hasSplits = rowSplits.length > 0;
+                                    const rowKeyId = row.displayId;
+                                    const isExpanded = expandedRows.has(rowKeyId);
                                     const splitAnalysis = isExpanded
                                       ? calculateSplitBreakdown(
-                                          row.splits,
+                                          rowSplits,
                                           row.distance,
                                           row.splitInterval,
                                           row.splitType
                                         )
                                       : null;
                                     const behindSec =
-                                      isFinite(row.timeSeconds) &&
+                                      isFinite(row.displaySeconds) &&
                                       isFinite(eventGroup.fastestTimeSec)
-                                        ? row.timeSeconds - eventGroup.fastestTimeSec
+                                        ? row.displaySeconds - eventGroup.fastestTimeSec
                                         : Infinity;
                                     const displaySwimmer = formatSwimmerDisplay(
                                       row.swimmerName,
@@ -13236,20 +13266,39 @@ export default function App() {
                                       ? benchmarkIndex.evaluateSwim(
                                           displaySwimmer,
                                           row.eventLabel,
-                                          row.finalsTime,
+                                          row.displayTime,
                                           row.classYear
                                         )
                                       : [];
                                     const hitStds = evaluateStandardsForSwim(
                                       row.eventLabel,
-                                      row.finalsTime
+                                      row.displayTime
                                     );
                                     const teamHex = getTeamHexColor(row.teamCode, row.teamName);
-                            
+
+                                    const prevTierLabel =
+                                      rowIdx > 0
+                                        ? eventGroup.swims[rowIdx - 1].finalTierLabel
+                                        : '';
+                                    const showTierBanner =
+                                      eventGroup.hasSubHeaders &&
+                                      Boolean(row.finalTierLabel) &&
+                                      row.finalTierLabel !== prevTierLabel;
+
                                     return (
-                                      <React.Fragment key={row.id}>
+                                      <React.Fragment key={rowKeyId}>
+                                        {showTierBanner && (
+                                          <tr className="bg-slate-100/95 border-y border-slate-200">
+                                            <td
+                                              colSpan={8}
+                                              className="py-1.5 px-4 text-[11px] font-black uppercase tracking-widest text-slate-700"
+                                            >
+                                              {row.finalTierLabel}
+                                            </td>
+                                          </tr>
+                                        )}
                                         <tr
-                                          onClick={() => hasSplits && toggleRow(row.id)}
+                                          onClick={() => hasSplits && toggleRow(rowKeyId)}
                                           style={{
                                             boxShadow: `inset 4px 0 0 ${teamHex}`,
                                           }}
@@ -13275,19 +13324,19 @@ export default function App() {
                                             )}
                                           </td>
                                           <td className="py-3 px-3 text-center">
-                                            {row.place ? (
+                                            {row.displayPlace ? (
                                               <span
                                                 className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
-                                                  row.place === 1
+                                                  row.displayPlace === 1
                                                     ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                                                    : row.place === 2
+                                                    : row.displayPlace === 2
                                                     ? 'bg-slate-200 text-slate-800 border border-slate-300'
-                                                    : row.place === 3
+                                                    : row.displayPlace === 3
                                                     ? 'bg-orange-100 text-orange-800 border border-orange-300'
                                                     : 'bg-slate-100 text-slate-600'
                                                 }`}
                                               >
-                                                {row.place}
+                                                {row.displayPlace}
                                               </span>
                                             ) : (
                                               <span className="text-slate-400 text-xs">—</span>
@@ -13329,11 +13378,11 @@ export default function App() {
                                             </div>
                                             <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
                                               {row.classYear && <span>Class: {row.classYear}</span>}
-                                              {(row.heat || row.lane) && (
+                                              {(row.displayHeat || row.displayLane) && (
                                                 <span className="font-mono text-slate-400">
-                                                  {row.heat ? `Heat ${row.heat}` : ''}
-                                                  {row.heat && row.lane ? ' • ' : ''}
-                                                  {row.lane ? `Lane ${row.lane}` : ''}
+                                                  {row.displayHeat ? `Heat ${row.displayHeat}` : ''}
+                                                  {row.displayHeat && row.displayLane ? ' • ' : ''}
+                                                  {row.displayLane ? `Lane ${row.displayLane}` : ''}
                                                 </span>
                                               )}
                                             </div>
@@ -13344,7 +13393,7 @@ export default function App() {
                                             </div>
                                           </td>
                                           <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
-                                            {row.finalsTime}
+                                            {row.displayTime}
                                           </td>
                                           <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
                                             {isFinite(behindSec) ? (
@@ -13362,9 +13411,9 @@ export default function App() {
                                             )}
                                           </td>
                                           <td className="py-3 px-3 text-center font-mono text-xs tabular-nums">
-                                            {row.points > 0 ? (
+                                            {row.displayPoints > 0 ? (
                                               <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
-                                                {row.points}
+                                                {row.displayPoints}
                                               </span>
                                             ) : (
                                               <span className="text-slate-300">—</span>
@@ -13373,7 +13422,7 @@ export default function App() {
                                           <td className="py-3 pl-3 pr-5 text-right">
                                             {hasSplits ? (
                                               <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200/80">
-                                                {row.splits.length} splits
+                                                {rowSplits.length} splits
                                               </span>
                                             ) : (
                                               <span className="text-xs text-slate-400">
@@ -13392,7 +13441,7 @@ export default function App() {
                                                   <div className="text-xs font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
                                                     <Timer className="w-4 h-4 text-cyan-600" />
                                                     <span>
-                                                      Split Breakdown (
+                                                      {row.displayRound} Split Breakdown (
                                                       {splitAnalysis.stats?.interval || 50}y
                                                       Intervals) — {displaySwimmer}
                                                     </span>
@@ -13426,10 +13475,14 @@ export default function App() {
                                                         )}
                                                       </>
                                                     )}
-                                                    {(row.heat || row.lane) && (
+                                                    {(row.displayHeat || row.displayLane) && (
                                                       <span className="text-slate-500 font-mono">
-                                                        {row.heat ? `Heat ${row.heat}` : ''}{' '}
-                                                        {row.lane ? `• Lane ${row.lane}` : ''}
+                                                        {row.displayHeat
+                                                          ? `Heat ${row.displayHeat}`
+                                                          : ''}{' '}
+                                                        {row.displayLane
+                                                          ? `• Lane ${row.displayLane}`
+                                                          : ''}
                                                       </span>
                                                     )}
                                                   </div>
