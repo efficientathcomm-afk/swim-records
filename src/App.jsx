@@ -712,6 +712,15 @@ function parseSDIFContent(content) {
         points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
       }
 
+      const rawRelayLetter = sliceCol(line, 11, 11);
+      const relayLetter = /^[A-Z0-9]$/i.test(rawRelayLetter)
+        ? rawRelayLetter.toUpperCase()
+        : 'A';
+      const relayDateMatch = line.slice(35, 50).match(/(\d{8})/);
+      const rawRelayDate = relayDateMatch ? relayDateMatch[1] : '';
+      const relayIsoDate =
+        rawRelayDate && rawRelayDate !== '00000000' ? formatSdifDate(rawRelayDate) : '';
+
       const strokeName = STROKE_MAP[strokeCode] || 'Relay';
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
