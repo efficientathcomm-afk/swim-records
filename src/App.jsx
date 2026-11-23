@@ -594,6 +594,7 @@ function parseSDIFContent(content) {
       const tailZone = line.slice(afterDateIdx + 38, afterDateIdx + 68);
 
       // Stop before trailing division/status code (e.g. '0100' or '01' at end of line)
+      const isExhibition = /X[A-Z0-9]{2,4}\s*$/i.test(line.slice(145));
       const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
       const tailTokens = cleanedTail ? cleanedTail.split(/\s+/) : [];
 
@@ -679,7 +680,7 @@ function parseSDIFContent(content) {
         heat = tailTokens[0] || '';
         lane = tailTokens[1] || '';
         const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
-        place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
+        place = /^\d+$/.test(placeRaw) && placeRaw !== '0' ? parseInt(placeRaw, 10) : null;
         const pointsToken = tailTokens[3] || '';
         points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
       }
@@ -710,6 +711,7 @@ function parseSDIFContent(content) {
         strokeName,
         eventNumber: parsedEventNum,
         isSwimOff: isSwimOffEvent,
+        isExhibition: isExhibition || (prelimPlace === null && place === null && tailTokens[4] === '0'),
         eventLabel,
         swimDate: swimIsoDate || meetInfo.isoDate || '',
         seedTime: seedTimeRaw || '',
@@ -4951,8 +4953,10 @@ export default function App() {
           if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
           if (sortConfig.key === 'time') return (a.displaySeconds - b.displaySeconds) * dir;
           if (sortConfig.key === 'place') {
+            if (Boolean(a.isExhibition) !== Boolean(b.isExhibition)) return a.isExhibition ? 1 : -1;
             return ((a.displayPlace ?? 9999) - (b.displayPlace ?? 9999)) * dir;
           }
+          if (Boolean(a.isExhibition) !== Boolean(b.isExhibition)) return a.isExhibition ? 1 : -1;
           const pA = a.displayPlace ?? 9999;
           const pB = b.displayPlace ?? 9999;
           if (pA !== pB) return pA - pB;
@@ -5082,6 +5086,7 @@ export default function App() {
         if (sortConfig.key === 'swimmerName') return a.swimmerName.localeCompare(b.swimmerName) * dir;
         if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
         if (sortConfig.key === 'time') return (a.displaySeconds - b.displaySeconds) * dir;
+        if (Boolean(a.isExhibition) !== Boolean(b.isExhibition)) return a.isExhibition ? 1 : -1;
         const pA = a.displayPlace ?? 9999;
         const pB = b.displayPlace ?? 9999;
         if (pA !== pB) return (pA - pB) * (sortConfig.key === 'place' ? dir : 1);
@@ -13324,7 +13329,14 @@ export default function App() {
                                             )}
                                           </td>
                                           <td className="py-3 px-3 text-center">
-                                            {row.displayPlace ? (
+                                            {row.isExhibition ? (
+                                              <span
+                                                title="Exhibition Swim"
+                                                className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-slate-200/80 text-slate-600 border border-slate-300"
+                                              >
+                                                EXH
+                                              </span>
+                                            ) : row.displayPlace ? (
                                               <span
                                                 className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
                                                   row.displayPlace === 1
