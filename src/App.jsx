@@ -583,23 +583,76 @@ function parseSDIFContent(content) {
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
+      // Extract Seed (cols 103-110), Prelim (cols 112-119), Swim-Off (cols 121-128), and Finals (cols 130-137)
+      // plus legacy dual-meet fallback where Seed is 103-110 and Finals is 116-123
       const seedTimeRaw = sliceCol(line, 103, 110);
-      const finalsTimeRaw = sliceCol(line, 116, 123);
-      const courseCode = sliceCol(line, 124, 124);
+      const col112to119 = sliceCol(line, 112, 119);
+      const col130to137 = sliceCol(line, 130, 137);
+      const hasExtendedTimeSlots =
+        /[\d:.]/.test(col130to137) ||
+        (line.length >= 138 && /[\d:.]/.test(col112to119) && line.slice(129, 138).trim() === '');
 
-      const tailTokens = line.slice(125, 152).trim().split(/\s+/);
-      const heat = tailTokens[0] || '';
-      const lane = tailTokens[1] || '';
-      const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
-      const place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
-      const pointsToken = tailTokens[3] || '';
-      const points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
+      let prelimTimeRaw = '';
+      let finalsTimeRaw = '';
+      let courseCode = '';
+      let tailZone = '';
+
+      if (hasExtendedTimeSlots) {
+        prelimTimeRaw = col112to119;
+        finalsTimeRaw = col130to137;
+        courseCode = sliceCol(line, 138, 138) || sliceCol(line, 124, 124);
+        tailZone = line.slice(138, 162);
+      } else {
+        finalsTimeRaw = sliceCol(line, 116, 123);
+        courseCode = sliceCol(line, 124, 124);
+        tailZone = line.slice(125, 152);
+      }
+
+      // Stop before trailing division/status code (e.g. '0100' or '01' at end of line)
+      const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
+      const tailTokens = cleanedTail ? cleanedTail.split(/\s+/) : [];
+
+      let heat = '';
+      let lane = '';
+      let place = null;
+      let prelimHeat = '';
+      let prelimLane = '';
+      let prelimPlace = null;
+      let points = 0;
+
+      const isPrelimFinalsFormat =
+        Boolean(prelimTimeRaw) ||
+        (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]));
+
+      if (isPrelimFinalsFormat) {
+        prelimHeat = tailTokens[0] || '';
+        prelimLane = tailTokens[1] || '';
+        heat = tailTokens[2] && tailTokens[2] !== '0' ? tailTokens[2] : '';
+        lane = tailTokens[3] && tailTokens[3] !== '0' ? tailTokens[3] : '';
+        const pPlaceRaw = (tailTokens[4] || '').replace(/\./g, '');
+        prelimPlace = /^\d+$/.test(pPlaceRaw) && pPlaceRaw !== '0' ? parseInt(pPlaceRaw, 10) : null;
+        const fPlaceRaw = (tailTokens[5] || '').replace(/\./g, '');
+        place = /^\d+$/.test(fPlaceRaw) && fPlaceRaw !== '0' ? parseInt(fPlaceRaw, 10) : null;
+        const ptsTok = tailTokens[6] || '';
+        points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
+      } else {
+        heat = tailTokens[0] || '';
+        lane = tailTokens[1] || '';
+        const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
+        place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
+        const pointsToken = tailTokens[3] || '';
+        points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
+      }
 
       const strokeName = STROKE_MAP[strokeCode] || `Stroke ${strokeCode}`;
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
       const parsedSec = timeToSeconds(finalsTimeRaw);
+      const parsedPrelimSec = timeToSeconds(prelimTimeRaw);
       const parsedSeedSec = timeToSeconds(seedTimeRaw);
+      const displayFallbackTime = finalsTimeRaw || prelimTimeRaw || 'NT';
+      const displayFallbackSec =
+        parsedSec !== null ? parsedSec : parsedPrelimSec !== null ? parsedPrelimSec : Infinity;
 
       const record = {
         id: `ind-${i}-${swimmerName}-${eventNumber}`,
@@ -619,8 +672,14 @@ function parseSDIFContent(content) {
         swimDate: swimIsoDate || meetInfo.isoDate || '',
         seedTime: seedTimeRaw || '',
         seedSeconds: parsedSeedSec === null ? Infinity : parsedSeedSec,
-        finalsTime: finalsTimeRaw || 'NT',
-        timeSeconds: parsedSec === null ? Infinity : parsedSec,
+        prelimTime: prelimTimeRaw || '',
+        prelimSeconds: parsedPrelimSec === null ? Infinity : parsedPrelimSec,
+        prelimHeat,
+        prelimLane,
+        prelimPlace,
+        finalsOnlyTime: finalsTimeRaw || '',
+        finalsTime: displayFallbackTime,
+        timeSeconds: displayFallbackSec,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
         heat,
         lane,
@@ -630,6 +689,10 @@ function parseSDIFContent(content) {
         splitType: 'C',
         splitPages: [],
         splits: [],
+        prelimSplitPages: [],
+        prelimSplits: [],
+        finalsSplitPages: [],
+        finalsSplits: [],
       };
 
       individualResults.push(record);
@@ -655,7 +718,7 @@ function parseSDIFContent(content) {
           events: [],
         });
       }
-      roster.get(swimmerName).events.push(`${distance} ${strokeName} (${finalsTimeRaw || 'NT'})`);
+      roster.get(swimmerName).events.push(`${distance} ${strokeName} (${displayFallbackTime})`);
     } else if (recType === 'D3') {
       // Cols 17-31 hold Preferred First Name directly after the 14-char swimmer ID/checksum (cols 3-16)
       const prefFirst = sliceCol(line, 17, 31).trim();
@@ -673,22 +736,49 @@ function parseSDIFContent(content) {
       const distance = sliceCol(line, 23, 25);
       const strokeCode = sliceCol(line, 26, 26);
       const eventNumber = sliceCol(line, 27, 30);
-      const seedTimeRaw = sliceCol(line, 59, 67);
+      const rawRelayDate = sliceCol(line, 39, 46);
+      const relayIsoDate =
+        /^\d{8}$/.test(rawRelayDate) && rawRelayDate !== '00000000'
+          ? formatSdifDate(rawRelayDate)
+          : '';
+      const seedTimeRaw = sliceCol(line, 47, 54) || sliceCol(line, 59, 67);
+      const prelimTimeRaw = sliceCol(line, 56, 63);
       const finalsTimeRaw = sliceCol(line, 72, 80);
       const courseCode = sliceCol(line, 81, 81);
 
-      const tailTokens = line.slice(81, 115).trim().split(/\s+/);
-      const heat = tailTokens[0] || '';
-      const lane = tailTokens[1] || '';
-      const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
-      const place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
-      const pointsToken = tailTokens[3] || '';
-      const points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
+      const tailZone = line.slice(81, 125).replace(/\s+\d{4}[A-Z]?\s*$/, '').trim();
+      const tailTokens = tailZone ? tailZone.split(/\s+/) : [];
+      const hasPrelimRel = Boolean(prelimTimeRaw) || tailTokens.length >= 6;
+
+      let heat = '';
+      let lane = '';
+      let place = null;
+      let prelimPlace = null;
+      let points = 0;
+
+      if (hasPrelimRel && tailTokens.length >= 5) {
+        heat = tailTokens[2] && tailTokens[2] !== '0' ? tailTokens[2] : tailTokens[0] || '';
+        lane = tailTokens[3] && tailTokens[3] !== '0' ? tailTokens[3] : tailTokens[1] || '';
+        const pPlRaw = (tailTokens[4] || '').replace(/\./g, '');
+        prelimPlace = /^\d+$/.test(pPlRaw) && pPlRaw !== '0' ? parseInt(pPlRaw, 10) : null;
+        const fPlRaw = (tailTokens[5] || '').replace(/\./g, '');
+        place = /^\d+$/.test(fPlRaw) && fPlRaw !== '0' ? parseInt(fPlRaw, 10) : null;
+        const ptsTok = tailTokens[6] || '';
+        points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
+      } else {
+        heat = tailTokens[0] || '';
+        lane = tailTokens[1] || '';
+        const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
+        place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
+        const pointsToken = tailTokens[3] || '';
+        points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
+      }
 
       const strokeName = STROKE_MAP[strokeCode] || 'Relay';
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
       const parsedSec = timeToSeconds(finalsTimeRaw);
+      const parsedPrelimSec = timeToSeconds(prelimTimeRaw);
       const parsedSeedSec = timeToSeconds(seedTimeRaw);
 
       const relayObj = {
@@ -705,10 +795,16 @@ function parseSDIFContent(content) {
         strokeName,
         eventNumber: parseInt(eventNumber, 10) || eventNumber,
         eventLabel,
+        swimDate: relayIsoDate || meetInfo.isoDate || '',
         seedTime: seedTimeRaw || '',
         seedSeconds: parsedSeedSec === null ? Infinity : parsedSeedSec,
-        finalsTime: finalsTimeRaw || 'NT',
-        timeSeconds: parsedSec === null ? Infinity : parsedSec,
+        prelimTime: prelimTimeRaw || '',
+        prelimSeconds: parsedPrelimSec === null ? Infinity : parsedPrelimSec,
+        prelimPlace,
+        finalsOnlyTime: finalsTimeRaw || '',
+        finalsTime: finalsTimeRaw || prelimTimeRaw || 'NT',
+        timeSeconds:
+          parsedSec !== null ? parsedSec : parsedPrelimSec !== null ? parsedPrelimSec : Infinity,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
         heat,
         lane,
@@ -754,6 +850,10 @@ function parseSDIFContent(content) {
         splitType: 'C',
         splitPages: [],
         splits: [],
+        prelimSplitPages: [],
+        prelimSplits: [],
+        finalsSplitPages: [],
+        finalsSplits: [],
       };
 
       if (lastE0) {
@@ -782,6 +882,7 @@ function parseSDIFContent(content) {
       const intervalRaw = line.slice(58, 62).trim();
       const splitInterval = /^\d+$/.test(intervalRaw) ? parseInt(intervalRaw, 10) : 50;
       const splitType = line.slice(62, 63).trim() || 'C';
+      const roundFlag = (line[143] || '').trim().toUpperCase(); // 'P' = Prelims, 'F' = Finals
 
       const parsedSplits = [];
       for (let s = 0; s < 10; s++) {
@@ -799,9 +900,26 @@ function parseSDIFContent(content) {
           if (!target) return;
           target.splitInterval = splitInterval;
           target.splitType = splitType;
-          target.splitPages.push({ seq: seqNum, splits: parsedSplits });
-          target.splitPages.sort((a, b) => a.seq - b.seq);
-          target.splits = target.splitPages.flatMap((p) => p.splits);
+          if (roundFlag === 'P' && Array.isArray(target.prelimSplitPages)) {
+            target.prelimSplitPages.push({ seq: seqNum, splits: parsedSplits });
+            target.prelimSplitPages.sort((a, b) => a.seq - b.seq);
+            target.prelimSplits = target.prelimSplitPages.flatMap((p) => p.splits);
+          } else if (roundFlag === 'F' && Array.isArray(target.finalsSplitPages)) {
+            target.finalsSplitPages.push({ seq: seqNum, splits: parsedSplits });
+            target.finalsSplitPages.sort((a, b) => a.seq - b.seq);
+            target.finalsSplits = target.finalsSplitPages.flatMap((p) => p.splits);
+          } else {
+            target.splitPages.push({ seq: seqNum, splits: parsedSplits });
+            target.splitPages.sort((a, b) => a.seq - b.seq);
+            target.splits = target.splitPages.flatMap((p) => p.splits);
+          }
+
+          // Primary display splits prefer Finals splits, falling back to Prelims or untagged splits
+          if (target.finalsSplits && target.finalsSplits.length > 0) {
+            target.splits = target.finalsSplits;
+          } else if (target.prelimSplits && target.prelimSplits.length > 0) {
+            target.splits = target.prelimSplits;
+          }
         };
 
         if (lastRecordType === 'D0' && lastD0) {
@@ -1882,80 +2000,17 @@ export default function App() {
     parsedData.individualResults.forEach((entry) => {
       if (entry.swimDate) distinctDatesSet.add(normalizeDateIso(entry.swimDate));
     });
+    parsedData.relayResults.forEach((entry) => {
+      if (entry.swimDate) distinctDatesSet.add(normalizeDateIso(entry.swimDate));
+    });
     if (defaultMeetDate) distinctDatesSet.add(defaultMeetDate);
     const meetDays = Array.from(distinctDatesSet).sort((a, b) => a.localeCompare(b));
+    // 1. Individual swims (Prelims + Finals extracted cleanly per round)
+    const isValidTimeStr = (t) =>
+      Boolean(t) && !['NT', 'DQ', 'SCR', 'NS'].includes(String(t).toUpperCase());
 
-    const matchedComp = resolveMasterCompetition(meetComp, defaultMeetDate);
-    const finalComp = matchedComp ? matchedComp.canonicalName : meetComp;
-    const finalLoc = matchedComp?.defaultLocation || meetLoc;
-
-    const resolveRowDate = (rowId, eventNum, naturalDate) => {
-      if (meetDateOverrides[`row:${rowId}`]) return meetDateOverrides[`row:${rowId}`];
-      if (eventNum !== undefined && eventNum !== null && meetDateOverrides[`ev:${eventNum}`]) {
-        return meetDateOverrides[`ev:${eventNum}`];
-      }
-      return naturalDate || (matchedComp?.date ? normalizeDateIso(matchedComp.date) : defaultMeetDate);
-    };
-
-    const existingHashes = new Set(
-      historicalRecords.map(
-        (r) =>
-          `${r.swimmerKey}|${r.eventKey}|${r.seconds.toFixed(2)}|${r.date}|${r.round || 'Finals'}|${r.place}`
-      )
-    );
-
-    const unmatchedAthletesMap = new Map();
-    const unmatchedEventsMap = new Map();
-    const rows = [];
-
-    const registerSwimmerAndEvent = (displaySwimmer, genderLabel, eventLabel) => {
-      const resolvedAth = resolveMasterAthlete(displaySwimmer);
-      const finalName = resolvedAth ? resolvedAth.canonicalName : displaySwimmer;
-      if (!resolvedAth) {
-        const aKey = normalizeSwimmerKey(displaySwimmer);
-        if (!unmatchedAthletesMap.has(aKey)) {
-          unmatchedAthletesMap.set(aKey, {
-            rawName: displaySwimmer,
-            inferredGender: genderLabel === 'Men' ? 'Men' : 'Women',
-            count: 1,
-          });
-        } else {
-          unmatchedAthletesMap.get(aKey).count += 1;
-        }
-      }
-
-      const resolvedEv = resolveMasterEvent(eventLabel, genderLabel);
-      const evKey = normalizeEventKey(eventLabel, genderLabel);
-      const finalEvKey = resolvedEv ? resolvedEv.eventKey : evKey;
-      const finalEvLabel = resolvedEv ? resolvedEv.canonicalName : eventLabel;
-      if (!resolvedEv && eventLabel) {
-        const eKey = `${eventLabel.trim().toLowerCase()}|${genderLabel}`;
-        if (!unmatchedEventsMap.has(eKey)) {
-          unmatchedEventsMap.set(eKey, {
-            rawEvent: eventLabel.trim(),
-            genderHint: genderLabel,
-            count: 1,
-          });
-        } else {
-          unmatchedEventsMap.get(eKey).count += 1;
-        }
-      }
-
-      return { finalName, finalEvKey, finalEvLabel };
-    };
-
-    // 1. Individual swims
     parsedData.individualResults.forEach((entry) => {
       if (entry.teamCode !== targetCode) return;
-      if (
-        !entry.finalsTime ||
-        entry.finalsTime === 'NT' ||
-        entry.finalsTime === 'DQ' ||
-        entry.finalsTime === 'SCR'
-      )
-        return;
-      const sec = timeToSeconds(entry.finalsTime);
-      if (sec === null) return;
 
       const displaySwimmer = formatSwimmerDisplay(entry.swimmerName, entry.preferredFirst);
       const { finalName, finalEvKey, finalEvLabel } = registerSwimmerAndEvent(
@@ -1968,94 +2023,137 @@ export default function App() {
         meetClassOverrides[swKey] !== undefined
           ? meetClassOverrides[swKey]
           : normalizeClass(entry.classYear);
-      const rowId = `cl2-ind-${entry.id}`;
-      const rowDate = resolveRowDate(
-        rowId,
-        entry.eventNumber,
-        normalizeDateIso(entry.swimDate) || defaultMeetDate
-      );
-      const placeStr = entry.place ? String(entry.place) : '';
-      const hash = `${swKey}|${finalEvKey}|${sec.toFixed(2)}|${rowDate}|Finals|${placeStr}`;
-      const isDuplicate = existingHashes.has(hash);
+      const baseNaturalDate = normalizeDateIso(entry.swimDate) || defaultMeetDate;
 
-      rows.push({
-        id: rowId,
-        eventNumber: entry.eventNumber,
-        swimmerName: finalName,
-        swimmerKey: swKey,
-        classYear: effectiveClass,
-        eventKey: finalEvKey,
-        eventLabel: finalEvLabel,
-        time: entry.finalsTime,
-        seconds: sec,
-        date: rowDate,
-        dateObj: parseFlexibleDate(rowDate),
-        location: finalLoc,
-        competition: finalComp,
-        round: 'Finals',
-        place: placeStr,
-        swimType: 'OFFICIAL',
-        isOfficial: true,
-        splitContext: '',
-        source: 'cl2_meet',
-        isDuplicate,
-        selected: !isDuplicate && !excludedMeetCommitIds.has(rowId),
-      });
+      const pushRoundSwim = ({
+        roundName,
+        rawTime,
+        secVal,
+        placeVal,
+        splitsArr,
+        idSuffix,
+      }) => {
+        const rowId = `cl2-ind-${entry.id}-${idSuffix}`;
+        const rowDate = resolveRowDate(rowId, entry.eventNumber, baseNaturalDate);
+        const placeStr = placeVal ? String(placeVal) : '';
+        const hash = `${swKey}|${finalEvKey}|${secVal.toFixed(2)}|${rowDate}|${roundName}|${placeStr}`;
+        const isDuplicate = existingHashes.has(hash);
 
-      // Optional legal opening splits
-      if (includeSplitsOnCommit && entry.splits && entry.splits.length > 0) {
-        const legalSplits = extractLegalOpeningSplits(
-          Number(entry.distance) || 0,
-          entry.genderLabel,
-          entry.strokeName,
-          finalEvLabel,
-          entry.splits,
-          entry.splitInterval,
-          entry.splitType
-        );
-        legalSplits.forEach((spItem, sIdx) => {
-          const spResolved = registerSwimmerAndEvent(
-            displaySwimmer,
-            entry.genderLabel,
-            spItem.eventLabel
-          );
-          if (!spResolved.finalEvKey) return;
-          const sRowId = `cl2-sp-${entry.id}-${sIdx}`;
-          const spDate = resolveRowDate(
-            sRowId,
-            entry.eventNumber,
-            normalizeDateIso(entry.swimDate) || defaultMeetDate
-          );
-          const sHash = `${swKey}|${spResolved.finalEvKey}|${spItem.seconds.toFixed(2)}|${spDate}|Finals|S`;
-          const sDup = existingHashes.has(sHash);
-          rows.push({
-            id: sRowId,
-            eventNumber: entry.eventNumber,
-            swimmerName: finalName,
-            swimmerKey: swKey,
-            classYear: effectiveClass,
-            eventKey: spResolved.finalEvKey,
-            eventLabel: spResolved.finalEvLabel,
-            time: spItem.time,
-            seconds: spItem.seconds,
-            date: spDate,
-            dateObj: parseFlexibleDate(spDate),
-            location: finalLoc,
-            competition: finalComp,
-            round: 'Finals',
-            place: 'S',
-            swimType: 'INTERMEDIATE_SPLIT',
-            isOfficial: true,
-            splitContext: spItem.context,
-            source: 'cl2_split',
-            isDuplicate: sDup,
-            selected: !sDup && !excludedMeetCommitIds.has(sRowId),
-          });
+        rows.push({
+          id: rowId,
+          eventNumber: entry.eventNumber,
+          swimmerName: finalName,
+          swimmerKey: swKey,
+          classYear: effectiveClass,
+          eventKey: finalEvKey,
+          eventLabel: finalEvLabel,
+          time: rawTime,
+          seconds: secVal,
+          date: rowDate,
+          dateObj: parseFlexibleDate(rowDate),
+          location: finalLoc,
+          competition: finalComp,
+          round: roundName,
+          place: placeStr,
+          swimType: 'OFFICIAL',
+          isOfficial: true,
+          splitContext: '',
+          source: 'cl2_meet',
+          isDuplicate,
+          selected: !isDuplicate && !excludedMeetCommitIds.has(rowId),
         });
+
+        if (includeSplitsOnCommit && Array.isArray(splitsArr) && splitsArr.length > 0) {
+          const legalSplits = extractLegalOpeningSplits(
+            Number(entry.distance) || 0,
+            entry.genderLabel,
+            entry.strokeName,
+            finalEvLabel,
+            splitsArr,
+            entry.splitInterval,
+            entry.splitType
+          );
+          legalSplits.forEach((spItem, sIdx) => {
+            const spResolved = registerSwimmerAndEvent(
+              displaySwimmer,
+              entry.genderLabel,
+              spItem.eventLabel
+            );
+            if (!spResolved.finalEvKey) return;
+            const sRowId = `cl2-sp-${entry.id}-${idSuffix}-${sIdx}`;
+            const spDate = resolveRowDate(sRowId, entry.eventNumber, baseNaturalDate);
+            const sHash = `${swKey}|${spResolved.finalEvKey}|${spItem.seconds.toFixed(2)}|${spDate}|${roundName}|S`;
+            const sDup = existingHashes.has(sHash);
+            rows.push({
+              id: sRowId,
+              eventNumber: entry.eventNumber,
+              swimmerName: finalName,
+              swimmerKey: swKey,
+              classYear: effectiveClass,
+              eventKey: spResolved.finalEvKey,
+              eventLabel: spResolved.finalEvLabel,
+              time: spItem.time,
+              seconds: spItem.seconds,
+              date: spDate,
+              dateObj: parseFlexibleDate(spDate),
+              location: finalLoc,
+              competition: finalComp,
+              round: roundName,
+              place: 'S',
+              swimType: 'INTERMEDIATE_SPLIT',
+              isOfficial: true,
+              splitContext: spItem.context,
+              source: 'cl2_split',
+              isDuplicate: sDup,
+              selected: !sDup && !excludedMeetCommitIds.has(sRowId),
+            });
+          });
+        }
+      };
+
+      // A. Prelim Swim (when prelimTime is present — captures both finalists' prelims & prelim-only swimmers)
+      if (isValidTimeStr(entry.prelimTime)) {
+        const pSec = timeToSeconds(entry.prelimTime);
+        if (pSec !== null && pSec > 0) {
+          const pSplits =
+            entry.prelimSplits && entry.prelimSplits.length > 0
+              ? entry.prelimSplits
+              : !isValidTimeStr(entry.finalsOnlyTime)
+              ? entry.splits
+              : [];
+          pushRoundSwim({
+            roundName: 'Prelims',
+            rawTime: entry.prelimTime,
+            secVal: pSec,
+            placeVal: entry.prelimPlace,
+            splitsArr: pSplits,
+            idSuffix: 'P',
+          });
+        }
+      }
+
+      // B. Finals Swim (true finals time + overall finals place)
+      const effectiveFinalsStr = entry.prelimTime ? entry.finalsOnlyTime : entry.finalsTime;
+      if (isValidTimeStr(effectiveFinalsStr)) {
+        const fSec = timeToSeconds(effectiveFinalsStr);
+        if (fSec !== null && fSec > 0) {
+          const fSplits =
+            entry.finalsSplits && entry.finalsSplits.length > 0
+              ? entry.finalsSplits
+              : entry.splits;
+          pushRoundSwim({
+            roundName: 'Finals',
+            rawTime: effectiveFinalsStr,
+            secVal: fSec,
+            placeVal: entry.place,
+            splitsArr: fSplits,
+            idSuffix: 'F',
+          });
+        }
       }
     });
 
-    // 2. Relay Lead-Offs (R) & Relay Team Wins
+    // 2. Relay Lead-Offs (R) & Relay Team Wins (Finals overall place === 1 only)
     parsedData.relayResults.forEach((entry) => {
       if (entry.teamCode !== targetCode) return;
       if (!entry.legs || entry.legs.length === 0) return;
@@ -2065,59 +2163,82 @@ export default function App() {
         ? 'Backstroke'
         : 'Freestyle';
       const legEvLabel = `${entry.genderLabel} ${legDist} ${legStroke}`;
-      const legBreakdown = calculateRelayLegBreakdown(entry);
+      const relayNaturalDate = normalizeDateIso(entry.swimDate) || defaultMeetDate;
 
-      const leadOffLeg = legBreakdown.find((l) => l.legOrder === 1);
-      if (leadOffLeg && leadOffLeg.swimmerName && leadOffLeg.legTotalTime !== '-') {
+      const extractLeadOffForRound = (roundName, splitsSelector) => {
+        const roundRelay = {
+          ...entry,
+          legs: entry.legs.map((l) => ({
+            ...l,
+            splits: splitsSelector(l),
+          })),
+        };
+        const breakdown = calculateRelayLegBreakdown(roundRelay);
+        const leadOffLeg = breakdown.find((l) => l.legOrder === 1);
+        if (!leadOffLeg || !leadOffLeg.swimmerName || leadOffLeg.legTotalTime === '-') return;
+
         const splitSec = timeToSeconds(leadOffLeg.legTotalTime);
-        if (splitSec !== null) {
-          const displayLead = formatSwimmerDisplay(
-            leadOffLeg.swimmerName,
-            leadOffLeg.preferredFirst
-          );
-          const { finalName, finalEvKey, finalEvLabel } = registerSwimmerAndEvent(
-            displayLead,
-            entry.genderLabel,
-            legEvLabel
-          );
-          const swKey = normalizeSwimmerKey(finalName);
-          const effectiveClass =
-            meetClassOverrides[swKey] !== undefined
-              ? meetClassOverrides[swKey]
-              : normalizeClass(leadOffLeg.classYear);
-const rRowId = `cl2-lo-${entry.id}`;
-          const rDate = resolveRowDate(rRowId, entry.eventNumber, defaultMeetDate);
-          const hash = `${swKey}|${finalEvKey}|${splitSec.toFixed(2)}|${rDate}|Finals|R`;
-          const isDuplicate = existingHashes.has(hash);
-          rows.push({
-            id: rRowId,
-            eventNumber: entry.eventNumber,
-            swimmerName: finalName,
-            swimmerKey: swKey,
-            classYear: effectiveClass,
-            eventKey: finalEvKey,
-            eventLabel: finalEvLabel,
-            time: leadOffLeg.legTotalTime,
-            seconds: splitSec,
-            date: rDate,
-            dateObj: parseFlexibleDate(rDate),
-            location: finalLoc,
-            competition: finalComp,
-            round: 'Finals',
-            place: 'R',
-            swimType: 'RELAY_LEADOFF',
-            isOfficial: true,
-            splitContext: `Lead-Off (${entry.eventLabel})`,
-            source: 'cl2_leadoff',
-            isDuplicate,
-            selected: !isDuplicate && !excludedMeetCommitIds.has(rRowId),
-          });
-        }
-      }
+        if (splitSec === null || splitSec <= 0) return;
 
-      if (Number(entry.place) === 1) {
-        const relaySec = timeToSeconds(entry.finalsTime);
+        const displayLead = formatSwimmerDisplay(
+          leadOffLeg.swimmerName,
+          leadOffLeg.preferredFirst
+        );
+        const { finalName, finalEvKey, finalEvLabel } = registerSwimmerAndEvent(
+          displayLead,
+          entry.genderLabel,
+          legEvLabel
+        );
+        const swKey = normalizeSwimmerKey(finalName);
+        const effectiveClass =
+          meetClassOverrides[swKey] !== undefined
+            ? meetClassOverrides[swKey]
+            : normalizeClass(leadOffLeg.classYear);
+        const rRowId = `cl2-lo-${entry.id}-${roundName}`;
+        const rDate = resolveRowDate(rRowId, entry.eventNumber, relayNaturalDate);
+        const hash = `${swKey}|${finalEvKey}|${splitSec.toFixed(2)}|${rDate}|${roundName}|R`;
+        const isDuplicate = existingHashes.has(hash);
+
+        rows.push({
+          id: rRowId,
+          eventNumber: entry.eventNumber,
+          swimmerName: finalName,
+          swimmerKey: swKey,
+          classYear: effectiveClass,
+          eventKey: finalEvKey,
+          eventLabel: finalEvLabel,
+          time: leadOffLeg.legTotalTime,
+          seconds: splitSec,
+          date: rDate,
+          dateObj: parseFlexibleDate(rDate),
+          location: finalLoc,
+          competition: finalComp,
+          round: roundName,
+          place: 'R',
+          swimType: 'RELAY_LEADOFF',
+          isOfficial: true,
+          splitContext: `Lead-Off (${entry.eventLabel})`,
+          source: 'cl2_leadoff',
+          isDuplicate,
+          selected: !isDuplicate && !excludedMeetCommitIds.has(rRowId),
+        });
+      };
+
+      const hasPrelimLegSplits = entry.legs.some(
+        (l) => l.prelimSplits && l.prelimSplits.length > 0
+      );
+      if (hasPrelimLegSplits) {
+        extractLeadOffForRound('Prelims', (l) => l.prelimSplits || []);
+      }
+      extractLeadOffForRound('Finals', (l) =>
+        l.finalsSplits && l.finalsSplits.length > 0 ? l.finalsSplits : l.splits || []
+      );
+
+      const effectiveRelFinals = entry.prelimTime ? entry.finalsOnlyTime : entry.finalsTime;
+      if (Number(entry.place) === 1 && isValidTimeStr(effectiveRelFinals)) {
+        const relaySec = timeToSeconds(effectiveRelFinals);
         if (relaySec !== null) {
+          const legBreakdown = calculateRelayLegBreakdown(entry);
           legBreakdown.forEach((leg) => {
             if (!leg.swimmerName) return;
             const displaySwimmer = formatSwimmerDisplay(leg.swimmerName, leg.preferredFirst);
@@ -2132,7 +2253,7 @@ const rRowId = `cl2-lo-${entry.id}`;
                 ? meetClassOverrides[swKey]
                 : normalizeClass(leg.classYear);
             const wRowId = `cl2-rw-${entry.id}-leg${leg.legOrder}`;
-            const wDate = resolveRowDate(wRowId, entry.eventNumber, defaultMeetDate);
+            const wDate = resolveRowDate(wRowId, entry.eventNumber, relayNaturalDate);
             const winHash = `${swKey}|${finalEvKey}|${relaySec.toFixed(2)}|${wDate}|Finals|1`;
             const isDuplicate = existingHashes.has(winHash);
             rows.push({
@@ -2143,7 +2264,7 @@ const rRowId = `cl2-lo-${entry.id}`;
               classYear: effectiveClass,
               eventKey: finalEvKey,
               eventLabel: finalEvLabel,
-              time: entry.finalsTime,
+              time: effectiveRelFinals,
               seconds: relaySec,
               date: wDate,
               dateObj: parseFlexibleDate(wDate),
@@ -14001,9 +14122,19 @@ const rRowId = `cl2-lo-${entry.id}`;
                                 <td className="py-2 px-3">
                                   {row.eventNumber ? `#${row.eventNumber} ` : ''}
                                   {row.eventLabel}
+                                  {row.round === 'Prelims' && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-bold">
+                                      Prelims
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="py-2 px-3 font-mono font-bold text-cyan-800">
                                   {row.time}
+                                  {row.place && row.place !== 'R' && row.place !== 'S' && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">
+                                      #{row.place}
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="py-2 px-3">
                                   <input
@@ -14018,34 +14149,6 @@ const rRowId = `cl2-lo-${entry.id}`;
                                     }}
                                     className="px-2 py-1 bg-white border border-slate-200 rounded text-[11px] font-mono text-slate-800"
                                   />
-                                </td>
-                                <td className="py-2 px-3">
-                                  <select
-                                    value={row.classYear || ''}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setMeetClassOverrides((prev) => ({
-                                        ...prev,
-                                        [row.swimmerKey]: val,
-                                      }));
-                                    }}
-                                    className={`px-2 py-1 border rounded text-[11px] font-bold ${
-                                      row.classYear
-                                        ? 'bg-white border-slate-200 text-slate-800'
-                                        : 'bg-amber-50 border-amber-300 text-amber-800'
-                                    }`}
-                                  >
-                                    <option value="">—</option>
-                                    <option value="FR">FR</option>
-                                    <option value="SO">SO</option>
-                                    <option value="JR">JR</option>
-                                    <option value="SR">SR</option>
-                                    <option value="GR">GR</option>
-                                  </select>
-                                </td>
-                                <td className="py-2 px-3">{row.eventLabel}</td>
-                                <td className="py-2 px-3 font-mono font-bold text-cyan-800">
-                                  {row.time}
                                 </td>
                                 <td className="py-2 px-3">
                                   {row.swimType === 'RELAY_LEADOFF' ? (
