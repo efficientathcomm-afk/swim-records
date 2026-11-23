@@ -581,16 +581,16 @@ function parseSDIFContent(content) {
       const rawSwimDate = sliceCol(line, 95, 102);
       const swimIsoDate =
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
-          ? formatSdifDate(rawSwimDate)
-          : '';
-      // Extract Seed (cols 103-110), Prelim (cols 112-119), Swim-Off (cols 121-128), and Finals (cols 130-137)
+      // Extract Seed (cols 95-102), Prelim (cols 104-111), Swim-Off (cols 113-120), and Finals (cols 122-129)
       // plus legacy dual-meet fallback where Seed is 103-110 and Finals is 116-123
-      const seedTimeRaw = sliceCol(line, 103, 110);
-      const col112to119 = sliceCol(line, 112, 119);
-      const col130to137 = sliceCol(line, 130, 137);
+      const seedTimeRaw = sliceCol(line, 95, 102) || sliceCol(line, 103, 110);
+      const col104to111 = sliceCol(line, 104, 111);
+      const col122to129 = sliceCol(line, 122, 129);
       const hasExtendedTimeSlots =
-        /[\d:.]/.test(col130to137) ||
-        (line.length >= 138 && /[\d:.]/.test(col112to119) && line.slice(129, 138).trim() === '');
+        /[\d:.]/.test(col104to111) ||
+        (line.length >= 130 &&
+          /[\d:.]/.test(col122to129) &&
+          line.slice(114, 121).trim() === '');
 
       let prelimTimeRaw = '';
       let finalsTimeRaw = '';
@@ -598,10 +598,10 @@ function parseSDIFContent(content) {
       let tailZone = '';
 
       if (hasExtendedTimeSlots) {
-        prelimTimeRaw = col112to119;
-        finalsTimeRaw = col130to137;
-        courseCode = sliceCol(line, 138, 138) || sliceCol(line, 124, 124);
-        tailZone = line.slice(138, 162);
+        prelimTimeRaw = col104to111;
+        finalsTimeRaw = col122to129;
+        courseCode = sliceCol(line, 130, 130) || sliceCol(line, 112, 112);
+        tailZone = line.slice(130, 154);
       } else {
         finalsTimeRaw = sliceCol(line, 116, 123);
         courseCode = sliceCol(line, 124, 124);
