@@ -4901,15 +4901,15 @@ export default function App() {
       .sort((a, b) => a[1] - b[1])
       .map(([label, num]) => ({ label, num }));
   }, [parsedData, meetSubTab]);
-
-  // Helper to resolve A / B / C Final tier from heat number (1 = A, 2 = B, 3 = C) or overall place
+  // Helper to resolve A / B / C Final tier from heat number (highest heat = A Final, e.g. 3/2/1 -> A/B/C; 2/1 -> A/B)
   const getFinalHeatTierInfo = (heatStr, placeNum, maxHeatNum) => {
     const hNum = parseInt(heatStr, 10);
     if (!Number.isNaN(hNum) && maxHeatNum >= 2) {
-      if (hNum === 1) return { tierRank: 1, label: 'A FINALS' };
-      if (hNum === 2) return { tierRank: 2, label: 'B FINALS' };
-      if (hNum === 3) return { tierRank: 3, label: 'C FINALS' };
-      return { tierRank: hNum, label: `FINAL HEAT ${hNum}` };
+      const rankFromTop = maxHeatNum - hNum + 1;
+      if (rankFromTop === 1) return { tierRank: 1, label: 'A FINALS' };
+      if (rankFromTop === 2) return { tierRank: 2, label: 'B FINALS' };
+      if (rankFromTop === 3) return { tierRank: 3, label: 'C FINALS' };
+      return { tierRank: rankFromTop, label: `FINAL HEAT ${hNum}` };
     }
     if (typeof placeNum === 'number' && placeNum > 0 && maxHeatNum >= 2) {
       if (placeNum <= 10) return { tierRank: 1, label: 'A FINALS' };
