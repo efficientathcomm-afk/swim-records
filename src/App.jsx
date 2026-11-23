@@ -676,7 +676,9 @@ function parseSDIFContent(content) {
       const isPrelimFinalsFormat =
         !isSpecialUnscoredEvent &&
         (Boolean(prelimTimeRaw) ||
-          (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4])));
+          (tailTokens.length >= 5 &&
+            !/^\d+\.$/.test(tailTokens[3] || '') &&
+            /^\d+$/.test(tailTokens[4])));
 
       if (isPrelimFinalsFormat) {
         // Expand any glued 3+ digit heat+lane token (e.g., "410" -> ["4", "10"], "310" -> ["3", "10"])
