@@ -4852,6 +4852,23 @@ export default function App() {
       .sort((a, b) => a[1] - b[1])
       .map(([label, num]) => ({ label, num }));
   }, [parsedData, meetSubTab]);
+
+  // Helper to resolve A / B / C Final tier from heat number (1 = A, 2 = B, 3 = C) or overall place
+  const getFinalHeatTierInfo = (heatStr, placeNum, maxHeatNum) => {
+    const hNum = parseInt(heatStr, 10);
+    if (!Number.isNaN(hNum) && maxHeatNum >= 2) {
+      if (hNum === 1) return { tierRank: 1, label: 'A FINALS' };
+      if (hNum === 2) return { tierRank: 2, label: 'B FINALS' };
+      if (hNum === 3) return { tierRank: 3, label: 'C FINALS' };
+      return { tierRank: hNum, label: `FINAL HEAT ${hNum}` };
+    }
+    if (typeof placeNum === 'number' && placeNum > 0 && maxHeatNum >= 2) {
+      if (placeNum <= 10) return { tierRank: 1, label: 'A FINALS' };
+      if (placeNum <= 20) return { tierRank: 2, label: 'B FINALS' };
+      return { tierRank: 3, label: 'C FINALS' };
+    }
+    return { tierRank: 1, label: '' };
+  };
   
   // Filtered & Sorted Individual Results for Section 4
   const filteredMeetIndividuals = useMemo(() => {
@@ -4868,80 +4885,232 @@ export default function App() {
           if (!fullText.includes(q)) return false;
         }
         return true;
-      })
-      .sort((a, b) => {
-        const dir = sortConfig.direction === 'asc' ? 1 : -1;
-        switch (sortConfig.key) {
-          case 'eventNumber':
-            if (a.eventNumber !== b.eventNumber) return (a.eventNumber - b.eventNumber) * dir;
-            return a.timeSeconds - b.timeSeconds;
-          case 'swimmerName':
-            return a.swimmerName.localeCompare(b.swimmerName) * dir;
-          case 'teamName':
-            return a.teamName.localeCompare(b.teamName) * dir;
-          case 'time':
-            return (a.timeSeconds - b.timeSeconds) * dir;
-          case 'place': {
-            const pA = a.place ?? 9999;
-            const pB = b.place ?? 9999;
-            return (pA - pB) * dir;
-          }
-          default:
-            return 0;
-        }
       });
-  }, [parsedData, selectedTeam, genderFilter, selectedEventFilter, searchQuery, sortConfig]);
+  }, [parsedData, selectedTeam, genderFilter, selectedEventFilter, searchQuery]);
 
+  // Build separate Prelims and Finals cards when prelims exist, while keeping single cards for dual-meet / timed-final events
   const groupedIndividualEvents = useMemo(() => {
-    const groupsMap = new Map();
+    if (!parsedData) return [];
+
+    // Check across the entire meet which events have prelim swims so filtering by team keeps card structure consistent
+    const eventHasPrelimsMap = new Map();
+    parsedData.individualResults.forEach((r) => {
+      const evKey = `${r.eventNumber}-${r.eventLabel}`;
+      const hasP =
+        Boolean(r.prelimTime && !['NT', 'DQ', 'SCR', 'NS'].includes(r.prelimTime)) ||
+        r.prelimPlace !== null;
+      if (hasP) eventHasPrelimsMap.set(evKey, true);
+    });
+
+    const eventsMap = new Map();
     filteredMeetIndividuals.forEach((row) => {
-      const key = `${row.eventNumber}-${row.eventLabel}`;
-      if (!groupsMap.has(key)) {
-        groupsMap.set(key, {
-          key,
+      const evKey = `${row.eventNumber}-${row.eventLabel}`;
+      if (!eventsMap.has(evKey)) {
+        eventsMap.set(evKey, {
+          baseKey: evKey,
           eventNumber: row.eventNumber,
           eventLabel: row.eventLabel,
           course: row.course,
-          swims: [],
+          isSwimOff: Boolean(row.isSwimOff),
+          rawRows: [],
         });
       }
-      groupsMap.get(key).swims.push(row);
+      eventsMap.get(evKey).rawRows.push(row);
     });
 
-    const groups = Array.from(groupsMap.values());
-    groups.sort((a, b) => {
+    const orderedEvents = Array.from(eventsMap.values()).sort((a, b) => {
       const dir = sortConfig.key === 'eventNumber' && sortConfig.direction === 'desc' ? -1 : 1;
-      return (a.eventNumber - b.eventNumber) * dir;
+      return (Number(a.eventNumber) - Number(b.eventNumber)) * dir;
     });
 
-    groups.forEach((group) => {
-      group.swims.sort((a, b) => {
+    const cards = [];
+
+    orderedEvents.forEach((ev) => {
+      const hasPrelims = Boolean(eventHasPrelimsMap.get(ev.baseKey)) && !ev.isSwimOff;
+
+      if (!hasPrelims) {
+        // Standard Timed-Final / Dual-Meet / Swim-Off Single Card
+        const swims = ev.rawRows.map((r) => ({
+          ...r,
+          displayId: r.id,
+          displayRound: r.isSwimOff ? 'Swim-Off' : 'Finals',
+          displayPlace: r.place,
+          displayTime: r.finalsTime,
+          displaySeconds: r.timeSeconds,
+          displayHeat: r.heat,
+          displayLane: r.lane,
+          displayPoints: r.isSwimOff ? 0 : r.points,
+          displaySplits: r.splits || [],
+          finalTierRank: 1,
+          finalTierLabel: '',
+        }));
+
+        swims.sort((a, b) => {
+          const dir = sortConfig.direction === 'asc' ? 1 : -1;
+          if (sortConfig.key === 'swimmerName') return a.swimmerName.localeCompare(b.swimmerName) * dir;
+          if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
+          if (sortConfig.key === 'time') return (a.displaySeconds - b.displaySeconds) * dir;
+          if (sortConfig.key === 'place') {
+            return ((a.displayPlace ?? 9999) - (b.displayPlace ?? 9999)) * dir;
+          }
+          const pA = a.displayPlace ?? 9999;
+          const pB = b.displayPlace ?? 9999;
+          if (pA !== pB) return pA - pB;
+          return a.displaySeconds - b.displaySeconds;
+        });
+
+        const validTimes = swims.map((r) => r.displaySeconds).filter((t) => isFinite(t));
+        cards.push({
+          key: `${ev.baseKey}-finals`,
+          eventNumber: ev.eventNumber,
+          eventLabel: ev.eventLabel,
+          roundTag: ev.isSwimOff ? 'Swim-Off' : '',
+          isPrelimCard: false,
+          hasSubHeaders: false,
+          course: ev.course,
+          swims,
+          fastestTimeSec: validTimes.length > 0 ? Math.min(...validTimes) : Infinity,
+        });
+        return;
+      }
+
+      // 1. FINALS CARD (only swimmers who swam in Finals)
+      const allEventFinalsRows = parsedData.individualResults.filter(
+        (r) =>
+          `${r.eventNumber}-${r.eventLabel}` === ev.baseKey &&
+          Boolean(r.finalsOnlyTime && !['NT', 'DQ', 'SCR', 'NS'].includes(r.finalsOnlyTime))
+      );
+      const maxFinalHeat = allEventFinalsRows.reduce((maxH, r) => {
+        const h = parseInt(r.heat, 10);
+        return !Number.isNaN(h) && h > maxH ? h : maxH;
+      }, 0);
+
+      const finalsSwims = ev.rawRows
+        .filter(
+          (r) =>
+            Boolean(r.finalsOnlyTime && !['NT', 'DQ', 'SCR', 'NS'].includes(r.finalsOnlyTime))
+        )
+        .map((r) => {
+          const fSec = timeToSeconds(r.finalsOnlyTime);
+          const tier = getFinalHeatTierInfo(r.heat, r.place, maxFinalHeat);
+          return {
+            ...r,
+            displayId: `${r.id}-F`,
+            displayRound: 'Finals',
+            displayPlace: r.place,
+            displayTime: r.finalsOnlyTime,
+            displaySeconds: fSec === null ? Infinity : fSec,
+            displayHeat: r.heat,
+            displayLane: r.lane,
+            displayPoints: r.points,
+            displaySplits:
+              r.finalsSplits && r.finalsSplits.length > 0 ? r.finalsSplits : r.splits || [],
+            finalTierRank: tier.tierRank,
+            finalTierLabel: tier.label,
+          };
+        });
+
+      const showBanners =
+        maxFinalHeat >= 2 &&
+        sortConfig.key !== 'swimmerName' &&
+        sortConfig.key !== 'teamName' &&
+        sortConfig.key !== 'time';
+
+      finalsSwims.sort((a, b) => {
         const dir = sortConfig.direction === 'asc' ? 1 : -1;
         if (sortConfig.key === 'swimmerName') return a.swimmerName.localeCompare(b.swimmerName) * dir;
         if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
-        if (sortConfig.key === 'time') return (a.timeSeconds - b.timeSeconds) * dir;
-        if (sortConfig.key === 'place') {
-          const pA = a.place ?? 9999;
-          const pB = b.place ?? 9999;
-          return (pA - pB) * dir;
+        if (sortConfig.key === 'time') return (a.displaySeconds - b.displaySeconds) * dir;
+
+        // Default & Place sort: group by A Final (Heat 1) -> B Final (Heat 2) -> C Final (Heat 3), then place
+        if (a.finalTierRank !== b.finalTierRank) {
+          return (a.finalTierRank - b.finalTierRank) * (sortConfig.key === 'place' ? dir : 1);
         }
-        const pA = a.place ?? 9999;
-        const pB = b.place ?? 9999;
-        if (pA !== pB) return pA - pB;
-        return a.timeSeconds - b.timeSeconds;
+        const pA = a.displayPlace ?? 9999;
+        const pB = b.displayPlace ?? 9999;
+        if (pA !== pB) return (pA - pB) * (sortConfig.key === 'place' ? dir : 1);
+        return a.displaySeconds - b.displaySeconds;
       });
 
-      const validTimes = group.swims.map((r) => r.timeSeconds).filter((t) => isFinite(t));
-      group.fastestTimeSec = validTimes.length > 0 ? Math.min(...validTimes) : Infinity;
+      if (finalsSwims.length > 0) {
+        const validFinals = finalsSwims.map((r) => r.displaySeconds).filter((t) => isFinite(t));
+        cards.push({
+          key: `${ev.baseKey}-finals`,
+          eventNumber: ev.eventNumber,
+          eventLabel: ev.eventLabel,
+          roundTag: 'Finals',
+          isPrelimCard: false,
+          hasSubHeaders: showBanners,
+          course: ev.course,
+          swims: finalsSwims,
+          fastestTimeSec: validFinals.length > 0 ? Math.min(...validFinals) : Infinity,
+        });
+      }
+
+      // 2. PRELIMS CARD (all swimmers with a Prelim time, sorted by Prelim finish, no points)
+      const prelimSwims = ev.rawRows
+        .filter(
+          (r) =>
+            Boolean(r.prelimTime && !['NT', 'DQ', 'SCR', 'NS'].includes(r.prelimTime)) ||
+            r.prelimPlace !== null
+        )
+        .map((r) => {
+          const pSec = timeToSeconds(r.prelimTime);
+          return {
+            ...r,
+            displayId: `${r.id}-P`,
+            displayRound: 'Prelims',
+            displayPlace: r.prelimPlace,
+            displayTime: r.prelimTime || 'NT',
+            displaySeconds: pSec === null ? Infinity : pSec,
+            displayHeat: r.prelimHeat,
+            displayLane: r.prelimLane,
+            displayPoints: 0,
+            displaySplits:
+              r.prelimSplits && r.prelimSplits.length > 0
+                ? r.prelimSplits
+                : !r.finalsOnlyTime
+                ? r.splits || []
+                : [],
+            finalTierRank: 1,
+            finalTierLabel: '',
+          };
+        });
+
+      prelimSwims.sort((a, b) => {
+        const dir = sortConfig.direction === 'asc' ? 1 : -1;
+        if (sortConfig.key === 'swimmerName') return a.swimmerName.localeCompare(b.swimmerName) * dir;
+        if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
+        if (sortConfig.key === 'time') return (a.displaySeconds - b.displaySeconds) * dir;
+        const pA = a.displayPlace ?? 9999;
+        const pB = b.displayPlace ?? 9999;
+        if (pA !== pB) return (pA - pB) * (sortConfig.key === 'place' ? dir : 1);
+        return a.displaySeconds - b.displaySeconds;
+      });
+
+      if (prelimSwims.length > 0) {
+        const validPrelims = prelimSwims.map((r) => r.displaySeconds).filter((t) => isFinite(t));
+        cards.push({
+          key: `${ev.baseKey}-prelims`,
+          eventNumber: ev.eventNumber,
+          eventLabel: ev.eventLabel,
+          roundTag: 'Prelims',
+          isPrelimCard: true,
+          hasSubHeaders: false,
+          course: ev.course,
+          swims: prelimSwims,
+          fastestTimeSec: validPrelims.length > 0 ? Math.min(...validPrelims) : Infinity,
+        });
+      }
     });
 
-    return groups;
-  }, [filteredMeetIndividuals, sortConfig]);
+    return cards;
+  }, [parsedData, filteredMeetIndividuals, sortConfig]);
 
   const toggleAllIndividualsInEvent = (swimsInEvent) => {
     const expandableIds = swimsInEvent
-      .filter((r) => r.splits && r.splits.length > 0)
-      .map((r) => r.id);
+      .filter((r) => r.displaySplits && r.displaySplits.length > 0)
+      .map((r) => r.displayId || r.id);
     if (expandableIds.length === 0) return;
     const allExpanded = expandableIds.every((id) => expandedRows.has(id));
     setExpandedRows((prev) => {
@@ -12938,30 +13107,52 @@ export default function App() {
                     ) : (
                       groupedIndividualEvents.map((eventGroup) => {
                         const expandableSwims = eventGroup.swims.filter(
-                          (r) => r.splits && r.splits.length > 0
+                          (r) => r.displaySplits && r.displaySplits.length > 0
                         );
                         const allExpanded =
                           expandableSwims.length > 0 &&
-                          expandableSwims.every((r) => expandedRows.has(r.id));
+                          expandableSwims.every((r) => expandedRows.has(r.displayId));
 
                         return (
                           <div
                             key={eventGroup.key}
                             className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
                           >
-                            <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+                            <div
+                              className={`${
+                                eventGroup.isPrelimCard
+                                  ? 'bg-slate-800 text-white'
+                                  : 'bg-slate-900 text-white'
+                              } px-5 py-3.5 flex flex-wrap items-center justify-between gap-3`}
+                            >
                               <div className="flex items-center gap-3">
                                 <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
                                   Event #{eventGroup.eventNumber}
                                 </span>
                                 <div>
-                                  <h3 className="text-base font-bold tracking-tight">
-                                    {eventGroup.eventLabel}
-                                  </h3>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h3 className="text-base font-bold tracking-tight">
+                                      {eventGroup.eventLabel}
+                                    </h3>
+                                    {eventGroup.roundTag && (
+                                      <span
+                                        className={`text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
+                                          eventGroup.isPrelimCard
+                                            ? 'bg-indigo-500/25 text-indigo-200 border border-indigo-400/40'
+                                            : eventGroup.roundTag === 'Swim-Off'
+                                            ? 'bg-amber-500/25 text-amber-200 border border-amber-400/40'
+                                            : 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
+                                        }`}
+                                      >
+                                        {eventGroup.roundTag}
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-xs text-slate-400">
                                     {eventGroup.swims.length}{' '}
                                     {eventGroup.swims.length === 1 ? 'Swimmer' : 'Swimmers'} •{' '}
                                     {eventGroup.course}
+                                    {eventGroup.isPrelimCard ? ' • Preliminary Round (Unscored)' : ''}
                                   </p>
                                 </div>
                               </div>
@@ -13024,7 +13215,13 @@ export default function App() {
                                       className="py-3 px-3 text-right cursor-pointer hover:text-slate-900 select-none"
                                     >
                                       <div className="flex items-center justify-end gap-1">
-                                        <span>Finals Time</span>
+                                        <span>
+                                          {eventGroup.isPrelimCard
+                                            ? 'Prelim Time'
+                                            : eventGroup.roundTag === 'Swim-Off'
+                                            ? 'Swim-Off Time'
+                                            : 'Finals Time'}
+                                        </span>
                                         <ArrowUpDown className="w-3 h-3 text-slate-400" />
                                       </div>
                                     </th>
@@ -13034,21 +13231,23 @@ export default function App() {
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 text-sm">
-                                  {eventGroup.swims.map((row) => {
-                                    const hasSplits = row.splits && row.splits.length > 0;
-                                    const isExpanded = expandedRows.has(row.id);
+                                  {eventGroup.swims.map((row, rowIdx) => {
+                                    const rowSplits = row.displaySplits || [];
+                                    const hasSplits = rowSplits.length > 0;
+                                    const rowKeyId = row.displayId;
+                                    const isExpanded = expandedRows.has(rowKeyId);
                                     const splitAnalysis = isExpanded
                                       ? calculateSplitBreakdown(
-                                          row.splits,
+                                          rowSplits,
                                           row.distance,
                                           row.splitInterval,
                                           row.splitType
                                         )
                                       : null;
                                     const behindSec =
-                                      isFinite(row.timeSeconds) &&
+                                      isFinite(row.displaySeconds) &&
                                       isFinite(eventGroup.fastestTimeSec)
-                                        ? row.timeSeconds - eventGroup.fastestTimeSec
+                                        ? row.displaySeconds - eventGroup.fastestTimeSec
                                         : Infinity;
                                     const displaySwimmer = formatSwimmerDisplay(
                                       row.swimmerName,
@@ -13067,20 +13266,39 @@ export default function App() {
                                       ? benchmarkIndex.evaluateSwim(
                                           displaySwimmer,
                                           row.eventLabel,
-                                          row.finalsTime,
+                                          row.displayTime,
                                           row.classYear
                                         )
                                       : [];
                                     const hitStds = evaluateStandardsForSwim(
                                       row.eventLabel,
-                                      row.finalsTime
+                                      row.displayTime
                                     );
                                     const teamHex = getTeamHexColor(row.teamCode, row.teamName);
-                            
+
+                                    const prevTierLabel =
+                                      rowIdx > 0
+                                        ? eventGroup.swims[rowIdx - 1].finalTierLabel
+                                        : '';
+                                    const showTierBanner =
+                                      eventGroup.hasSubHeaders &&
+                                      Boolean(row.finalTierLabel) &&
+                                      row.finalTierLabel !== prevTierLabel;
+
                                     return (
-                                      <React.Fragment key={row.id}>
+                                      <React.Fragment key={rowKeyId}>
+                                        {showTierBanner && (
+                                          <tr className="bg-slate-100/95 border-y border-slate-200">
+                                            <td
+                                              colSpan={8}
+                                              className="py-1.5 px-4 text-[11px] font-black uppercase tracking-widest text-slate-700"
+                                            >
+                                              {row.finalTierLabel}
+                                            </td>
+                                          </tr>
+                                        )}
                                         <tr
-                                          onClick={() => hasSplits && toggleRow(row.id)}
+                                          onClick={() => hasSplits && toggleRow(rowKeyId)}
                                           style={{
                                             boxShadow: `inset 4px 0 0 ${teamHex}`,
                                           }}
@@ -13106,19 +13324,19 @@ export default function App() {
                                             )}
                                           </td>
                                           <td className="py-3 px-3 text-center">
-                                            {row.place ? (
+                                            {row.displayPlace ? (
                                               <span
                                                 className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
-                                                  row.place === 1
+                                                  row.displayPlace === 1
                                                     ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                                                    : row.place === 2
+                                                    : row.displayPlace === 2
                                                     ? 'bg-slate-200 text-slate-800 border border-slate-300'
-                                                    : row.place === 3
+                                                    : row.displayPlace === 3
                                                     ? 'bg-orange-100 text-orange-800 border border-orange-300'
                                                     : 'bg-slate-100 text-slate-600'
                                                 }`}
                                               >
-                                                {row.place}
+                                                {row.displayPlace}
                                               </span>
                                             ) : (
                                               <span className="text-slate-400 text-xs">—</span>
@@ -13160,11 +13378,11 @@ export default function App() {
                                             </div>
                                             <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
                                               {row.classYear && <span>Class: {row.classYear}</span>}
-                                              {(row.heat || row.lane) && (
+                                              {(row.displayHeat || row.displayLane) && (
                                                 <span className="font-mono text-slate-400">
-                                                  {row.heat ? `Heat ${row.heat}` : ''}
-                                                  {row.heat && row.lane ? ' • ' : ''}
-                                                  {row.lane ? `Lane ${row.lane}` : ''}
+                                                  {row.displayHeat ? `Heat ${row.displayHeat}` : ''}
+                                                  {row.displayHeat && row.displayLane ? ' • ' : ''}
+                                                  {row.displayLane ? `Lane ${row.displayLane}` : ''}
                                                 </span>
                                               )}
                                             </div>
@@ -13175,7 +13393,7 @@ export default function App() {
                                             </div>
                                           </td>
                                           <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
-                                            {row.finalsTime}
+                                            {row.displayTime}
                                           </td>
                                           <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
                                             {isFinite(behindSec) ? (
@@ -13193,9 +13411,9 @@ export default function App() {
                                             )}
                                           </td>
                                           <td className="py-3 px-3 text-center font-mono text-xs tabular-nums">
-                                            {row.points > 0 ? (
+                                            {row.displayPoints > 0 ? (
                                               <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
-                                                {row.points}
+                                                {row.displayPoints}
                                               </span>
                                             ) : (
                                               <span className="text-slate-300">—</span>
@@ -13204,7 +13422,7 @@ export default function App() {
                                           <td className="py-3 pl-3 pr-5 text-right">
                                             {hasSplits ? (
                                               <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200/80">
-                                                {row.splits.length} splits
+                                                {rowSplits.length} splits
                                               </span>
                                             ) : (
                                               <span className="text-xs text-slate-400">
@@ -13223,7 +13441,7 @@ export default function App() {
                                                   <div className="text-xs font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
                                                     <Timer className="w-4 h-4 text-cyan-600" />
                                                     <span>
-                                                      Split Breakdown (
+                                                      {row.displayRound} Split Breakdown (
                                                       {splitAnalysis.stats?.interval || 50}y
                                                       Intervals) — {displaySwimmer}
                                                     </span>
@@ -13257,10 +13475,14 @@ export default function App() {
                                                         )}
                                                       </>
                                                     )}
-                                                    {(row.heat || row.lane) && (
+                                                    {(row.displayHeat || row.displayLane) && (
                                                       <span className="text-slate-500 font-mono">
-                                                        {row.heat ? `Heat ${row.heat}` : ''}{' '}
-                                                        {row.lane ? `• Lane ${row.lane}` : ''}
+                                                        {row.displayHeat
+                                                          ? `Heat ${row.displayHeat}`
+                                                          : ''}{' '}
+                                                        {row.displayLane
+                                                          ? `• Lane ${row.displayLane}`
+                                                          : ''}
                                                       </span>
                                                     )}
                                                   </div>
