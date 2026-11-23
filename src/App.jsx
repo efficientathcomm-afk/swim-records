@@ -712,6 +712,182 @@ function parseSDIFContent(content) {
         points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
       }
 
+      const strokeName = STROKE_MAP[strokeCode] || 'Unknown';
+      const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
+      const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
+      const effectiveFinalsTime = isSwimOffEvent
+        ? swimOffTimeRaw || prelimTimeRaw || seedTimeRaw || 'NT'
+        : finalsTimeRaw || prelimTimeRaw || 'NT';
+      const parsedSec = timeToSeconds(effectiveFinalsTime);
+      const parsedPrelimSec = timeToSeconds(prelimTimeRaw);
+      const parsedSeedSec = timeToSeconds(seedTimeRaw);
+
+      if (swimmerName && teamsMap.has(teamCode)) {
+        const roster = teamsMap.get(teamCode).swimmers;
+        if (!roster.has(swimmerName)) {
+          roster.set(swimmerName, {
+            name: swimmerName,
+            preferredFirst: '',
+            gender: genderLabel,
+            classYear: resolvedClass,
+            events: [eventLabel],
+          });
+        } else {
+          const existingSw = roster.get(swimmerName);
+          if (!existingSw.events.includes(eventLabel)) {
+            existingSw.events.push(eventLabel);
+          }
+          if (!existingSw.classYear && resolvedClass) {
+            existingSw.classYear = resolvedClass;
+          }
+        }
+      }
+
+      const d0Obj = {
+        id: `ind-${i}-${teamCode}-${eventNumber}`,
+        type: 'individual',
+        teamCode,
+        teamName: teamsMap.get(teamCode)?.name || teamCode,
+        swimmerName,
+        preferredFirst: '',
+        classYear: resolvedClass,
+        genderCode,
+        genderLabel,
+        distance: parseInt(distance, 10) || distance,
+        strokeCode,
+        strokeName,
+        eventNumber: parsedEventNum,
+        isSwimOff: isSwimOffEvent,
+        isExhibition,
+        eventLabel,
+        swimDate: swimIsoDate || meetInfo.isoDate || '',
+        seedTime: seedTimeRaw || '',
+        seedSeconds: parsedSeedSec === null ? Infinity : parsedSeedSec,
+        prelimTime: prelimTimeRaw || '',
+        prelimSeconds: parsedPrelimSec === null ? Infinity : parsedPrelimSec,
+        prelimHeat,
+        prelimLane,
+        prelimPlace,
+        swimOffTime: swimOffTimeRaw || '',
+        finalsOnlyTime: finalsTimeRaw || '',
+        finalsTime: effectiveFinalsTime,
+        timeSeconds: parsedSec === null ? Infinity : parsedSec,
+        course: COURSE_MAP[courseCode] || courseCode || 'SCY',
+        heat,
+        lane,
+        place,
+        points,
+        splitInterval: 50,
+        splitType: 'C',
+        splitPages: [],
+        splits: [],
+        prelimSplitPages: [],
+        prelimSplits: [],
+        finalsSplitPages: [],
+        finalsSplits: [],
+      };
+
+      individualResults.push(d0Obj);
+      lastD0 = d0Obj;
+      lastRecordType = 'D0';
+    } else if (recType === 'E0') {
+      const rawTeamSlice = sliceCol(line, 4, 9);
+      let teamCode = currentTeamContext || rawTeamSlice || 'UNAT';
+      if (!currentTeamContext && rawTeamSlice) {
+        for (const [registeredCode] of teamsMap.entries()) {
+          if (registeredCode === rawTeamSlice || registeredCode.startsWith(rawTeamSlice)) {
+            teamCode = registeredCode;
+            break;
+          }
+        }
+      }
+
+      const genderCode = sliceCol(line, 67, 67) || sliceCol(line, 66, 66);
+      const distance = sliceCol(line, 68, 71);
+      const strokeCode = sliceCol(line, 72, 72);
+      const eventNumber = sliceCol(line, 73, 76);
+
+      const postEventSegment = line.slice(80);
+      const dateMatch = postEventSegment.match(/(\d{8})/);
+      const afterDateIdx = dateMatch ? 80 + dateMatch.index + 8 : 94;
+      const timeZoneStr = line.slice(afterDateIdx, afterDateIdx + 38);
+      const afterFinalsMatch = line.slice(afterDateIdx).match(
+        /(?:(?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi
+      );
+      let tailZone = line.slice(afterDateIdx + 38, afterDateIdx + 68);
+      if (afterFinalsMatch && afterFinalsMatch.length > 0) {
+        const lastTok = afterFinalsMatch[afterFinalsMatch.length - 1];
+        const lastTokPos = line.slice(afterDateIdx).lastIndexOf(lastTok);
+        if (lastTokPos >= 0) {
+          tailZone = line.slice(
+            afterDateIdx + lastTokPos + lastTok.length,
+            afterDateIdx + lastTokPos + lastTok.length + 34
+          );
+        }
+      }
+
+      const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
+      const tailTokens = cleanedTail ? cleanedTail.split(/\s+/) : [];
+
+      const timeTokens = Array.from(
+        timeZoneStr.matchAll(/((?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
+      ).map((m) => ({
+        full: `${m[1]}${m[2] || ''}`.toUpperCase(),
+        clean: m[1].toUpperCase(),
+        course: (m[2] || '').toUpperCase(),
+      }));
+
+      let seedTimeRaw = '';
+      let prelimTimeRaw = '';
+      let finalsTimeRaw = '';
+      let courseCode = '';
+
+      if (timeTokens.length >= 3) {
+        seedTimeRaw = timeTokens[0].clean;
+        prelimTimeRaw = timeTokens[1].clean;
+        finalsTimeRaw = timeTokens[timeTokens.length - 1].clean;
+        courseCode =
+          timeTokens[timeTokens.length - 1].course || timeTokens[1].course || timeTokens[0].course;
+      } else if (timeTokens.length === 2) {
+        const hasPrelimTail = tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]);
+        if (hasPrelimTail) {
+          seedTimeRaw = timeTokens[0].clean;
+          prelimTimeRaw = timeTokens[1].clean;
+          courseCode = timeTokens[1].course || timeTokens[0].course;
+        } else {
+          seedTimeRaw = timeTokens[0].clean;
+          finalsTimeRaw = timeTokens[1].clean;
+          courseCode = timeTokens[1].course || timeTokens[0].course;
+        }
+      } else if (timeTokens.length === 1) {
+        finalsTimeRaw = timeTokens[0].clean;
+        courseCode = timeTokens[0].course;
+      }
+
+      let heat = '';
+      let lane = '';
+      let place = null;
+      let prelimPlace = null;
+      let points = 0;
+
+      if (prelimTimeRaw || (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]))) {
+        heat = tailTokens[2] && tailTokens[2] !== '0' ? tailTokens[2] : '';
+        lane = tailTokens[3] && tailTokens[3] !== '0' ? tailTokens[3] : '';
+        const pPlaceRaw = (tailTokens[4] || '').replace(/\./g, '');
+        prelimPlace = /^\d+$/.test(pPlaceRaw) && pPlaceRaw !== '0' ? parseInt(pPlaceRaw, 10) : null;
+        const fPlaceRaw = (tailTokens[5] || '').replace(/\./g, '');
+        place = /^\d+$/.test(fPlaceRaw) && fPlaceRaw !== '0' ? parseInt(fPlaceRaw, 10) : null;
+        const ptsTok = tailTokens[6] || '';
+        points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
+      } else {
+        heat = tailTokens[0] || '';
+        lane = tailTokens[1] || '';
+        const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
+        place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
+        const pointsToken = tailTokens[3] || '';
+        points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
+      }
+
       const rawRelayLetter = sliceCol(line, 11, 11);
       const relayLetter = /^[A-Z0-9]$/i.test(rawRelayLetter)
         ? rawRelayLetter.toUpperCase()
