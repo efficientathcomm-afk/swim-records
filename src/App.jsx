@@ -590,36 +590,36 @@ function parseSDIFContent(content) {
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
-      // Exact 1-based SDIF D0 Time Columns:
-      // Cols 95-102: Seed Time | Cols 103-110: Prelim Time | Cols 116-123: Finals Time
-      const seedTimeRaw = sliceCol(line, 95, 102);
-      const prelimTimeRaw = sliceCol(line, 103, 110);
-      const finalsTimeRaw = sliceCol(line, 116, 123);
+      // Exact 1-based SDIF D0 Time Columns in Hy-Tek WMM 8.0 CL2 files:
+      // Cols 98-105: Seed Time | Cols 107-114: Prelim Time | Cols 125-132: Finals Time
+      const seedTimeRaw = sliceCol(line, 98, 105);
+      const prelimTimeRaw = sliceCol(line, 107, 114);
+      const finalsTimeRaw = sliceCol(line, 125, 132);
       const courseCode =
-        (finalsTimeRaw || prelimTimeRaw || seedTimeRaw).slice(-1) || sliceCol(line, 123, 124);
+        (finalsTimeRaw || prelimTimeRaw || seedTimeRaw).slice(-1) || sliceCol(line, 132, 133);
 
       const isDiving = strokeCode === '6' || /H$/i.test(distance);
       const isExhibition =
-        sliceCol(line, 151, 158).toUpperCase().includes('X') ||
+        sliceCol(line, 151, 160).toUpperCase().includes('X') ||
         (parseInt(eventNumber, 10) || 0) >= 100;
       const isTimeTrial = (parseInt(eventNumber, 10) || 0) >= 100;
 
       // Exact 1-based SDIF D0 Heat / Lane / Place / Points (supports 10-lane pools without spaces):
-      // Col 125: Prelim Heat | Cols 126-127: Prelim Lane
-      // Col 129: Finals Heat | Cols 130-131: Finals Lane
-      // Cols 132-134: Prelim Place | Cols 135-137: Finals Place | Cols 138-143: Points
+      // Col 134: Prelim Heat | Cols 135-136: Prelim Lane
+      // Col 138: Finals Heat | Cols 139-140: Finals Lane
+      // Cols 141-143: Prelim Place | Cols 144-146: Finals Place | Cols 147-152: Points
       const parseIntField = (s) => {
         const clean = String(s || '').replace(/\./g, '').trim();
         return /^\d+$/.test(clean) ? parseInt(clean, 10) : 0;
       };
 
-      const pHeatNum = parseIntField(sliceCol(line, 125, 125));
-      const pLaneNum = parseIntField(sliceCol(line, 126, 127));
-      const fHeatNum = parseIntField(sliceCol(line, 129, 129));
-      const fLaneNum = parseIntField(sliceCol(line, 130, 131));
-      const pPlaceNum = parseIntField(sliceCol(line, 132, 134));
-      const fPlaceNum = parseIntField(sliceCol(line, 135, 137));
-      const ptsRaw = sliceCol(line, 138, 143);
+      const pHeatNum = parseIntField(sliceCol(line, 134, 134));
+      const pLaneNum = parseIntField(sliceCol(line, 135, 136));
+      const fHeatNum = parseIntField(sliceCol(line, 138, 138));
+      const fLaneNum = parseIntField(sliceCol(line, 139, 140));
+      const pPlaceNum = parseIntField(sliceCol(line, 141, 143));
+      const fPlaceNum = parseIntField(sliceCol(line, 144, 146));
+      const ptsRaw = sliceCol(line, 147, 152);
       const ptsVal = parseFloat(ptsRaw);
       const points = !Number.isNaN(ptsVal) && ptsVal > 0 ? ptsVal : 0;
 
