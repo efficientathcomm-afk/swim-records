@@ -591,20 +591,13 @@ function parseSDIFContent(content) {
 
       const afterDateIdx = dateMatch ? 80 + dateMatch.index + 8 : 94;
       const timeZoneStr = line.slice(afterDateIdx, afterDateIdx + 38);
-      const afterFinalsMatch = line.slice(afterDateIdx).match(
-        /(?:(?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi
-      );
-      let tailZone = line.slice(afterDateIdx + 38, afterDateIdx + 68);
-      if (afterFinalsMatch && afterFinalsMatch.length > 0) {
-        const lastTok = afterFinalsMatch[afterFinalsMatch.length - 1];
-        const lastTokPos = line.slice(afterDateIdx).lastIndexOf(lastTok);
-        if (lastTokPos >= 0) {
-          tailZone = line.slice(afterDateIdx + lastTokPos + lastTok.length, afterDateIdx + lastTokPos + lastTok.length + 34);
-        }
-      }
 
       // Stop before trailing division/status code (e.g. '0100' or '01' at end of line)
       const isExhibition = /X[A-Z0-9]{2,4}\s*$/i.test(line.slice(145));
+      // Fixed SDIF D0 layout: time slots occupy cols 95..138 (after date), and placement/points
+      // occupy cols 139..152 (before division/status codes). Slice starting after the time zone.
+      const fixedTailStart = Math.max(afterDateIdx + 38, 138);
+      const tailZone = line.slice(fixedTailStart, fixedTailStart + 18);
       const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
       const tailTokens = cleanedTail ? cleanedTail.split(/\s+/) : [];
 
@@ -725,7 +718,8 @@ function parseSDIFContent(content) {
       const parsedFinalsSec = timeToSeconds(effectiveFinalsTime);
       const parsedPrelimSec = timeToSeconds(prelimTimeRaw);
       const parsedSeedSec = timeToSeconds(seedTimeRaw);
-      const prefFirst = sliceCol(line, 121, 130);
+      // Preferred first name only appears on D3 records in SDIF; never slice into the D0 tail zone.
+      const prefFirst = '';
 
       const d0Obj = {
         id: `ind-${i}-${teamCode}-${eventNumber}`,
