@@ -601,6 +601,7 @@ function parseSDIFContent(content) {
         timeZoneStr.matchAll(/((?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
       ).map((m) => ({
         full: `${m[1]}${m[2] || ''}`.toUpperCase(),
+        clean: m[1].toUpperCase(),
         course: (m[2] || '').toUpperCase(),
         offset: m.index ?? 0,
       }));
@@ -613,39 +614,39 @@ function parseSDIFContent(content) {
 
       if (isSwimOffEvent) {
         if (timeTokens.length >= 2) {
-          seedTimeRaw = timeTokens[0].full;
-          swimOffTimeRaw = timeTokens[1].full;
+          seedTimeRaw = timeTokens[0].clean;
+          swimOffTimeRaw = timeTokens[1].clean;
           courseCode = timeTokens[1].course || timeTokens[0].course;
         } else if (timeTokens.length === 1) {
-          swimOffTimeRaw = timeTokens[0].full;
+          swimOffTimeRaw = timeTokens[0].clean;
           courseCode = timeTokens[0].course;
         }
       } else if (timeTokens.length >= 3) {
-        // Seed + Prelim + Finals (e.g. 5:08.46Y, 5:08.22Y, 5:09.65Y)
-        seedTimeRaw = timeTokens[0].full;
-        prelimTimeRaw = timeTokens[1].full;
-        finalsTimeRaw = timeTokens[timeTokens.length - 1].full;
+        // Seed + Prelim + Finals (e.g. 5:08.46Y, 5:08.22Y, 5:09.65Y -> 5:08.46, 5:08.22, 5:09.65)
+        seedTimeRaw = timeTokens[0].clean;
+        prelimTimeRaw = timeTokens[1].clean;
+        finalsTimeRaw = timeTokens[timeTokens.length - 1].clean;
         courseCode =
           timeTokens[timeTokens.length - 1].course || timeTokens[1].course || timeTokens[0].course;
       } else if (timeTokens.length === 2) {
         const hasPrelimTail = tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]);
         if (hasPrelimTail) {
           // Seed + Prelim only (e.g. Erik Floren Smith: 49.74Y Seed, 48.46Y Prelim, no Finals)
-          seedTimeRaw = timeTokens[0].full;
-          prelimTimeRaw = timeTokens[1].full;
+          seedTimeRaw = timeTokens[0].clean;
+          prelimTimeRaw = timeTokens[1].clean;
           courseCode = timeTokens[1].course || timeTokens[0].course;
         } else {
           // Dual meet / Timed Final with Seed + Finals
-          seedTimeRaw = timeTokens[0].full;
-          finalsTimeRaw = timeTokens[1].full;
+          seedTimeRaw = timeTokens[0].clean;
+          finalsTimeRaw = timeTokens[1].clean;
           courseCode = timeTokens[1].course || timeTokens[0].course;
         }
       } else if (timeTokens.length === 1) {
         const hasPrelimTail = tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]);
         if (hasPrelimTail && tailTokens[2] === '0' && tailTokens[3] === '0') {
-          prelimTimeRaw = timeTokens[0].full;
+          prelimTimeRaw = timeTokens[0].clean;
         } else {
-          finalsTimeRaw = timeTokens[0].full;
+          finalsTimeRaw = timeTokens[0].clean;
         }
         courseCode = timeTokens[0].course;
       }
