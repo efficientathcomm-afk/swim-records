@@ -594,12 +594,6 @@ function parseSDIFContent(content) {
 
       // Stop before trailing division/status code (e.g. '0100' or '01' at end of line)
       const isExhibition = /X[A-Z0-9]{2,4}\s*$/i.test(line.slice(145));
-      // Fixed SDIF D0 layout: time slots occupy cols 95..138 (after date), and placement/points
-      // occupy cols 139..152 (before division/status codes). Slice starting after the time zone.
-      const fixedTailStart = Math.max(afterDateIdx + 38, 138);
-      const tailZone = line.slice(fixedTailStart, fixedTailStart + 18);
-      const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
-      const tailTokens = cleanedTail ? cleanedTail.split(/\s+/) : [];
 
       const timeTokens = Array.from(
         timeZoneStr.matchAll(/((?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
@@ -609,6 +603,17 @@ function parseSDIFContent(content) {
         course: (m[2] || '').toUpperCase(),
         offset: m.index ?? 0,
       }));
+
+      // Locate the tail right after the last time token in timeZoneStr (regardless of whether
+      // the D0 line has a 12-char USS ID or blank spaces), rather than a hardcoded col 138.
+      let tailStartIdx = afterDateIdx + 38;
+      if (timeTokens.length > 0) {
+        const lastTok = timeTokens[timeTokens.length - 1];
+        tailStartIdx = afterDateIdx + lastTok.offset + lastTok.full.length;
+      }
+      const tailZone = line.slice(tailStartIdx, tailStartIdx + 24);
+      const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
+      const tailTokens = cleanedTail ? cleanedTail.split(/\s+/) : [];
 
       let seedTimeRaw = '';
       let prelimTimeRaw = '';
