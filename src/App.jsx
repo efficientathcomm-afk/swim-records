@@ -590,23 +590,25 @@ function parseSDIFContent(content) {
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
-      // Exact SDIF D0 Time Columns:
-      // Cols 95-102: Seed Time | Cols 103-110: Prelim Time | Cols 111-115: Swim-Off | Cols 116-123: Finals Time
-      const seedTimeRaw = sliceCol(line, 95, 102);
-      const prelimTimeRaw = sliceCol(line, 103, 110);
-      const finalsTimeRaw = sliceCol(line, 116, 123);
-      const courseCode = sliceCol(line, 124, 124);
+      // Exact Hy-Tek WMM 8.0 D0 Time Columns (after 8-char swim date at cols 87-94):
+      // Cols 96-103: Seed Time | Cols 105-112: Prelim Time | Cols 114-121: Swim-Off | Cols 123-130: Finals Time
+      const seedTimeRaw = sliceCol(line, 96, 103);
+      const prelimTimeRaw = sliceCol(line, 105, 112);
+      const finalsTimeRaw = sliceCol(line, 123, 130);
+      const courseCode =
+        (finalsTimeRaw || prelimTimeRaw || seedTimeRaw).slice(-1) || sliceCol(line, 130, 131);
 
       const isDiving = strokeCode === '6' || /H$/i.test(distance);
       const isExhibition =
-        sliceCol(line, 152, 152).toUpperCase() === 'X' ||
+        sliceCol(line, 155, 160).toUpperCase().includes('X') ||
         (parseInt(eventNumber, 10) || 0) >= 100;
       const isTimeTrial = (parseInt(eventNumber, 10) || 0) >= 100;
 
-      // Parse cols 125-152:
+      // Parse cols 132-158:
       // Prelims/Finals layout: PrelimHeat, PrelimLane, FinalsHeat, FinalsLane, PrelimPlace, FinalsPlace, Points
-      // Timed-Finals / Diving layout: Heat, Lane, Place, Points (or Heat, Lane, FinalsPlace, Points)
-      const tailTokens = line.slice(125, 152).trim().split(/\s+/).filter(Boolean);
+      // Prelims-only layout:   PrelimHeat, PrelimLane, 0, 0, PrelimPlace (with trailing event/flags ignored)
+      // Timed-Finals / Diving: 1, Lane, FinalsPlace, Points
+      const tailTokens = line.slice(131, 156).trim().split(/\s+/).filter(Boolean);
       const pointsToken = tailTokens.find((t) => /^\d+\.$/.test(t)) || '';
       const points = pointsToken ? parseFloat(pointsToken) : 0;
       const nonPtTokens = tailTokens
@@ -626,25 +628,34 @@ function parseSDIFContent(content) {
       if (nonPtTokens.length >= 6) {
         prelimHeat = nonPtTokens[0];
         prelimLane = nonPtTokens[1];
-        finalsHeat = nonPtTokens[2];
-        finalsLane = nonPtTokens[3];
+        finalsHeat = nonPtTokens[2] !== '0' ? nonPtTokens[2] : '';
+        finalsLane = nonPtTokens[3] !== '0' ? nonPtTokens[3] : '';
         const pPl = parseInt(nonPtTokens[4], 10);
         const fPl = parseInt(nonPtTokens[5], 10);
         prelimPlace = pPl > 0 ? pPl : null;
-        place = fPl > 0 ? fPl : null;
+        if (finalsTimeRaw) {
+          place = fPl > 0 ? fPl : null;
+        } else {
+          // Prelims-only swimmer (e.g. "1 6 0 0 31"): 5th token is PrelimPlace
+          place = prelimPlace;
+        }
         heat = finalsHeat || prelimHeat;
         lane = finalsLane || prelimLane;
       } else if (nonPtTokens.length === 5) {
         prelimHeat = nonPtTokens[0];
         prelimLane = nonPtTokens[1];
-        finalsHeat = nonPtTokens[2];
-        finalsLane = nonPtTokens[3];
-        const fPl = parseInt(nonPtTokens[4], 10);
-        place = fPl > 0 ? fPl : null;
+        finalsHeat = nonPtTokens[2] !== '0' ? nonPtTokens[2] : '';
+        finalsLane = nonPtTokens[3] !== '0' ? nonPtTokens[3] : '';
+        const fifth = parseInt(nonPtTokens[4], 10);
+        if (finalsTimeRaw) {
+          place = fifth > 0 ? fifth : null;
+        } else {
+          prelimPlace = fifth > 0 ? fifth : null;
+          place = prelimPlace;
+        }
         heat = finalsHeat || prelimHeat;
         lane = finalsLane || prelimLane;
       } else if (nonPtTokens.length === 4) {
-        // Timed finals / distance / diving where Prelims heat/lane are blank (0 0) or omitted
         if (nonPtTokens[0] === '0' && nonPtTokens[1] === '0') {
           const fPl = parseInt(nonPtTokens[3], 10);
           place = fPl > 0 ? fPl : null;
@@ -5328,26 +5339,41 @@ const rRowId = `cl2-lo-${entry.id}`;
     const eventsHtml = orderedEvents
       .map((evGrp) => {
         const sortedEntries = [...evGrp.entries].sort((a, b) => {
-          const pA = a.place ?? 9999;
-          const pB = b.place ?? 9999;
+          if (!evGrp.isRelay) {
+            const hasFinA = Boolean(a.finalsOnlyTime);
+            const hasFinB = Boolean(b.finalsOnlyTime);
+            if (hasFinA !== hasFinB) return hasFinA ? -1 : 1;
+          }
+          const pA = a.place ?? a.prelimPlace ?? 9999;
+          const pB = b.place ?? b.prelimPlace ?? 9999;
           if (pA !== pB) return pA - pB;
+          if (a.isDiving) return (b.timeSeconds ?? 0) - (a.timeSeconds ?? 0);
           return (a.timeSeconds ?? Infinity) - (b.timeSeconds ?? Infinity);
         });
         const validTimes = sortedEntries
           .map((e) => e.timeSeconds)
           .filter((t) => Number.isFinite(t));
-        const fastestSec = validTimes.length > 0 ? Math.min(...validTimes) : Infinity;
+        const fastestSec =
+          validTimes.length > 0
+            ? sortedEntries[0]?.isDiving
+              ? Math.max(...validTimes)
+              : Math.min(...validTimes)
+            : Infinity;
 
         const rowsHtml = sortedEntries
           .map((row) => {
             const teamHex = getTeamHexColor(row.teamCode, row.teamName);
             const behindSec =
               Number.isFinite(row.timeSeconds) && Number.isFinite(fastestSec)
-                ? row.timeSeconds - fastestSec
+                ? row.isDiving
+                  ? fastestSec - row.timeSeconds
+                  : row.timeSeconds - fastestSec
                 : Infinity;
             const behindLabel = Number.isFinite(behindSec)
               ? behindSec < 0.005
                 ? '<span class="tag-winner">Winner</span>'
+                : row.isDiving
+                ? `-${behindSec.toFixed(2)}`
                 : `+${behindSec.toFixed(2)}s`
               : '—';
 
@@ -5440,11 +5466,18 @@ const rRowId = `cl2-lo-${entry.id}`;
 
             // Individual Swim Row
             const dispName = formatSwimmerDisplay(row.swimmerName, row.preferredFirst);
-            const tags = isPrimary
-              ? benchmarkIndex.evaluateSwim(dispName, row.eventLabel, row.finalsTime, row.classYear)
+            const tags =
+              isPrimary && !row.isDiving
+                ? benchmarkIndex.evaluateSwim(dispName, row.eventLabel, row.finalsTime, row.classYear)
+                : [];
+            const hitStds = !row.isDiving
+              ? evaluateStandardsForSwim(row.eventLabel, row.finalsTime)
               : [];
-            const hitStds = evaluateStandardsForSwim(row.eventLabel, row.finalsTime);
+            const isPrelimOnly = !row.finalsOnlyTime && Boolean(row.prelimTime);
             const badgesHtml = [
+              ...(isPrelimOnly
+                ? ['<span class="badge badge-std">Prelims</span>']
+                : []),
               ...tags.map((t) => `<span class="badge badge-rec">${escapeHtml(t.label)}</span>`),
               ...hitStds.map((s) => `<span class="badge badge-std">${escapeHtml(s.label)}</span>`),
             ].join('');
@@ -5545,6 +5578,12 @@ const rRowId = `cl2-lo-${entry.id}`;
               row.heat ? `Heat ${escapeHtml(row.heat)}` : ''
             }${row.heat && row.lane ? ' • ' : ''}${
               row.lane ? `Lane ${escapeHtml(row.lane)}` : ''
+            }${
+              row.prelimTime && row.finalsOnlyTime
+                ? ` • Prelims: ${escapeHtml(row.prelimTime)}${
+                    row.prelimPlace ? ` (#${row.prelimPlace})` : ''
+                  }`
+                : ''
             }</div>
               </td>
               <td>${escapeHtml(row.teamName)}</td>
