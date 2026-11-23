@@ -721,21 +721,31 @@ function parseSDIFContent(content) {
         place = /^\d+$/.test(fPlaceRaw) && fPlaceRaw !== '0' ? parseInt(fPlaceRaw, 10) : null;
         points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
       } else {
-        const fHeatRaw = tailZone.slice(0, 2).trim();
-        const fLaneRaw = tailZone.slice(2, 4).trim();
-        const remainderClean = tailZone
-          .slice(4)
-          .replace(/\s+\d{4}\s*$/, '')
-          .replace(/\s+0\d\s*$/, '')
-          .trim();
-        const remTokens = remainderClean ? remainderClean.split(/\s+/) : [];
+        // Timed-final / dual-meet tail: [finalsHeat, finalsLane, finalsPlace, points]
+        // Expand any glued 3+ digit heat+lane token (e.g., "110" -> ["1", "10"])
+        const tfTokens = [];
+        for (let tIdx = 0; tIdx < tailTokens.length; tIdx++) {
+          const tok = tailTokens[tIdx];
+          if (/^\d+\.$/.test(tok)) {
+            tfTokens.push(tok);
+            break;
+          }
+          if (/^\d{3,}$/.test(tok) && Number(tok.slice(1)) >= 10) {
+            tfTokens.push(tok.slice(0, 1), tok.slice(1));
+          } else {
+            tfTokens.push(tok);
+          }
+        }
+
+        const fHeatRaw = tfTokens[0] || '';
+        const fLaneRaw = tfTokens[1] || '';
+        const fPlaceRaw = String(tfTokens[2] || '').replace(/\./g, '');
+        const ptsTok = tfTokens[3] || '';
 
         heat = fHeatRaw && fHeatRaw !== '0' ? fHeatRaw : '';
         lane = fLaneRaw && fLaneRaw !== '0' ? fLaneRaw : '';
-        const placeRaw = (remTokens[0] || '').replace(/\./g, '');
-        place = /^\d+$/.test(placeRaw) && placeRaw !== '0' ? parseInt(placeRaw, 10) : null;
-        const pointsToken = remTokens[1] || '';
-        points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
+        place = /^\d+$/.test(fPlaceRaw) && fPlaceRaw !== '0' ? parseInt(fPlaceRaw, 10) : null;
+        points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
       }
 
       const strokeName = STROKE_MAP[strokeCode] || `Stroke ${strokeCode}`;
