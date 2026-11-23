@@ -581,32 +581,74 @@ function parseSDIFContent(content) {
       const parsedEventNum = parseInt(eventNumber, 10) || eventNumber;
       const isSwimOffEvent = typeof parsedEventNum === 'number' && parsedEventNum >= 900;
 
-      // Cols 85-92 hold Swim Date (MMDDYYYY) in standard Hy-Tek D0 lines (fallback 94-101)
-      const rawSwimDate = sliceCol(line, 83, 90) || sliceCol(line, 85, 92) || sliceCol(line, 94, 101);
+      // Anchor directly on the 8-digit Swim Date (MMDDYYYY) after col 80 so lines with or without
+      // a 12-char USS ID never shift the Seed / Prelim / Swim-Off / Finals time slots.
+      const postEventSegment = line.slice(80);
+      const dateMatch = postEventSegment.match(/(\d{8})/);
+      const rawSwimDate = dateMatch ? dateMatch[1] : '';
       const swimIsoDate =
-        /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
-          ? formatSdifDate(rawSwimDate)
-          : '';
+        rawSwimDate && rawSwimDate !== '00000000' ? formatSdifDate(rawSwimDate) : '';
 
-      // Exact 1-based Hy-Tek D0 time slots (each 8 chars wide, matching original col 116..123 Finals):
-      // Cols 91-98: Seed Time (8 chars)
-      // Cols 100-107: Prelim Time (8 chars, e.g. '5:08.22Y')
-      // Cols 109-116: Swim-Off Time (8 chars)
-      // Cols 118-125: Finals Time (8 chars, e.g. '5:09.65Y' or '  48.76Y')
-      const seedTimeRaw = sliceCol(line, 91, 98);
-      const prelimTimeRaw = sliceCol(line, 100, 107);
-      const swimOffTimeRaw = sliceCol(line, 109, 116);
-      const finalsTimeRaw = sliceCol(line, 118, 125) || sliceCol(line, 116, 123);
-      const courseCode =
-        sliceCol(line, 125, 125) ||
-        sliceCol(line, 116, 116) ||
-        sliceCol(line, 107, 107) ||
-        sliceCol(line, 124, 124);
-      const tailZone = line.slice(125, 156);
+      const afterDateIdx = dateMatch ? 80 + dateMatch.index + 8 : 94;
+      const timeZoneStr = line.slice(afterDateIdx, afterDateIdx + 38);
+      const tailZone = line.slice(afterDateIdx + 38, afterDateIdx + 68);
 
       // Stop before trailing division/status code (e.g. '0100' or '01' at end of line)
       const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
       const tailTokens = cleanedTail ? cleanedTail.split(/\s+/) : [];
+
+      const timeTokens = Array.from(
+        timeZoneStr.matchAll(/((?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
+      ).map((m) => ({
+        full: `${m[1]}${m[2] || ''}`.toUpperCase(),
+        course: (m[2] || '').toUpperCase(),
+        offset: m.index ?? 0,
+      }));
+
+      let seedTimeRaw = '';
+      let prelimTimeRaw = '';
+      let swimOffTimeRaw = '';
+      let finalsTimeRaw = '';
+      let courseCode = '';
+
+      if (isSwimOffEvent) {
+        if (timeTokens.length >= 2) {
+          seedTimeRaw = timeTokens[0].full;
+          swimOffTimeRaw = timeTokens[1].full;
+          courseCode = timeTokens[1].course || timeTokens[0].course;
+        } else if (timeTokens.length === 1) {
+          swimOffTimeRaw = timeTokens[0].full;
+          courseCode = timeTokens[0].course;
+        }
+      } else if (timeTokens.length >= 3) {
+        // Seed + Prelim + Finals (e.g. 5:08.46Y, 5:08.22Y, 5:09.65Y)
+        seedTimeRaw = timeTokens[0].full;
+        prelimTimeRaw = timeTokens[1].full;
+        finalsTimeRaw = timeTokens[timeTokens.length - 1].full;
+        courseCode =
+          timeTokens[timeTokens.length - 1].course || timeTokens[1].course || timeTokens[0].course;
+      } else if (timeTokens.length === 2) {
+        const hasPrelimTail = tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]);
+        if (hasPrelimTail) {
+          // Seed + Prelim only (e.g. Erik Floren Smith: 49.74Y Seed, 48.46Y Prelim, no Finals)
+          seedTimeRaw = timeTokens[0].full;
+          prelimTimeRaw = timeTokens[1].full;
+          courseCode = timeTokens[1].course || timeTokens[0].course;
+        } else {
+          // Dual meet / Timed Final with Seed + Finals
+          seedTimeRaw = timeTokens[0].full;
+          finalsTimeRaw = timeTokens[1].full;
+          courseCode = timeTokens[1].course || timeTokens[0].course;
+        }
+      } else if (timeTokens.length === 1) {
+        const hasPrelimTail = tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]);
+        if (hasPrelimTail && tailTokens[2] === '0' && tailTokens[3] === '0') {
+          prelimTimeRaw = timeTokens[0].full;
+        } else {
+          finalsTimeRaw = timeTokens[0].full;
+        }
+        courseCode = timeTokens[0].course;
+      }
 
       let heat = '';
       let lane = '';
