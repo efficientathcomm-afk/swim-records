@@ -678,21 +678,13 @@ function parseSDIFContent(content) {
       if (isPrelimFinalsFormat) {
         // Parse the tail tokens directly in order:
         // [prelimHeat, prelimLane, finalsHeat, finalsLane, prelimPlace, finalsPlace, points]
-        // Handle both merged 2-digit prelim lanes (e.g. "410" -> pHeat=4, pLane=10)
-        // and merged 2-digit finals lanes (e.g. "310" -> fHeat=3, fLane=10).
-        const firstTok = tailTokens[0] || '';
-        const hasMergedPrelimHeatLane =
-          /^\d{3,}$/.test(firstTok) && Number(firstTok.slice(1)) >= 10;
-
-        if (hasMergedPrelimHeatLane) {
-          prelimHeat = firstTok.slice(0, 1) !== '0' ? firstTok.slice(0, 1) : '';
-          prelimLane = firstTok.slice(1);
-
-          const fHeatTok = tailTokens[1] || '';
-          const fLaneTok = tailTokens[2] || '';
-          const pPlaceTok = tailTokens[3] || '';
-          const fPlaceTok = tailTokens[4] || '';
-          const ptsTok = tailTokens[5] || '';
+        // Note: in a 2-digit lane like "310" (finalsHeat=3, finalsLane=10), the token is "310"
+        const pHeatTok = tailTokens[0] || '';
+        const pLaneTok = tailTokens[1] || '';
+        const fHeatLaneTok = tailTokens[2] || '';
+        const pPlaceTok = tailTokens[3] || '';
+        const fPlaceTok = tailTokens[4] || '';
+        const ptsTok = tailTokens[5] || '';
 
         prelimHeat = pHeatTok && pHeatTok !== '0' ? pHeatTok : '';
         prelimLane = pLaneTok && pLaneTok !== '0' ? pLaneTok : '';
