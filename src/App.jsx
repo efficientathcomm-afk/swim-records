@@ -590,100 +590,49 @@ function parseSDIFContent(content) {
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
-      // Verified Hy-Tek SDIF D0 Time Columns (1-based):
-      // Cols 95-102: Seed Time | Cols 103-110: Prelim Time | Cols 116-123: Finals Time
-      const seedTimeRaw = sliceCol(line, 95, 102);
-      const prelimTimeRaw = sliceCol(line, 103, 110);
-      const finalsTimeRaw = sliceCol(line, 116, 123);
+      // Verified 1-based Hy-Tek WMM 8.0 SDIF D0 Time Columns:
+      // Cols 99-106: Seed Time | Cols 108-115: Prelim Time | Cols 126-133: Finals Time
+      const seedTimeRaw = sliceCol(line, 99, 106);
+      const prelimTimeRaw = sliceCol(line, 108, 115);
+      const finalsTimeRaw = sliceCol(line, 126, 133);
       const courseCode =
-        (finalsTimeRaw || prelimTimeRaw || seedTimeRaw).slice(-1) || sliceCol(line, 123, 124);
+        (finalsTimeRaw || prelimTimeRaw || seedTimeRaw).slice(-1) || sliceCol(line, 133, 134);
 
       const isDiving = strokeCode === '6' || /H$/i.test(distance);
       const isExhibition =
-        sliceCol(line, 150, 158).toUpperCase().includes('X') ||
+        sliceCol(line, 155, 162).toUpperCase().includes('X') ||
         (parseInt(eventNumber, 10) || 0) >= 100;
       const isTimeTrial = (parseInt(eventNumber, 10) || 0) >= 100;
 
-      // Parse strictly cols 125-149 (stopping before col 150 division code "0100" / "0500"):
-      // Prelims/Finals: PrelimHeat, PrelimLane, FinalsHeat, FinalsLane, PrelimPlace, FinalsPlace, Points
-      // Prelims-only:   PrelimHeat, PrelimLane, 0, 0, PrelimPlace
-      // Timed-Finals:   1, Lane, FinalsPlace, Points
-      const tailTokens = line.slice(124, 149).trim().split(/\s+/).filter(Boolean);
-      const pointsToken = tailTokens.find((t) => /^\d+\.$/.test(t)) || '';
-      const points = pointsToken ? parseFloat(pointsToken) : 0;
-      const nonPtTokens = tailTokens
-        .filter((t) => !/^\d+\.$/.test(t))
-        .map((t) => t.replace(/\./g, ''))
-        .filter((t) => /^\d+$/.test(t));
+      // Fixed-width 1-based Hy-Tek WMM 8.0 Heat / Lane / Place / Points (supports 10-lane pools without spaces):
+      // Col 135: Prelim Heat | Cols 136-137: Prelim Lane
+      // Col 139: Finals Heat | Cols 140-141: Finals Lane
+      // Cols 142-144: Prelim Place | Cols 145-147: Finals Place | Cols 148-153: Points
+      const parseIntField = (s) => {
+        const clean = String(s || '').replace(/\./g, '').trim();
+        return /^\d+$/.test(clean) ? parseInt(clean, 10) : 0;
+      };
 
-      let heat = '';
-      let lane = '';
-      let prelimHeat = '';
-      let prelimLane = '';
-      let finalsHeat = '';
-      let finalsLane = '';
-      let prelimPlace = null;
-      let place = null;
+      const pHeatNum = parseIntField(sliceCol(line, 135, 135));
+      const pLaneNum = parseIntField(sliceCol(line, 136, 137));
+      const fHeatNum = parseIntField(sliceCol(line, 139, 139));
+      const fLaneNum = parseIntField(sliceCol(line, 140, 141));
+      const pPlaceNum = parseIntField(sliceCol(line, 142, 144));
+      const fPlaceNum = parseIntField(sliceCol(line, 145, 147));
+      const ptsRaw = sliceCol(line, 148, 153);
+      const ptsVal = parseFloat(ptsRaw);
+      const points = !Number.isNaN(ptsVal) && ptsVal > 0 ? ptsVal : 0;
 
-      if (nonPtTokens.length >= 6) {
-        prelimHeat = nonPtTokens[0];
-        prelimLane = nonPtTokens[1];
-        finalsHeat = nonPtTokens[2] !== '0' ? nonPtTokens[2] : '';
-        finalsLane = nonPtTokens[3] !== '0' ? nonPtTokens[3] : '';
-        const pPl = parseInt(nonPtTokens[4], 10);
-        const fPl = parseInt(nonPtTokens[5], 10);
-        prelimPlace = pPl > 0 ? pPl : null;
-        if (finalsTimeRaw) {
-          place = fPl > 0 ? fPl : null;
-        } else {
-          // Prelims-only swimmer (e.g. "1 6 0 0 31"): 5th token is PrelimPlace
-          place = prelimPlace;
-        }
-        heat = finalsHeat || prelimHeat;
-        lane = finalsLane || prelimLane;
-      } else if (nonPtTokens.length === 5) {
-        prelimHeat = nonPtTokens[0];
-        prelimLane = nonPtTokens[1];
-        finalsHeat = nonPtTokens[2] !== '0' ? nonPtTokens[2] : '';
-        finalsLane = nonPtTokens[3] !== '0' ? nonPtTokens[3] : '';
-        const fifth = parseInt(nonPtTokens[4], 10);
-        if (finalsTimeRaw) {
-          place = fifth > 0 ? fifth : null;
-        } else {
-          prelimPlace = fifth > 0 ? fifth : null;
-          place = prelimPlace;
-        }
-        heat = finalsHeat || prelimHeat;
-        lane = finalsLane || prelimLane;
-      } else if (nonPtTokens.length === 4) {
-        if (nonPtTokens[0] === '0' && nonPtTokens[1] === '0') {
-          const fPl = parseInt(nonPtTokens[3], 10);
-          place = fPl > 0 ? fPl : null;
-        } else {
-          heat = nonPtTokens[0];
-          lane = nonPtTokens[1];
-          const pPl = parseInt(nonPtTokens[2], 10);
-          const fPl = parseInt(nonPtTokens[3], 10);
-          if (finalsTimeRaw) {
-            prelimPlace = pPl > 0 ? pPl : null;
-            place = fPl > 0 ? fPl : null;
-          } else {
-            prelimPlace = fPl > 0 ? fPl : pPl > 0 ? pPl : null;
-            place = prelimPlace;
-          }
-        }
-      } else if (nonPtTokens.length === 3) {
-        heat = nonPtTokens[0];
-        lane = nonPtTokens[1];
-        const pl = parseInt(nonPtTokens[2], 10);
-        place = pl > 0 ? pl : null;
-        if (!finalsTimeRaw && prelimTimeRaw) {
-          prelimPlace = place;
-        }
-      } else if (nonPtTokens.length === 2) {
-        heat = nonPtTokens[0];
-        lane = nonPtTokens[1];
-      }
+      const prelimHeat = pHeatNum > 0 ? String(pHeatNum) : '';
+      const prelimLane = pLaneNum > 0 ? String(pLaneNum) : '';
+      const finalsHeat = fHeatNum > 0 ? String(fHeatNum) : '';
+      const finalsLane = fLaneNum > 0 ? String(fLaneNum) : '';
+      const prelimPlace = pPlaceNum > 0 ? pPlaceNum : null;
+      const finalsPlace = fPlaceNum > 0 ? fPlaceNum : null;
+
+      const place = finalsTimeRaw ? finalsPlace : prelimPlace;
+      const heat = finalsTimeRaw ? finalsHeat || prelimHeat : prelimHeat || finalsHeat;
+      const lane = finalsTimeRaw ? finalsLane || prelimLane : prelimLane || finalsLane;
 
       const strokeName = IND_STROKE_MAP[strokeCode] || STROKE_MAP[strokeCode] || `Stroke ${strokeCode}`;
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
