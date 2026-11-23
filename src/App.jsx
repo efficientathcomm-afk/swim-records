@@ -591,7 +591,17 @@ function parseSDIFContent(content) {
 
       const afterDateIdx = dateMatch ? 80 + dateMatch.index + 8 : 94;
       const timeZoneStr = line.slice(afterDateIdx, afterDateIdx + 38);
-      const tailZone = line.slice(afterDateIdx + 38, afterDateIdx + 68);
+      const afterFinalsMatch = line.slice(afterDateIdx).match(
+        /(?:(?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi
+      );
+      let tailZone = line.slice(afterDateIdx + 38, afterDateIdx + 68);
+      if (afterFinalsMatch && afterFinalsMatch.length > 0) {
+        const lastTok = afterFinalsMatch[afterFinalsMatch.length - 1];
+        const lastTokPos = line.slice(afterDateIdx).lastIndexOf(lastTok);
+        if (lastTokPos >= 0) {
+          tailZone = line.slice(afterDateIdx + lastTokPos + lastTok.length, afterDateIdx + lastTokPos + lastTok.length + 34);
+        }
+      }
 
       // Stop before trailing division/status code (e.g. '0100' or '01' at end of line)
       const isExhibition = /X[A-Z0-9]{2,4}\s*$/i.test(line.slice(145));
@@ -666,30 +676,44 @@ function parseSDIFContent(content) {
           (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4])));
 
       if (isPrelimFinalsFormat) {
-        // Fixed 2-char fields immediately after Finals Time: [pHeat(2)][pLane(2)][fHeat(2)][fLane(2)]
-        // prevents 2-digit lanes like '10' in ' 4 3 310 10  4 34.' from merging with fHeat ('310').
-        const pHeatRaw = tailZone.slice(0, 2).trim();
-        const pLaneRaw = tailZone.slice(2, 4).trim();
-        const fHeatRaw = tailZone.slice(4, 6).trim();
-        const fLaneRaw = tailZone.slice(6, 8).trim();
-        const remainderClean = tailZone
-          .slice(8)
-          .replace(/\s+\d{4}\s*$/, '')
-          .replace(/\s+0\d\s*$/, '')
-          .trim();
-        const remTokens = remainderClean ? remainderClean.split(/\s+/) : [];
+        // Parse the tail tokens directly in order:
+        // [prelimHeat, prelimLane, finalsHeat, finalsLane, prelimPlace, finalsPlace, points]
+        // Note: in a 2-digit lane like "310" (finalsHeat=3, finalsLane=10), the token is "310"
+        const pHeatTok = tailTokens[0] || '';
+        const pLaneTok = tailTokens[1] || '';
+        const fHeatLaneTok = tailTokens[2] || '';
+        const pPlaceTok = tailTokens[3] || '';
+        const fPlaceTok = tailTokens[4] || '';
+        const ptsTok = tailTokens[5] || '';
 
-        prelimHeat = pHeatRaw && pHeatRaw !== '0' ? pHeatRaw : '';
-        prelimLane = pLaneRaw && pLaneRaw !== '0' ? pLaneRaw : '';
-        heat = fHeatRaw && fHeatRaw !== '0' ? fHeatRaw : '';
-        lane = fLaneRaw && fLaneRaw !== '0' ? fLaneRaw : '';
+        prelimHeat = pHeatTok && pHeatTok !== '0' ? pHeatTok : '';
+        prelimLane = pLaneTok && pLaneTok !== '0' ? pLaneTok : '';
 
-        const pPlaceRaw = (remTokens[0] || '').replace(/\./g, '');
+        if (/^\d{3,}$/.test(fHeatLaneTok) && Number(fHeatLaneTok.slice(1)) >= 10) {
+          heat = fHeatLaneTok.slice(0, 1);
+          lane = fHeatLaneTok.slice(1);
+        } else {
+          heat = fHeatLaneTok && fHeatLaneTok !== '0' ? fHeatLaneTok : '';
+          lane = (tailTokens[2] && /^\d+$/.test(tailTokens[2]) && tailTokens.length >= 7) ? tailTokens[3] : '';
+        }
+
+        // Handle when prelimLane & finalsLane are separate tokens (e.g. "4 3 3 10 10 4 34.")
+        let resolvedPPlaceTok = pPlaceTok;
+        let resolvedFPlaceTok = fPlaceTok;
+        let resolvedPtsTok = ptsTok;
+
+        if (!(/^\d{3,}$/.test(fHeatLaneTok) && Number(fHeatLaneTok.slice(1)) >= 10) && tailTokens.length >= 7) {
+          lane = tailTokens[3] && tailTokens[3] !== '0' ? tailTokens[3] : '';
+          resolvedPPlaceTok = tailTokens[4] || '';
+          resolvedFPlaceTok = tailTokens[5] || '';
+          resolvedPtsTok = tailTokens[6] || '';
+        }
+
+        const pPlaceRaw = String(resolvedPPlaceTok).replace(/\./g, '');
         prelimPlace = /^\d+$/.test(pPlaceRaw) && pPlaceRaw !== '0' ? parseInt(pPlaceRaw, 10) : null;
-        const fPlaceRaw = (remTokens[1] || '').replace(/\./g, '');
+        const fPlaceRaw = String(resolvedFPlaceTok).replace(/\./g, '');
         place = /^\d+$/.test(fPlaceRaw) && fPlaceRaw !== '0' ? parseInt(fPlaceRaw, 10) : null;
-        const ptsTok = remTokens[2] || '';
-        points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
+        points = /^\d+\.$/.test(resolvedPtsTok) ? parseFloat(resolvedPtsTok) : 0;
       } else {
         const fHeatRaw = tailZone.slice(0, 2).trim();
         const fLaneRaw = tailZone.slice(2, 4).trim();
