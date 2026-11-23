@@ -581,16 +581,18 @@ function parseSDIFContent(content) {
       const rawSwimDate = sliceCol(line, 95, 102);
       const swimIsoDate =
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
-      // Extract Seed (cols 95-102), Prelim (cols 104-111), Swim-Off (cols 113-120), and Finals (cols 122-129)
-      // plus legacy dual-meet fallback where Seed is 103-110 and Finals is 116-123
-      const seedTimeRaw = sliceCol(line, 95, 102) || sliceCol(line, 103, 110);
-      const col104to111 = sliceCol(line, 104, 111);
-      const col122to129 = sliceCol(line, 122, 129);
+          ? formatSdifDate(rawSwimDate)
+          : '';
+
+      // Dual-meet D0: Seed (103-110), Finals (116-123), Course (124), Tail (125-152)
+      // Invitational Prelims/Finals D0: Seed (104-111), Prelim (113-120), Swim-Off (122-129), Finals (131-138), Tail (139-162)
+      const seedTimeRaw = sliceCol(line, 103, 111);
+      const col112to120 = sliceCol(line, 112, 120);
+      const col130to138 = sliceCol(line, 130, 138);
       const hasExtendedTimeSlots =
-        /[\d:.]/.test(col104to111) ||
-        (line.length >= 130 &&
-          /[\d:.]/.test(col122to129) &&
-          line.slice(114, 121).trim() === '');
+        line.length >= 139 &&
+        (/[\d:.]/.test(col112to120) || /[\d:.]/.test(col130to138)) &&
+        !['Y', 'S', 'L'].includes(sliceCol(line, 124, 124));
 
       let prelimTimeRaw = '';
       let finalsTimeRaw = '';
@@ -598,10 +600,10 @@ function parseSDIFContent(content) {
       let tailZone = '';
 
       if (hasExtendedTimeSlots) {
-        prelimTimeRaw = col104to111;
-        finalsTimeRaw = col122to129;
-        courseCode = sliceCol(line, 130, 130) || sliceCol(line, 112, 112);
-        tailZone = line.slice(130, 154);
+        prelimTimeRaw = col112to120;
+        finalsTimeRaw = col130to138;
+        courseCode = sliceCol(line, 138, 138) || sliceCol(line, 120, 120);
+        tailZone = line.slice(138, 162);
       } else {
         finalsTimeRaw = sliceCol(line, 116, 123);
         courseCode = sliceCol(line, 124, 124);
