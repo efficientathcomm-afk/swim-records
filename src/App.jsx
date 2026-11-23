@@ -579,7 +579,10 @@ function parseSDIFContent(content) {
       const strokeCode = sliceCol(line, 72, 72);
       const eventNumber = sliceCol(line, 73, 76);
       const parsedEventNum = parseInt(eventNumber, 10) || eventNumber;
+      const isTimeTrialEvent =
+        typeof parsedEventNum === 'number' && parsedEventNum >= 101 && parsedEventNum <= 899;
       const isSwimOffEvent = typeof parsedEventNum === 'number' && parsedEventNum >= 900;
+      const isSpecialUnscoredEvent = isTimeTrialEvent || isSwimOffEvent;
 
       // Anchor directly on the 8-digit Swim Date (MMDDYYYY) after col 80 so lines with or without
       // a 12-char USS ID never shift the Seed / Prelim / Swim-Off / Finals time slots.
@@ -671,7 +674,7 @@ function parseSDIFContent(content) {
       let points = 0;
 
       const isPrelimFinalsFormat =
-        !isSwimOffEvent &&
+        !isSpecialUnscoredEvent &&
         (Boolean(prelimTimeRaw) ||
           (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4])));
 
@@ -758,6 +761,7 @@ function parseSDIFContent(content) {
         strokeCode,
         strokeName,
         eventNumber: parsedEventNum,
+        isTimeTrial: isTimeTrialEvent,
         isSwimOff: isSwimOffEvent,
         isExhibition: isExhibition || (prelimPlace === null && place === null && tailTokens[4] === '0'),
         eventLabel,
@@ -829,6 +833,11 @@ function parseSDIFContent(content) {
       const distance = sliceCol(line, 23, 25);
       const strokeCode = sliceCol(line, 26, 26);
       const eventNumber = sliceCol(line, 27, 30);
+      const parsedRelayEventNum = parseInt(eventNumber, 10) || eventNumber;
+      const isRelayTimeTrial =
+        typeof parsedRelayEventNum === 'number' &&
+        parsedRelayEventNum >= 101 &&
+        parsedRelayEventNum <= 899;
       const rawRelayDate = sliceCol(line, 39, 46);
       const relayIsoDate =
         /^\d{8}$/.test(rawRelayDate) && rawRelayDate !== '00000000'
@@ -886,7 +895,8 @@ function parseSDIFContent(content) {
         distance: parseInt(distance, 10) || distance,
         strokeCode,
         strokeName,
-        eventNumber: parseInt(eventNumber, 10) || eventNumber,
+        eventNumber: parsedRelayEventNum,
+        isTimeTrial: isRelayTimeTrial,
         eventLabel,
         swimDate: relayIsoDate || meetInfo.isoDate || '',
         seedTime: seedTimeRaw || '',
@@ -2294,13 +2304,14 @@ export default function App() {
               ? entry.finalsSplits
               : entry.splits;
           const isSwimOffRow = Boolean(entry.isSwimOff || entry.swimOffTime);
+          const isTimeTrialRow = Boolean(entry.isTimeTrial);
           pushRoundSwim({
-            roundName: isSwimOffRow ? 'Swim-Off' : 'Finals',
+            roundName: isSwimOffRow ? 'Swim-Off' : isTimeTrialRow ? 'Time Trial' : 'Finals',
             rawTime: effectiveFinalsStr,
             secVal: fSec,
-            placeVal: isSwimOffRow ? '' : entry.place,
+            placeVal: isSwimOffRow || isTimeTrialRow ? '' : entry.place,
             splitsArr: fSplits,
-            idSuffix: isSwimOffRow ? 'SO' : 'F',
+            idSuffix: isSwimOffRow ? 'SO' : isTimeTrialRow ? 'TT' : 'F',
           });
         }
       }
@@ -2310,6 +2321,7 @@ export default function App() {
     parsedData.relayResults.forEach((entry) => {
       if (entry.teamCode !== targetCode) return;
       if (!entry.legs || entry.legs.length === 0) return;
+      const relayRoundName = entry.isTimeTrial ? 'Time Trial' : 'Finals';
 
       const legDist = Math.round((Number(entry.distance) || 0) / 4);
       const legStroke = String(entry.strokeName || '').includes('Medley')
@@ -2383,12 +2395,12 @@ export default function App() {
       if (hasPrelimLegSplits) {
         extractLeadOffForRound('Prelims', (l) => l.prelimSplits || []);
       }
-      extractLeadOffForRound('Finals', (l) =>
+      extractLeadOffForRound(relayRoundName, (l) =>
         l.finalsSplits && l.finalsSplits.length > 0 ? l.finalsSplits : l.splits || []
       );
 
       const effectiveRelFinals = entry.prelimTime ? entry.finalsOnlyTime : entry.finalsTime;
-      if (Number(entry.place) === 1 && isValidTimeStr(effectiveRelFinals)) {
+      if (!entry.isTimeTrial && Number(entry.place) === 1 && isValidTimeStr(effectiveRelFinals)) {
         const relaySec = timeToSeconds(effectiveRelFinals);
         if (relaySec !== null) {
           const legBreakdown = calculateRelayLegBreakdown(entry);
@@ -4961,6 +4973,7 @@ export default function App() {
           eventNumber: row.eventNumber,
           eventLabel: row.eventLabel,
           course: row.course,
+          isTimeTrial: Boolean(row.isTimeTrial),
           isSwimOff: Boolean(row.isSwimOff),
           rawRows: [],
         });
@@ -4976,20 +4989,21 @@ export default function App() {
     const cards = [];
 
     orderedEvents.forEach((ev) => {
-      const hasPrelims = Boolean(eventHasPrelimsMap.get(ev.baseKey)) && !ev.isSwimOff;
+      const hasPrelims =
+        Boolean(eventHasPrelimsMap.get(ev.baseKey)) && !ev.isSwimOff && !ev.isTimeTrial;
 
       if (!hasPrelims) {
-        // Standard Timed-Final / Dual-Meet / Swim-Off Single Card
+        // Standard Timed-Final / Dual-Meet / Time-Trial / Swim-Off Single Card
         const swims = ev.rawRows.map((r) => ({
           ...r,
           displayId: r.id,
-          displayRound: r.isSwimOff ? 'Swim-Off' : 'Finals',
-          displayPlace: r.place,
+          displayRound: r.isSwimOff ? 'Swim-Off' : r.isTimeTrial ? 'Time Trial' : 'Finals',
+          displayPlace: r.isTimeTrial || r.isSwimOff ? null : r.place,
           displayTime: r.finalsTime,
           displaySeconds: r.timeSeconds,
           displayHeat: r.heat,
           displayLane: r.lane,
-          displayPoints: r.isSwimOff ? 0 : r.points,
+          displayPoints: r.isSwimOff || r.isTimeTrial ? 0 : r.points,
           displaySplits: r.splits || [],
           finalTierRank: 1,
           finalTierLabel: '',
@@ -5016,7 +5030,7 @@ export default function App() {
           key: `${ev.baseKey}-finals`,
           eventNumber: ev.eventNumber,
           eventLabel: ev.eventLabel,
-          roundTag: ev.isSwimOff ? 'Swim-Off' : '',
+          roundTag: ev.isSwimOff ? 'Swim-Off' : ev.isTimeTrial ? 'Time Trial' : '',
           isPrelimCard: false,
           hasSubHeaders: false,
           course: ev.course,
@@ -5201,6 +5215,7 @@ export default function App() {
           eventNumber: relay.eventNumber,
           eventLabel: relay.eventLabel,
           course: relay.course,
+          isTimeTrial: Boolean(relay.isTimeTrial),
           relays: [],
         });
       }
@@ -13194,6 +13209,8 @@ export default function App() {
                                             ? 'bg-indigo-500/25 text-indigo-200 border border-indigo-400/40'
                                             : eventGroup.roundTag === 'Swim-Off'
                                             ? 'bg-amber-500/25 text-amber-200 border border-amber-400/40'
+                                            : eventGroup.roundTag === 'Time Trial'
+                                            ? 'bg-purple-500/25 text-purple-200 border border-purple-400/40'
                                             : 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
                                         }`}
                                       >
@@ -13205,7 +13222,11 @@ export default function App() {
                                     {eventGroup.swims.length}{' '}
                                     {eventGroup.swims.length === 1 ? 'Swimmer' : 'Swimmers'} •{' '}
                                     {eventGroup.course}
-                                    {eventGroup.isPrelimCard ? ' • Preliminary Round (Unscored)' : ''}
+                                    {eventGroup.isPrelimCard
+                                      ? ' • Preliminary Round (Unscored)'
+                                      : eventGroup.roundTag === 'Time Trial'
+                                      ? ' • Time Trial (Unscored)'
+                                      : ''}
                                   </p>
                                 </div>
                               </div>
@@ -13273,6 +13294,8 @@ export default function App() {
                                             ? 'Prelim Time'
                                             : eventGroup.roundTag === 'Swim-Off'
                                             ? 'Swim-Off Time'
+                                            : eventGroup.roundTag === 'Time Trial'
+                                            ? 'Time Trial'
                                             : 'Finals Time'}
                                         </span>
                                         <ArrowUpDown className="w-3 h-3 text-slate-400" />
@@ -13728,15 +13751,23 @@ export default function App() {
                                   Event #{eventGroup.eventNumber}
                                 </span>
                                 <div>
-                                  <h3 className="text-base font-bold tracking-tight">
-                                    {eventGroup.eventLabel}
-                                  </h3>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h3 className="text-base font-bold tracking-tight">
+                                      {eventGroup.eventLabel}
+                                    </h3>
+                                    {eventGroup.isTimeTrial && (
+                                      <span className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-purple-500/25 text-purple-200 border border-purple-400/40">
+                                        Time Trial
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-xs text-slate-400">
                                     {eventGroup.relays.length}{' '}
                                     {eventGroup.relays.length === 1
                                       ? 'Relay Entry'
                                       : 'Relay Entries'}{' '}
                                     • {eventGroup.course}
+                                    {eventGroup.isTimeTrial ? ' • Time Trial (Unscored)' : ''}
                                   </p>
                                 </div>
                               </div>
@@ -13839,7 +13870,7 @@ export default function App() {
                                             )}
                                           </td>
                                           <td className="py-3 px-3 text-center">
-                                            {relay.place ? (
+                                            {!eventGroup.isTimeTrial && relay.place ? (
                                               <span
                                                 className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
                                                   relay.place === 1
@@ -13903,7 +13934,7 @@ export default function App() {
                                             )}
                                           </td>
                                           <td className="py-3 pl-3 pr-5 text-center font-mono text-xs tabular-nums">
-                                            {relay.points > 0 ? (
+                                            {!eventGroup.isTimeTrial && relay.points > 0 ? (
                                               <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold">
                                                 {relay.points}
                                               </span>
@@ -14512,12 +14543,9 @@ export default function App() {
                                       Prelims
                                     </span>
                                   )}
-                                </td>
-                                <td className="py-2 px-3 font-mono font-bold text-cyan-800">
-                                  {row.time}
-                                  {row.place && row.place !== 'R' && row.place !== 'S' && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">
-                                      #{row.place}
+                                  {row.round === 'Time Trial' && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-[10px] font-bold">
+                                      Time Trial
                                     </span>
                                   )}
                                 </td>
