@@ -590,25 +590,25 @@ function parseSDIFContent(content) {
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
-      // Exact Hy-Tek WMM 8.0 D0 Time Columns (after 8-char swim date at cols 87-94):
-      // Cols 96-103: Seed Time | Cols 105-112: Prelim Time | Cols 114-121: Swim-Off | Cols 123-130: Finals Time
-      const seedTimeRaw = sliceCol(line, 96, 103);
-      const prelimTimeRaw = sliceCol(line, 105, 112);
-      const finalsTimeRaw = sliceCol(line, 123, 130);
+      // Verified Hy-Tek SDIF D0 Time Columns (1-based):
+      // Cols 95-102: Seed Time | Cols 103-110: Prelim Time | Cols 116-123: Finals Time
+      const seedTimeRaw = sliceCol(line, 95, 102);
+      const prelimTimeRaw = sliceCol(line, 103, 110);
+      const finalsTimeRaw = sliceCol(line, 116, 123);
       const courseCode =
-        (finalsTimeRaw || prelimTimeRaw || seedTimeRaw).slice(-1) || sliceCol(line, 130, 131);
+        (finalsTimeRaw || prelimTimeRaw || seedTimeRaw).slice(-1) || sliceCol(line, 123, 124);
 
       const isDiving = strokeCode === '6' || /H$/i.test(distance);
       const isExhibition =
-        sliceCol(line, 155, 160).toUpperCase().includes('X') ||
+        sliceCol(line, 150, 158).toUpperCase().includes('X') ||
         (parseInt(eventNumber, 10) || 0) >= 100;
       const isTimeTrial = (parseInt(eventNumber, 10) || 0) >= 100;
 
-      // Parse cols 132-158:
-      // Prelims/Finals layout: PrelimHeat, PrelimLane, FinalsHeat, FinalsLane, PrelimPlace, FinalsPlace, Points
-      // Prelims-only layout:   PrelimHeat, PrelimLane, 0, 0, PrelimPlace (with trailing event/flags ignored)
-      // Timed-Finals / Diving: 1, Lane, FinalsPlace, Points
-      const tailTokens = line.slice(131, 156).trim().split(/\s+/).filter(Boolean);
+      // Parse strictly cols 125-149 (stopping before col 150 division code "0100" / "0500"):
+      // Prelims/Finals: PrelimHeat, PrelimLane, FinalsHeat, FinalsLane, PrelimPlace, FinalsPlace, Points
+      // Prelims-only:   PrelimHeat, PrelimLane, 0, 0, PrelimPlace
+      // Timed-Finals:   1, Lane, FinalsPlace, Points
+      const tailTokens = line.slice(124, 149).trim().split(/\s+/).filter(Boolean);
       const pointsToken = tailTokens.find((t) => /^\d+\.$/.test(t)) || '';
       const points = pointsToken ? parseFloat(pointsToken) : 0;
       const nonPtTokens = tailTokens
