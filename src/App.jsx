@@ -590,11 +590,14 @@ function parseSDIFContent(content) {
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
-      // Exact 1-based SDIF D0 Time Columns in Hy-Tek WMM 8.0 CL2 files:
-      // Cols 98-105: Seed Time | Cols 107-114: Prelim Time | Cols 125-132: Finals Time
-      const seedTimeRaw = sliceCol(line, 98, 105);
-      const prelimTimeRaw = sliceCol(line, 107, 114);
-      const finalsTimeRaw = sliceCol(line, 125, 132);
+
+      // Extract swim times/scores (e.g., 5:08.46Y, 22.03Y, or 263.05) from the SDIF D0 time block (cols 93-132)
+      const timeBlock = line.slice(92, 132);
+      const timeTokens = timeBlock.match(/(?:\d+:)?\d+\.\d{1,2}[A-Z]?/gi) || [];
+      const seedTimeRaw = timeTokens[0] || '';
+      const prelimTimeRaw = timeTokens.length >= 2 ? timeTokens[1] : '';
+      const finalsTimeRaw =
+        timeTokens.length >= 3 ? timeTokens[timeTokens.length - 1] : '';
       const courseCode =
         (finalsTimeRaw || prelimTimeRaw || seedTimeRaw).slice(-1) || sliceCol(line, 132, 133);
 
