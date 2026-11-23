@@ -3273,6 +3273,25 @@ const rRowId = `cl2-lo-${entry.id}`;
     });
   };
 
+    const updateQualStandardsList = async (nextList, changedItem = null, deletedId = null) => {
+    setQualStandards(nextList);
+    try {
+      localStorage.setItem('swimmeet_qual_standards_v1', JSON.stringify(nextList));
+    } catch {}
+    if (cloudUser) {
+      try {
+        if (deletedId) {
+          await deleteDoc(doc(db, 'qual_standards', String(deletedId)));
+        } else if (changedItem) {
+          await setDoc(doc(db, 'qual_standards', String(changedItem.id)), changedItem);
+        }
+      } catch (err) {
+        setCloudSyncStatus('offline');
+        setCloudErrorMsg(err?.code || err?.message || 'standards-sync-failed');
+      }
+    }
+  };
+  
   // Extract numeric Swimcloud team ID from a team URL, iframe embed code, or raw numeric ID
   const extractSwimcloudTeamId = (rawInput) => {
     const str = String(rawInput || '').trim();
