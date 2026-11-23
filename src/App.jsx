@@ -666,22 +666,45 @@ function parseSDIFContent(content) {
           (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4])));
 
       if (isPrelimFinalsFormat) {
-        prelimHeat = tailTokens[0] || '';
-        prelimLane = tailTokens[1] || '';
-        heat = tailTokens[2] && tailTokens[2] !== '0' ? tailTokens[2] : '';
-        lane = tailTokens[3] && tailTokens[3] !== '0' ? tailTokens[3] : '';
-        const pPlaceRaw = (tailTokens[4] || '').replace(/\./g, '');
+        // Fixed 2-char fields immediately after Finals Time: [pHeat(2)][pLane(2)][fHeat(2)][fLane(2)]
+        // prevents 2-digit lanes like '10' in ' 4 3 310 10  4 34.' from merging with fHeat ('310').
+        const pHeatRaw = tailZone.slice(0, 2).trim();
+        const pLaneRaw = tailZone.slice(2, 4).trim();
+        const fHeatRaw = tailZone.slice(4, 6).trim();
+        const fLaneRaw = tailZone.slice(6, 8).trim();
+        const remainderClean = tailZone
+          .slice(8)
+          .replace(/\s+\d{4}\s*$/, '')
+          .replace(/\s+0\d\s*$/, '')
+          .trim();
+        const remTokens = remainderClean ? remainderClean.split(/\s+/) : [];
+
+        prelimHeat = pHeatRaw && pHeatRaw !== '0' ? pHeatRaw : '';
+        prelimLane = pLaneRaw && pLaneRaw !== '0' ? pLaneRaw : '';
+        heat = fHeatRaw && fHeatRaw !== '0' ? fHeatRaw : '';
+        lane = fLaneRaw && fLaneRaw !== '0' ? fLaneRaw : '';
+
+        const pPlaceRaw = (remTokens[0] || '').replace(/\./g, '');
         prelimPlace = /^\d+$/.test(pPlaceRaw) && pPlaceRaw !== '0' ? parseInt(pPlaceRaw, 10) : null;
-        const fPlaceRaw = (tailTokens[5] || '').replace(/\./g, '');
+        const fPlaceRaw = (remTokens[1] || '').replace(/\./g, '');
         place = /^\d+$/.test(fPlaceRaw) && fPlaceRaw !== '0' ? parseInt(fPlaceRaw, 10) : null;
-        const ptsTok = tailTokens[6] || '';
+        const ptsTok = remTokens[2] || '';
         points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
       } else {
-        heat = tailTokens[0] || '';
-        lane = tailTokens[1] || '';
-        const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
+        const fHeatRaw = tailZone.slice(0, 2).trim();
+        const fLaneRaw = tailZone.slice(2, 4).trim();
+        const remainderClean = tailZone
+          .slice(4)
+          .replace(/\s+\d{4}\s*$/, '')
+          .replace(/\s+0\d\s*$/, '')
+          .trim();
+        const remTokens = remainderClean ? remainderClean.split(/\s+/) : [];
+
+        heat = fHeatRaw && fHeatRaw !== '0' ? fHeatRaw : '';
+        lane = fLaneRaw && fLaneRaw !== '0' ? fLaneRaw : '';
+        const placeRaw = (remTokens[0] || '').replace(/\./g, '');
         place = /^\d+$/.test(placeRaw) && placeRaw !== '0' ? parseInt(placeRaw, 10) : null;
-        const pointsToken = tailTokens[3] || '';
+        const pointsToken = remTokens[1] || '';
         points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
       }
 
