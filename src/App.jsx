@@ -676,44 +676,45 @@ function parseSDIFContent(content) {
           (tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4])));
 
       if (isPrelimFinalsFormat) {
-        // Parse the tail tokens directly in order:
-        // [prelimHeat, prelimLane, finalsHeat, finalsLane, prelimPlace, finalsPlace, points]
-        // Note: in a 2-digit lane like "310" (finalsHeat=3, finalsLane=10), the token is "310"
-        const pHeatTok = tailTokens[0] || '';
-        const pLaneTok = tailTokens[1] || '';
-        const fHeatLaneTok = tailTokens[2] || '';
-        const pPlaceTok = tailTokens[3] || '';
-        const fPlaceTok = tailTokens[4] || '';
-        const ptsTok = tailTokens[5] || '';
+        // Expand any glued 3+ digit heat+lane token (e.g., "410" -> ["4", "10"], "310" -> ["3", "10"])
+        // so [prelimHeat, prelimLane, finalsHeat, finalsLane, prelimPlace, finalsPlace, points] stay aligned.
+        const expandedTailTokens = [];
+        for (let tIdx = 0; tIdx < tailTokens.length; tIdx++) {
+          const tok = tailTokens[tIdx];
+          // Stop once we hit trailing event number / division codes or decimal points token
+          if (/^\d+\.$/.test(tok)) {
+            expandedTailTokens.push(tok);
+            break;
+          }
+          // Stop if a standalone 2-digit event number appears right after prelim-only place (e.g. "... 0 0 37 05")
+          if (!finalsTimeRaw && expandedTailTokens.length === 5 && /^\d{2,}$/.test(tok)) {
+            break;
+          }
+          if (/^\d{3,}$/.test(tok) && Number(tok.slice(1)) >= 10) {
+            expandedTailTokens.push(tok.slice(0, 1), tok.slice(1));
+          } else {
+            expandedTailTokens.push(tok);
+          }
+        }
+
+        const pHeatTok = expandedTailTokens[0] || '';
+        const pLaneTok = expandedTailTokens[1] || '';
+        const fHeatTok = expandedTailTokens[2] || '';
+        const fLaneTok = expandedTailTokens[3] || '';
+        const pPlaceTok = expandedTailTokens[4] || '';
+        const fPlaceTok = expandedTailTokens[5] || '';
+        const ptsTok = expandedTailTokens[6] || '';
 
         prelimHeat = pHeatTok && pHeatTok !== '0' ? pHeatTok : '';
         prelimLane = pLaneTok && pLaneTok !== '0' ? pLaneTok : '';
+        heat = fHeatTok && fHeatTok !== '0' ? fHeatTok : '';
+        lane = fLaneTok && fLaneTok !== '0' ? fLaneTok : '';
 
-        if (/^\d{3,}$/.test(fHeatLaneTok) && Number(fHeatLaneTok.slice(1)) >= 10) {
-          heat = fHeatLaneTok.slice(0, 1);
-          lane = fHeatLaneTok.slice(1);
-        } else {
-          heat = fHeatLaneTok && fHeatLaneTok !== '0' ? fHeatLaneTok : '';
-          lane = (tailTokens[2] && /^\d+$/.test(tailTokens[2]) && tailTokens.length >= 7) ? tailTokens[3] : '';
-        }
-
-        // Handle when prelimLane & finalsLane are separate tokens (e.g. "4 3 3 10 10 4 34.")
-        let resolvedPPlaceTok = pPlaceTok;
-        let resolvedFPlaceTok = fPlaceTok;
-        let resolvedPtsTok = ptsTok;
-
-        if (!(/^\d{3,}$/.test(fHeatLaneTok) && Number(fHeatLaneTok.slice(1)) >= 10) && tailTokens.length >= 7) {
-          lane = tailTokens[3] && tailTokens[3] !== '0' ? tailTokens[3] : '';
-          resolvedPPlaceTok = tailTokens[4] || '';
-          resolvedFPlaceTok = tailTokens[5] || '';
-          resolvedPtsTok = tailTokens[6] || '';
-        }
-
-        const pPlaceRaw = String(resolvedPPlaceTok).replace(/\./g, '');
+        const pPlaceRaw = String(pPlaceTok).replace(/\./g, '');
         prelimPlace = /^\d+$/.test(pPlaceRaw) && pPlaceRaw !== '0' ? parseInt(pPlaceRaw, 10) : null;
-        const fPlaceRaw = String(resolvedFPlaceTok).replace(/\./g, '');
+        const fPlaceRaw = String(fPlaceTok).replace(/\./g, '');
         place = /^\d+$/.test(fPlaceRaw) && fPlaceRaw !== '0' ? parseInt(fPlaceRaw, 10) : null;
-        points = /^\d+\.$/.test(resolvedPtsTok) ? parseFloat(resolvedPtsTok) : 0;
+        points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
       } else {
         const fHeatRaw = tailZone.slice(0, 2).trim();
         const fLaneRaw = tailZone.slice(2, 4).trim();
