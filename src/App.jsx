@@ -582,27 +582,27 @@ function parseSDIFContent(content) {
       const isSwimOffEvent = typeof parsedEventNum === 'number' && parsedEventNum >= 900;
 
       // Cols 85-92 hold Swim Date (MMDDYYYY) in standard Hy-Tek D0 lines (fallback 94-101)
-      const rawSwimDate = sliceCol(line, 85, 92) || sliceCol(line, 94, 101);
+      const rawSwimDate = sliceCol(line, 83, 90) || sliceCol(line, 85, 92) || sliceCol(line, 94, 101);
       const swimIsoDate =
         /^\d{8}$/.test(rawSwimDate) && rawSwimDate !== '00000000'
           ? formatSdifDate(rawSwimDate)
           : '';
 
-      // Exact 1-based Hy-Tek D0 time slots after Col 92:
-      // Cols 94-101: Seed Time (8 chars)
-      // Cols 103-110: Prelim Time (8 chars)
-      // Cols 112-119: Swim-Off Time (8 chars)
-      // Cols 121-128: Finals Time (8 chars)
-      const seedTimeRaw = sliceCol(line, 94, 101);
-      const prelimTimeRaw = sliceCol(line, 103, 110);
-      const swimOffTimeRaw = sliceCol(line, 112, 119);
-      const finalsTimeRaw = sliceCol(line, 121, 128);
+      // Exact 1-based Hy-Tek D0 time slots (each 8 chars wide, matching original col 116..123 Finals):
+      // Cols 91-98: Seed Time (8 chars)
+      // Cols 100-107: Prelim Time (8 chars, e.g. '5:08.22Y')
+      // Cols 109-116: Swim-Off Time (8 chars)
+      // Cols 118-125: Finals Time (8 chars, e.g. '5:09.65Y' or '  48.76Y')
+      const seedTimeRaw = sliceCol(line, 91, 98);
+      const prelimTimeRaw = sliceCol(line, 100, 107);
+      const swimOffTimeRaw = sliceCol(line, 109, 116);
+      const finalsTimeRaw = sliceCol(line, 118, 125) || sliceCol(line, 116, 123);
       const courseCode =
-        sliceCol(line, 128, 128) ||
-        sliceCol(line, 119, 119) ||
-        sliceCol(line, 110, 110) ||
+        sliceCol(line, 125, 125) ||
+        sliceCol(line, 116, 116) ||
+        sliceCol(line, 107, 107) ||
         sliceCol(line, 124, 124);
-      const tailZone = line.slice(128, 160);
+      const tailZone = line.slice(125, 156);
 
       // Stop before trailing division/status code (e.g. '0100' or '01' at end of line)
       const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
