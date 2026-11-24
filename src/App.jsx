@@ -868,7 +868,24 @@ function parseSDIFContent(content) {
 
       const tailZone = line.slice(81, 125).replace(/\s+\d{4}[A-Z]?\s*$/, '').trim();
       const tailTokens = tailZone ? tailZone.split(/\s+/) : [];
-      const hasPrelimRel = Boolean(prelimTimeRaw) || tailTokens.length >= 6;
+      // Expand glued 3+ digit heat+lane tokens (e.g. "110" -> ["1", "10"], "310" -> ["3", "10"])
+      const normalizedRelayTail = [];
+      for (let tIdx = 0; tIdx < tailTokens.length; tIdx++) {
+        const tok = tailTokens[tIdx];
+        if (/^\d+\.$/.test(tok)) {
+          normalizedRelayTail.push(tok);
+          break;
+        }
+        if (/^\d{3,}$/.test(tok) && Number(tok.slice(1)) >= 10) {
+          normalizedRelayTail.push(tok.slice(0, 1), tok.slice(1));
+        } else {
+          normalizedRelayTail.push(tok);
+        }
+      }
+      const isTimedFinalRelTail = /^\d+\.$/.test(normalizedRelayTail[3] || '');
+      const hasPrelimRel =
+        !isTimedFinalRelTail &&
+        (Boolean(prelimTimeRaw) || normalizedRelayTail.length >= 5);
 
       let heat = '';
       let lane = '';
@@ -876,21 +893,27 @@ function parseSDIFContent(content) {
       let prelimPlace = null;
       let points = 0;
 
-      if (hasPrelimRel && tailTokens.length >= 5) {
-        heat = tailTokens[2] && tailTokens[2] !== '0' ? tailTokens[2] : tailTokens[0] || '';
-        lane = tailTokens[3] && tailTokens[3] !== '0' ? tailTokens[3] : tailTokens[1] || '';
-        const pPlRaw = (tailTokens[4] || '').replace(/\./g, '');
+      if (hasPrelimRel && normalizedRelayTail.length >= 5) {
+        heat =
+          normalizedRelayTail[2] && normalizedRelayTail[2] !== '0'
+            ? normalizedRelayTail[2]
+            : normalizedRelayTail[0] || '';
+        lane =
+          normalizedRelayTail[3] && normalizedRelayTail[3] !== '0'
+            ? normalizedRelayTail[3]
+            : normalizedRelayTail[1] || '';
+        const pPlRaw = (normalizedRelayTail[4] || '').replace(/\./g, '');
         prelimPlace = /^\d+$/.test(pPlRaw) && pPlRaw !== '0' ? parseInt(pPlRaw, 10) : null;
-        const fPlRaw = (tailTokens[5] || '').replace(/\./g, '');
+        const fPlRaw = (normalizedRelayTail[5] || '').replace(/\./g, '');
         place = /^\d+$/.test(fPlRaw) && fPlRaw !== '0' ? parseInt(fPlRaw, 10) : null;
-        const ptsTok = tailTokens[6] || '';
+        const ptsTok = normalizedRelayTail[6] || '';
         points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
       } else {
-        heat = tailTokens[0] || '';
-        lane = tailTokens[1] || '';
-        const placeRaw = (tailTokens[2] || '').replace(/\./g, '');
-        place = /^\d+$/.test(placeRaw) ? parseInt(placeRaw, 10) : null;
-        const pointsToken = tailTokens[3] || '';
+        heat = normalizedRelayTail[0] && normalizedRelayTail[0] !== '0' ? normalizedRelayTail[0] : '';
+        lane = normalizedRelayTail[1] && normalizedRelayTail[1] !== '0' ? normalizedRelayTail[1] : '';
+        const placeRaw = (normalizedRelayTail[2] || '').replace(/\./g, '');
+        place = /^\d+$/.test(placeRaw) && placeRaw !== '0' ? parseInt(placeRaw, 10) : null;
+        const pointsToken = normalizedRelayTail[3] || '';
         points = /^\d+\.$/.test(pointsToken) ? parseFloat(pointsToken) : 0;
       }
 
