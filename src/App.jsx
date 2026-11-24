@@ -1754,6 +1754,7 @@ export default function App() {
   const [dbPageSize, setDbPageSize] = useState(100);
   const [selectedDbIds, setSelectedDbIds] = useState(new Set());
   const [pendingDbDeleteIds, setPendingDbDeleteIds] = useState(null);
+  const [showDbDuplicateScanner, setShowDbDuplicateScanner] = useState(false);
   const [editingDbRowId, setEditingDbRowId] = useState(null);
   const [editDbDraft, setEditDbDraft] = useState({
     swimmerName: '',
@@ -5132,6 +5133,88 @@ export default function App() {
     setDbPage(1);
   };
 
+  // Detect duplicate or near-duplicate clusters in Committed DB (same athlete + event + time within ±2 days)
+  const duplicateDbClusters = useMemo(() => {
+    const byAthEv = new Map();
+    historicalRecords.forEach((rec) => {
+      const mAth = resolveMasterAthlete(rec.swimmerName);
+      const athKey = normalizeSwimmerKey(mAth ? mAth.canonicalName : rec.swimmerName);
+      const evKey = rec.eventKey || normalizeEventKey(rec.eventLabel);
+      const sec = Number(rec.seconds);
+      if (!athKey || !evKey || !Number.isFinite(sec) || sec <= 0) return;
+
+      const bucketKey = `${athKey}|${evKey}`;
+      if (!byAthEv.has(bucketKey)) byAthEv.set(bucketKey, []);
+      byAthEv.get(bucketKey).push({
+        rec,
+        sec,
+        dateMs: (rec.dateObj || parseFlexibleDate(rec.date))?.getTime() ?? null,
+      });
+    });
+
+    const clusters = [];
+    const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+
+    byAthEv.forEach((items) => {
+      if (items.length < 2) return;
+      const visited = new Set();
+
+      for (let i = 0; i < items.length; i++) {
+        if (visited.has(i)) continue;
+        const seed = items[i];
+        const group = [seed];
+        visited.add(i);
+
+        for (let j = i + 1; j < items.length; j++) {
+          if (visited.has(j)) continue;
+          const cand = items[j];
+          const timeClose = Math.abs(seed.sec - cand.sec) <= 0.015;
+          if (!timeClose) continue;
+
+          const sameDateStr = (seed.rec.date || '') === (cand.rec.date || '');
+          const withinTwoDays =
+            seed.dateMs !== null &&
+            cand.dateMs !== null &&
+            Math.abs(seed.dateMs - cand.dateMs) <= TWO_DAYS_MS;
+
+          if (sameDateStr || withinTwoDays) {
+            group.push(cand);
+            visited.add(j);
+          }
+        }
+
+        if (group.length >= 2) {
+          group.sort(
+            (a, b) =>
+              String(a.rec.date || '').localeCompare(String(b.rec.date || '')) ||
+              String(a.rec.round || 'Finals').localeCompare(String(b.rec.round || 'Finals'))
+          );
+          const allExact = group.every(
+            (g) =>
+              (g.rec.date || '') === (group[0].rec.date || '') &&
+              normalizeCompKey(g.rec.competition) === normalizeCompKey(group[0].rec.competition) &&
+              (g.rec.round || 'Finals') === (group[0].rec.round || 'Finals') &&
+              String(g.rec.place || '') === String(group[0].rec.place || '')
+          );
+          clusters.push({
+            id: `dup-cluster-${group[0].rec.id}`,
+            swimmerName: group[0].rec.swimmerName,
+            eventLabel: group[0].rec.eventLabel,
+            time: group[0].rec.time,
+            isExactDuplicate: allExact,
+            records: group.map((g) => g.rec),
+          });
+        }
+      }
+    });
+
+    return clusters.sort(
+      (a, b) =>
+        Number(b.isExactDuplicate) - Number(a.isExactDuplicate) ||
+        compareByLastName(a.swimmerName, b.swimmerName)
+    );
+  }, [historicalRecords, masterRoster]);
+
   // All-Time Career Wins Leaderboard (Individual + Relay Finals Wins, optional Competition filter)
   const allTimeWinsLeaderboard = useMemo(() => {
     const activeSet = new Set(
@@ -7679,1270 +7762,23 @@ export default function App() {
 
                     <div className="flex flex-wrap items-center gap-2">
                       <button
-                        onClick={() => handleStageHistoryText(pasteSheetText)}
-                        disabled={!pasteSheetText.trim()}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white transition cursor-pointer"
+                        type="button"
+                        onClick={() => setShowDbDuplicateScanner((prev) => !prev)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                          showDbDuplicateScanner
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                            : duplicateDbClusters.length > 0
+                            ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                            : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                        }`}
                       >
-                        <SlidersHorizontal className="w-3.5 h-3.5" />
-                        Stage & Reconcile Rows
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        <span>
+                          {showDbDuplicateScanner
+                            ? 'Hide Duplicate Scanner'
+                            : `Find Duplicates (${duplicateDbClusters.length})`}
+                        </span>
                       </button>
-                      {stagedHistoryRows.length > 0 && (
-                        <button
-                          onClick={() => setStagedHistoryRows([])}
-                          className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                        >
-                          Clear Staging
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Unmatched Master List Reconciliation Panel */}
-                  {(stagingUnmatched.athletes.length > 0 ||
-                    stagingUnmatched.competitions.length > 0 ||
-                    stagingUnmatched.events.length > 0) && (
-                    <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 sm:p-5 space-y-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <h3 className="text-sm font-extrabold text-amber-950 flex items-center gap-1.5">
-                            <Link2 className="w-4 h-4 text-amber-700" />
-                            Master List Reconciliation ({stagingUnmatched.athletes.length} Athletes,{' '}
-                            {stagingUnmatched.competitions.length} Competitions,{' '}
-                            {stagingUnmatched.events.length} Events)
-                          </h3>
-                          <p className="text-xs text-amber-800 mt-0.5">
-                            Map incoming names to existing Master List records as aliases or add them
-                            as new canonical entries.
-                          </p>
-                        </div>
-                        <button
-                          onClick={handleApplyReconciliations}
-                          className="px-4 py-2 rounded-xl text-xs font-extrabold bg-amber-600 hover:bg-amber-500 text-white shadow-sm transition cursor-pointer"
-                        >
-                          Apply Reconciliations
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                        {stagingUnmatched.athletes.length > 0 && (
-                          <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2.5">
-                            <div className="text-xs font-bold uppercase text-slate-600">
-                              Unmatched Athletes
-                            </div>
-                            {stagingUnmatched.athletes.map((item) => {
-                              const selKey = `ath:${normalizeSwimmerKey(item.rawName)}`;
-                              return (
-                                <div key={selKey} className="space-y-1 text-xs">
-                                  <div className="font-bold text-slate-900">
-                                    {item.rawName}{' '}
-                                    <span className="text-slate-400 font-normal">
-                                      ({item.count} rows)
-                                    </span>
-                                  </div>
-                                  <select
-                                    value={reconcileSelections[selKey] || '__NEW__'}
-                                    onChange={(e) =>
-                                      setReconcileSelections((prev) => ({
-                                        ...prev,
-                                        [selKey]: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
-                                  >
-                                    <option value="__NEW__">
-                                      + Add &quot;{item.rawName}&quot; as New ({item.inferredGender})
-                                    </option>
-                                    {masterRoster
-                                      .slice()
-                                      .sort((a, b) =>
-                                        compareByLastName(a.canonicalName, b.canonicalName)
-                                      )
-                                      .map((ath) => (
-                                        <option key={ath.id} value={ath.id}>
-                                          Alias → {ath.canonicalName} ({ath.gender})
-                                        </option>
-                                      ))}
-                                  </select>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        {stagingUnmatched.competitions.length > 0 && (
-                          <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2.5">
-                            <div className="text-xs font-bold uppercase text-slate-600">
-                              Unmatched Competitions (Name + Date)
-                            </div>
-                            {stagingUnmatched.competitions.map((item) => {
-                              const selKey = `comp:${normalizeCompKey(item.rawName)}|${item.sampleDate}`;
-                              return (
-                                <div key={selKey} className="space-y-1 text-xs">
-                                  <div className="font-bold text-slate-900">
-                                    {item.rawName}{' '}
-                                    <span className="font-mono text-cyan-700">
-                                      [{item.sampleDate || 'No Date'}]
-                                    </span>
-                                  </div>
-                                  <select
-                                    value={reconcileSelections[selKey] || '__NEW__'}
-                                    onChange={(e) =>
-                                      setReconcileSelections((prev) => ({
-                                        ...prev,
-                                        [selKey]: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
-                                  >
-                                    <option value="__NEW__">
-                                      + Add &quot;{item.rawName}&quot; ({item.sampleDate || 'Any Date'})
-                                    </option>
-                                    {masterCompetitions.map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        Alias → {c.canonicalName} ({c.date || 'Any Date'})
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        {stagingUnmatched.events.length > 0 && (
-                          <div className="bg-white rounded-xl border border-amber-200 p-3.5 space-y-2.5">
-                            <div className="text-xs font-bold uppercase text-slate-600">
-                              Unmatched Events
-                            </div>
-                            {stagingUnmatched.events.map((item) => {
-                              const selKey = `ev:${item.rawEvent.toLowerCase()}|${item.genderHint}`;
-                              return (
-                                <div key={selKey} className="space-y-1 text-xs">
-                                  <div className="font-bold text-slate-900">
-                                    {item.rawEvent}{' '}
-                                    {item.genderHint ? `(${item.genderHint})` : ''}
-                                  </div>
-                                  <select
-                                    value={reconcileSelections[selKey] || ''}
-                                    onChange={(e) =>
-                                      setReconcileSelections((prev) => ({
-                                        ...prev,
-                                        [selKey]: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
-                                  >
-                                    <option value="">-- Select Canonical Event --</option>
-                                    {masterEvents.map((ev) => (
-                                      <option key={ev.id} value={ev.id}>
-                                        {ev.canonicalName}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Staged Preview Table */}
-                  {stagedHistoryRows.length > 0 && (
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-xs font-bold text-slate-700">
-                          Staged Rows ({stagedHistoryRows.filter((r) => r.selected).length} of{' '}
-                          {stagedHistoryRows.length} selected)
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() => handleCommitStagedRows('append')}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition cursor-pointer"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Append Selected to Database
-                          </button>
-                          <button
-                            onClick={() => handleCommitStagedRows('replace')}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white transition cursor-pointer"
-                          >
-                            Replace Entire Database
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[420px]">
-                        <table className="w-full text-left text-xs">
-                          <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
-                            <tr>
-                              <th className="py-2.5 px-3 w-10">
-                                <input
-                                  type="checkbox"
-                                  checked={
-                                    stagedHistoryRows.length > 0 &&
-                                    stagedHistoryRows.every((r) => r.selected)
-                                  }
-                                  onChange={(e) =>
-                                    setStagedHistoryRows((prev) =>
-                                      prev.map((r) => ({ ...r, selected: e.target.checked }))
-                                    )
-                                  }
-                                />
-                              </th>
-                              <th className="py-2.5 px-3">Athlete</th>
-                              <th className="py-2.5 px-3">Event</th>
-                              <th className="py-2.5 px-3">Time</th>
-                              <th className="py-2.5 px-3">Competition</th>
-                              <th className="py-2.5 px-3">Date</th>
-                              <th className="py-2.5 px-3">Classification</th>
-                              <th className="py-2.5 px-3">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {stagedHistoryRows.map((row) => (
-                              <tr
-                                key={row.id}
-                                className={row.isDuplicate ? 'bg-slate-50/70 text-slate-400' : ''}
-                              >
-                                <td className="py-2 px-3">
-                                  <input
-                                    type="checkbox"
-                                    checked={row.selected}
-                                    onChange={(e) =>
-                                      setStagedHistoryRows((prev) =>
-                                        prev.map((item) =>
-                                          item.id === row.id
-                                            ? { ...item, selected: e.target.checked }
-                                            : item
-                                        )
-                                      )
-                                    }
-                                  />
-                                </td>
-                                <td className="py-2 px-3 font-semibold text-slate-800">
-                                  <div>{row.swimmerName}</div>
-                                  {row.classYear && (
-                                    <span className="text-[10px] text-slate-500 font-normal">
-                                      Class: {row.classYear}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="py-2 px-3">{row.eventLabel}</td>
-                                <td className="py-2 px-3 font-mono font-bold">
-                                  {row.time}
-                                  {row.place && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">
-                                      #{row.place}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="py-2 px-3">
-                                  {row.competition || '—'}
-                                  {row.round === 'Prelims' && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
-                                      Prelims (SF)
-                                    </span>
-                                  )}
-                                  {row.round === 'Time Trial' && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-bold">
-                                      Time Trial (TT)
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="py-2 px-3 font-mono text-[11px]">{row.date || '—'}</td>
-                                <td className="py-2 px-3">
-                                  {row.swimType === 'RELAY_TEAM' ? (
-                                    <span className="px-2 py-1 rounded bg-purple-100 text-purple-800 text-[11px] font-bold">
-                                      Relay Lineup (4 Legs)
-                                    </span>
-                                  ) : (
-                                    <select
-                                      value={row.swimType}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        setStagedHistoryRows((prev) =>
-                                          prev.map((item) =>
-                                            item.id === row.id
-                                              ? {
-                                                  ...item,
-                                                  swimType: val,
-                                                  place:
-                                                    val === 'RELAY_LEADOFF'
-                                                      ? 'R'
-                                                      : val === 'INTERMEDIATE_SPLIT'
-                                                      ? 'S'
-                                                      : item.place === 'R' || item.place === 'S'
-                                                      ? ''
-                                                      : item.place,
-                                                }
-                                              : item
-                                          )
-                                        );
-                                      }}
-                                      className="px-2 py-1 bg-white border border-slate-200 rounded text-[11px]"
-                                    >
-                                      <option value="OFFICIAL">Official Individual</option>
-                                      <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
-                                      <option value="INTERMEDIATE_SPLIT">
-                                        Intermediate Split (S)
-                                      </option>
-                                    </select>
-                                  )}
-                                </td>
-                                <td className="py-2 px-3">
-                                  {row.isDuplicate ? (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-600">
-                                      Already in DB
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                                      Ready
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* SUB-TAB B: MASTER ROSTER */}
-              {historySubTab === 'roster' && (
-                <div className="p-5 sm:p-6 space-y-5">
-                  <div className="bg-cyan-50/50 p-4 rounded-xl border border-cyan-200/80 space-y-2.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-cyan-900 flex items-center gap-1.5">
-                        <UserPlus className="w-4 h-4 text-cyan-700" />
-                        Mass Roster Importer
-                      </label>
-                      <span className="text-[11px] text-cyan-800 font-medium">
-                        Columns:{' '}
-                        <code className="bg-white px-1 rounded">
-                          Name, Gender, Active (Yes/No), Aliases (semicolon-separated)
-                        </code>
-                      </span>
-                    </div>
-                    <textarea
-                      rows={4}
-                      value={bulkRosterText}
-                      onChange={(e) => setBulkRosterText(e.target.value)}
-                      placeholder={`Name, Gender, Active, Aliases\nKathleen Miller, Women, Yes, Kate Miller\nDelanie McKenzie, Women, Yes, Lanie McKenzie\nCharles Schundler, Men, No, Jackson Schundler`}
-                      className="w-full p-3 text-xs font-mono bg-white border border-cyan-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    />
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <button
-                        onClick={handleBulkImportRoster}
-                        disabled={!bulkRosterText.trim()}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white transition cursor-pointer"
-                      >
-                        <UserPlus className="w-3.5 h-3.5" />
-                        Mass Import Athletes
-                      </button>
-
-                      {historicalRecords.length > 0 && (
-                        <button
-                          onClick={handleSyncMasterListsFromDatabase}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                          Sync Missing from DB
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Single Athlete Quick-Add Bar */}
-                  <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 flex-1">
-                      <div className="sm:col-span-2">
-                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                          Quick-Add Single Athlete
-                        </label>
-                        <input
-                          type="text"
-                          value={newAthleteName}
-                          onChange={(e) => setNewAthleteName(e.target.value)}
-                          placeholder="e.g., Kathleen Miller"
-                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                          Gender
-                        </label>
-                        <select
-                          value={newAthleteGender}
-                          onChange={(e) => setNewAthleteGender(e.target.value)}
-                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                        >
-                          <option value="Women">Women</option>
-                          <option value="Men">Men</option>
-                        </select>
-                      </div>
-                      <div className="flex items-end gap-2">
-                        <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-3 py-2.5 rounded-lg cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={newAthleteActive}
-                            onChange={(e) => setNewAthleteActive(e.target.checked)}
-                            className="rounded text-cyan-600 focus:ring-cyan-500"
-                          />
-                          Active
-                        </label>
-                        <button
-                          onClick={() => {
-                            if (!newAthleteName.trim()) return;
-                            if (resolveMasterAthlete(newAthleteName)) {
-                              setBenchmarkStatusMsg(
-                                `"${newAthleteName.trim()}" already exists in the Master Roster.`
-                              );
-                              return;
-                            }
-                            const created = {
-                              id: `ath-${Date.now()}`,
-                              canonicalName: newAthleteName.trim(),
-                              gender: newAthleteGender,
-                              isActive: newAthleteActive,
-                              aliases: [],
-                            };
-                            updateMasterRoster([...masterRoster, created], [created]);
-                            setNewAthleteName('');
-                          }}
-                          className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white transition cursor-pointer"
-                        >
-                          Add
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Master Roster Table (Sorted by Last Name) */}
-                  {masterRoster.length === 0 ? (
-                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                      No athletes in the Master Roster yet. Use the Mass Roster Importer above or
-                      sync from your database.
-                    </div>
-                  ) : (
-                    (() => {
-                      const filteredRoster = masterRoster
-                        .filter((ath) => {
-                          if (rosterFilterGender !== 'ALL' && ath.gender !== rosterFilterGender) {
-                            return false;
-                          }
-                          if (rosterFilterActive === 'ACTIVE' && !ath.isActive) return false;
-                          if (rosterFilterActive === 'INACTIVE' && ath.isActive) return false;
-                          if (rosterSearchQuery.trim() !== '') {
-                            const q = rosterSearchQuery.toLowerCase();
-                            const hay = `${ath.canonicalName} ${(ath.aliases || []).join(' ')}`.toLowerCase();
-                            if (!hay.includes(q)) return false;
-                          }
-                          return true;
-                        })
-                        .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName));
-
-                      return (
-                        <div className="space-y-3">
-                          {/* Roster Filter Bar */}
-                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                            <div className="flex flex-wrap items-center gap-2.5 flex-1">
-                              <div className="relative flex-1 min-w-[180px] max-w-xs">
-                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                <input
-                                  type="text"
-                                  value={rosterSearchQuery}
-                                  onChange={(e) => setRosterSearchQuery(e.target.value)}
-                                  placeholder="Search name or alias..."
-                                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                                />
-                              </div>
-
-                              {/* Gender Filter */}
-                              <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
-                                {[
-                                  { id: 'ALL', label: 'All Genders' },
-                                  { id: 'Women', label: 'Women' },
-                                  { id: 'Men', label: 'Men' },
-                                ].map((opt) => (
-                                  <button
-                                    key={opt.id}
-                                    onClick={() => setRosterFilterGender(opt.id)}
-                                    className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
-                                      rosterFilterGender === opt.id
-                                        ? 'bg-white text-slate-900 shadow-xs'
-                                        : 'text-slate-600 hover:text-slate-900'
-                                    }`}
-                                  >
-                                    {opt.label}
-                                  </button>
-                                ))}
-                              </div>
-
-                              {/* Active Status Filter */}
-                              <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
-                                {[
-                                  { id: 'ALL', label: 'All Status' },
-                                  { id: 'ACTIVE', label: 'Active' },
-                                  { id: 'INACTIVE', label: 'Inactive' },
-                                ].map((opt) => (
-                                  <button
-                                    key={opt.id}
-                                    onClick={() => setRosterFilterActive(opt.id)}
-                                    className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
-                                      rosterFilterActive === opt.id
-                                        ? 'bg-white text-slate-900 shadow-xs'
-                                        : 'text-slate-600 hover:text-slate-900'
-                                    }`}
-                                  >
-                                    {opt.label}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-3 text-xs text-slate-600 shrink-0">
-                              <span>
-                                Showing <strong>{filteredRoster.length}</strong> of{' '}
-                                <strong>{masterRoster.length}</strong>
-                              </span>
-                              {(rosterSearchQuery ||
-                                rosterFilterGender !== 'ALL' ||
-                                rosterFilterActive !== 'ALL') && (
-                                <button
-                                  onClick={() => {
-                                    setRosterSearchQuery('');
-                                    setRosterFilterGender('ALL');
-                                    setRosterFilterActive('ALL');
-                                  }}
-                                  className="font-bold text-cyan-700 hover:underline cursor-pointer"
-                                >
-                                  Reset
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          {filteredRoster.length === 0 ? (
-                            <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                              No athletes match the selected roster filters.
-                            </div>
-                          ) : (
-                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                              <table className="w-full text-left text-xs">
-                                <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
-                                  <tr>
-                                    <th className="py-2.5 px-4">Canonical Name</th>
-                                    <th className="py-2.5 px-4">Gender</th>
-                                    <th className="py-2.5 px-4 text-center">Status</th>
-                                    <th className="py-2.5 px-4">Saved Aliases</th>
-                                    <th className="py-2.5 px-4 text-center">Actions</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                  {filteredRoster.map((ath) => {
-                                    const isEditingAth = editingRosterId === ath.id;
-                                    if (isEditingAth) {
-                                      return (
-                                        <tr key={ath.id} className="bg-cyan-50/70">
-                                          <td className="py-2.5 px-4">
-                                            <input
-                                              type="text"
-                                              value={editRosterDraft.canonicalName}
-                                              onChange={(e) =>
-                                                setEditRosterDraft((prev) => ({
-                                                  ...prev,
-                                                  canonicalName: e.target.value,
-                                                }))
-                                              }
-                                              className="w-full px-2.5 py-1.5 text-xs font-bold bg-white border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                                            />
-                                            <label className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan-900 cursor-pointer">
-                                              <input
-                                                type="checkbox"
-                                                checked={editRosterDraft.propagateToDb}
-                                                onChange={(e) =>
-                                                  setEditRosterDraft((prev) => ({
-                                                    ...prev,
-                                                    propagateToDb: e.target.checked,
-                                                  }))
-                                                }
-                                                className="rounded text-cyan-600"
-                                              />
-                                              Update matching DB rows
-                                            </label>
-                                          </td>
-                                          <td className="py-2.5 px-4 align-top">
-                                            <select
-                                              value={editRosterDraft.gender}
-                                              onChange={(e) =>
-                                                setEditRosterDraft((prev) => ({
-                                                  ...prev,
-                                                  gender: e.target.value,
-                                                }))
-                                              }
-                                              className="px-2 py-1.5 text-xs bg-white border border-cyan-300 rounded-lg"
-                                            >
-                                              <option value="Women">Women</option>
-                                              <option value="Men">Men</option>
-                                            </select>
-                                          </td>
-                                          <td className="py-2.5 px-4 text-center align-top">
-                                            <label className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 bg-white border border-cyan-300 px-2 py-1 rounded-lg cursor-pointer">
-                                              <input
-                                                type="checkbox"
-                                                checked={editRosterDraft.isActive}
-                                                onChange={(e) =>
-                                                  setEditRosterDraft((prev) => ({
-                                                    ...prev,
-                                                    isActive: e.target.checked,
-                                                  }))
-                                                }
-                                                className="rounded text-cyan-600"
-                                              />
-                                              Active
-                                            </label>
-                                          </td>
-                                          <td className="py-2.5 px-4 align-top">
-                                            <input
-                                              type="text"
-                                              value={editRosterDraft.aliasesText}
-                                              onChange={(e) =>
-                                                setEditRosterDraft((prev) => ({
-                                                  ...prev,
-                                                  aliasesText: e.target.value,
-                                                }))
-                                              }
-                                              placeholder="Semicolon or comma separated aliases..."
-                                              className="w-full px-2.5 py-1.5 text-xs bg-white border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                                            />
-                                          </td>
-                                          <td className="py-2.5 px-4 text-center align-top">
-                                            <div className="inline-flex items-center gap-1">
-                                              <button
-                                                type="button"
-                                                onClick={() => handleSaveMasterRosterEdit(ath)}
-                                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
-                                              >
-                                                Save
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => setEditingRosterId(null)}
-                                                className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
-                                              >
-                                                Cancel
-                                              </button>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      );
-                                    }
-
-                                    return (
-                                      <tr key={ath.id} className="hover:bg-slate-50">
-                                        <td className="py-2.5 px-4 font-bold text-slate-900">
-                                          {ath.canonicalName}
-                                        </td>
-                                        <td className="py-2.5 px-4 text-slate-600">{ath.gender}</td>
-                                        <td className="py-2.5 px-4 text-center">
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              const updatedItem = { ...ath, isActive: !ath.isActive };
-                                              updateMasterRoster(
-                                                masterRoster.map((item) =>
-                                                  item.id === ath.id ? updatedItem : item
-                                                ),
-                                                [updatedItem]
-                                              );
-                                            }}
-                                            title="Click to toggle Active / Inactive status"
-                                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold transition cursor-pointer ${
-                                              ath.isActive
-                                                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                                                : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                                            }`}
-                                          >
-                                            {ath.isActive ? 'Active' : 'Inactive'}
-                                          </button>
-                                        </td>
-                                        <td className="py-2.5 px-4 text-slate-500">
-                                          {(ath.aliases || []).length > 0 ? (
-                                            <div className="flex flex-wrap gap-1">
-                                              {ath.aliases.map((al) => (
-                                                <span
-                                                  key={al}
-                                                  className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
-                                                >
-                                                  {al}
-                                                </span>
-                                              ))}
-                                            </div>
-                                          ) : (
-                                            <span className="text-slate-400 italic">None</span>
-                                          )}
-                                        </td>
-                                        <td className="py-2.5 px-4 text-center">
-                                          <div className="inline-flex items-center gap-1.5">
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                setEditingRosterId(ath.id);
-                                                setEditRosterDraft({
-                                                  canonicalName: ath.canonicalName || '',
-                                                  gender: ath.gender || 'Women',
-                                                  isActive: Boolean(ath.isActive),
-                                                  aliasesText: (ath.aliases || []).join('; '),
-                                                  propagateToDb: true,
-                                                });
-                                              }}
-                                              className="px-2 py-1 rounded text-[11px] font-bold text-cyan-700 hover:bg-cyan-50 border border-cyan-200 cursor-pointer"
-                                            >
-                                              Edit
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                updateMasterRoster(
-                                                  masterRoster.filter((item) => item.id !== ath.id),
-                                                  null,
-                                                  ath.id
-                                                )
-                                              }
-                                              title="Remove athlete from Master Roster"
-                                              className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                                            >
-                                              <Trash2 className="w-3.5 h-3.5" />
-                                            </button>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()
-                  )}
-                </div>
-              )}
-
-              {/* SUB-TAB C: MASTER COMPETITIONS */}
-              {historySubTab === 'competitions' && (
-                <div className="p-5 sm:p-6 space-y-5">
-                  <div className="bg-cyan-50/50 p-4 rounded-xl border border-cyan-200/80 space-y-2.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-cyan-900 flex items-center gap-1.5">
-                        <Building2 className="w-4 h-4 text-cyan-700" />
-                        Mass Competitions Importer (Each Competition + Date is a Unique Meet)
-                      </label>
-                      <span className="text-[11px] text-cyan-800 font-medium">
-                        Columns:{' '}
-                        <code className="bg-white px-1 rounded">
-                          Competition Name, Date (YYYY-MM-DD), Location, Aliases
-                        </code>
-                      </span>
-                    </div>
-                    <textarea
-                      rows={4}
-                      value={bulkCompText}
-                      onChange={(e) => setBulkCompText(e.target.value)}
-                      placeholder={`Competition Name, Date, Location, Aliases\nGettysburg Invitational, 2026-10-24, Gettysburg PA, Gettysburg Invite\nCentennial Conference Championships, 2026-02-20, Lancaster PA, CC Championships`}
-                      className="w-full p-3 text-xs font-mono bg-white border border-cyan-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    />
-                    <button
-                      onClick={handleBulkImportCompetitions}
-                      disabled={!bulkCompText.trim()}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white transition cursor-pointer"
-                    >
-                      <Calendar className="w-3.5 h-3.5" />
-                      Mass Import Competitions
-                    </button>
-                  </div>
-
-                  {/* Single Competition Quick-Add */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200 items-end">
-                    <div className="md:col-span-2">
-                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                        Competition Name
-                      </label>
-                      <input
-                        type="text"
-                        value={newCompName}
-                        onChange={(e) => setNewCompName(e.target.value)}
-                        placeholder="e.g., Centennial Conference Championships"
-                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                        Meet Date
-                      </label>
-                      <input
-                        type="date"
-                        value={newCompDate}
-                        onChange={(e) => setNewCompDate(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newCompLocation}
-                        onChange={(e) => setNewCompLocation(e.target.value)}
-                        placeholder="Location (e.g., Lancaster PA)"
-                        className="flex-1 px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg"
-                      />
-                      <button
-                        onClick={() => {
-                          if (!newCompName.trim()) return;
-                          const created = {
-                            id: `comp-${Date.now()}`,
-                            canonicalName: newCompName.trim(),
-                            date: normalizeDateIso(newCompDate),
-                            defaultLocation: newCompLocation.trim(),
-                            aliases: [],
-                          };
-                          updateMasterCompetitions([...masterCompetitions, created], [created]);
-                          setNewCompName('');
-                          setNewCompDate('');
-                          setNewCompLocation('');
-                        }}
-                        className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  </div>
-
-                  {masterCompetitions.length === 0 ? (
-                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                      No competitions in Master Competitions yet.
-                    </div>
-                  ) : (
-                    (() => {
-                      const qComp = compSearchQuery.trim().toLowerCase();
-                      const qCompDate = compFilterDate.trim().toLowerCase();
-                      const dir = compSortConfig.direction === 'asc' ? 1 : -1;
-
-                      const filteredSortedComps = masterCompetitions
-                        .filter((comp) => {
-                          if (qComp) {
-                            const hay = `${comp.canonicalName || ''} ${
-                              comp.defaultLocation || ''
-                            } ${(comp.aliases || []).join(' ')}`.toLowerCase();
-                            if (!hay.includes(qComp)) return false;
-                          }
-                          if (
-                            qCompDate &&
-                            !String(comp.date || '').toLowerCase().includes(qCompDate)
-                          ) {
-                            return false;
-                          }
-                          return true;
-                        })
-                        .slice()
-                        .sort((a, b) => {
-                          switch (compSortConfig.key) {
-                            case 'canonicalName':
-                              return (
-                                String(a.canonicalName || '').localeCompare(
-                                  String(b.canonicalName || '')
-                                ) * dir
-                              );
-                            case 'defaultLocation':
-                              return (
-                                String(a.defaultLocation || '').localeCompare(
-                                  String(b.defaultLocation || '')
-                                ) * dir
-                              );
-                            case 'date':
-                            default: {
-                              const cmp = String(a.date || '').localeCompare(String(b.date || ''));
-                              if (cmp !== 0) return cmp * dir;
-                              return String(a.canonicalName || '').localeCompare(
-                                String(b.canonicalName || '')
-                              );
-                            }
-                          }
-                        });
-
-                      return (
-                        <div className="space-y-3">
-                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                            <div className="flex flex-wrap items-center gap-2.5 flex-1">
-                              <div className="relative flex-1 min-w-[200px] max-w-xs">
-                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                <input
-                                  type="text"
-                                  value={compSearchQuery}
-                                  onChange={(e) => setCompSearchQuery(e.target.value)}
-                                  placeholder="Search competition, location, or alias..."
-                                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                                />
-                              </div>
-                              <input
-                                type="text"
-                                value={compFilterDate}
-                                onChange={(e) => setCompFilterDate(e.target.value)}
-                                placeholder="Date (YYYY-MM)..."
-                                className="px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-200 rounded-lg w-36 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                              />
-                            </div>
-                            <div className="text-xs text-slate-600">
-                              Showing <strong>{filteredSortedComps.length}</strong> of{' '}
-                              <strong>{masterCompetitions.length}</strong>
-                            </div>
-                          </div>
-
-                          <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                            <table className="w-full text-left text-xs">
-                              <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
-                                <tr>
-                                  <th
-                                    onClick={() =>
-                                      setCompSortConfig((p) => ({
-                                        key: 'canonicalName',
-                                        direction:
-                                          p.key === 'canonicalName' && p.direction === 'asc'
-                                            ? 'desc'
-                                            : 'asc',
-                                      }))
-                                    }
-                                    className="py-2.5 px-4 cursor-pointer hover:text-slate-900"
-                                  >
-                                    Competition Name
-                                  </th>
-                                  <th
-                                    onClick={() =>
-                                      setCompSortConfig((p) => ({
-                                        key: 'date',
-                                        direction:
-                                          p.key === 'date' && p.direction === 'desc'
-                                            ? 'asc'
-                                            : 'desc',
-                                      }))
-                                    }
-                                    className="py-2.5 px-4 cursor-pointer hover:text-slate-900"
-                                  >
-                                    Date
-                                  </th>
-                                  <th className="py-2.5 px-4">Location</th>
-                                  <th className="py-2.5 px-4">Aliases</th>
-                                  <th className="py-2.5 px-4 text-center">Actions</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100">
-                                {filteredSortedComps.map((comp) => {
-                                  const isEditing = editingCompId === comp.id;
-                                  if (isEditing) {
-                                    return (
-                                      <tr key={comp.id} className="bg-cyan-50/70">
-                                        <td className="py-2 px-4">
-                                          <input
-                                            type="text"
-                                            value={editCompDraft.canonicalName}
-                                            onChange={(e) =>
-                                              setEditCompDraft((p) => ({
-                                                ...p,
-                                                canonicalName: e.target.value,
-                                              }))
-                                            }
-                                            className="w-full px-2 py-1 text-xs font-bold bg-white border border-cyan-300 rounded"
-                                          />
-                                          <label className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-cyan-900 cursor-pointer">
-                                            <input
-                                              type="checkbox"
-                                              checked={editCompDraft.propagateToDb}
-                                              onChange={(e) =>
-                                                setEditCompDraft((p) => ({
-                                                  ...p,
-                                                  propagateToDb: e.target.checked,
-                                                }))
-                                              }
-                                            />
-                                            Update matching DB rows
-                                          </label>
-                                        </td>
-                                        <td className="py-2 px-4 align-top">
-                                          <input
-                                            type="date"
-                                            value={editCompDraft.date}
-                                            onChange={(e) =>
-                                              setEditCompDraft((p) => ({
-                                                ...p,
-                                                date: e.target.value,
-                                              }))
-                                            }
-                                            className="px-2 py-1 text-xs font-mono bg-white border border-cyan-300 rounded"
-                                          />
-                                        </td>
-                                        <td className="py-2 px-4 align-top">
-                                          <input
-                                            type="text"
-                                            value={editCompDraft.defaultLocation}
-                                            onChange={(e) =>
-                                              setEditCompDraft((p) => ({
-                                                ...p,
-                                                defaultLocation: e.target.value,
-                                              }))
-                                            }
-                                            className="w-full px-2 py-1 text-xs bg-white border border-cyan-300 rounded"
-                                          />
-                                        </td>
-                                        <td className="py-2 px-4 align-top">
-                                          <input
-                                            type="text"
-                                            value={editCompDraft.aliasesText}
-                                            onChange={(e) =>
-                                              setEditCompDraft((p) => ({
-                                                ...p,
-                                                aliasesText: e.target.value,
-                                              }))
-                                            }
-                                            className="w-full px-2 py-1 text-xs bg-white border border-cyan-300 rounded"
-                                          />
-                                        </td>
-                                        <td className="py-2 px-4 text-center align-top">
-                                          <div className="inline-flex gap-1">
-                                            <button
-                                              type="button"
-                                              onClick={() => handleSaveMasterCompetitionEdit(comp)}
-                                              className="px-2 py-1 rounded text-[11px] font-bold bg-emerald-600 text-white cursor-pointer"
-                                            >
-                                              Save
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => setEditingCompId(null)}
-                                              className="px-2 py-1 rounded text-[11px] bg-white border border-slate-200 cursor-pointer"
-                                            >
-                                              Cancel
-                                            </button>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    );
-                                  }
-                                  return (
-                                    <tr key={comp.id} className="hover:bg-slate-50">
-                                      <td className="py-2.5 px-4 font-bold text-slate-900">
-                                        {comp.canonicalName}
-                                      </td>
-                                      <td className="py-2.5 px-4 font-mono text-slate-600">
-                                        {comp.date ? formatDisplayDateMDY(comp.date) : 'Any Date'}
-                                      </td>
-                                      <td className="py-2.5 px-4 text-slate-600">
-                                        {comp.defaultLocation || '—'}
-                                      </td>
-                                      <td className="py-2.5 px-4 text-slate-500">
-                                        {(comp.aliases || []).join(', ') || '—'}
-                                      </td>
-                                      <td className="py-2.5 px-4 text-center">
-                                        <div className="inline-flex items-center gap-1.5">
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setEditingCompId(comp.id);
-                                              setEditCompDraft({
-                                                canonicalName: comp.canonicalName || '',
-                                                date: normalizeDateIso(comp.date || ''),
-                                                defaultLocation: comp.defaultLocation || '',
-                                                aliasesText: (comp.aliases || []).join('; '),
-                                                propagateToDb: true,
-                                              });
-                                            }}
-                                            className="px-2 py-1 rounded text-[11px] font-bold text-cyan-700 hover:bg-cyan-50 border border-cyan-200 cursor-pointer"
-                                          >
-                                            Edit
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              updateMasterCompetitions(
-                                                masterCompetitions.filter((c) => c.id !== comp.id),
-                                                null,
-                                                comp.id
-                                              )
-                                            }
-                                            className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                                          >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </button>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      );
-                    })()
-                  )}
-                </div>
-              )}
-
-              {/* SUB-TAB D: MASTER EVENTS */}
-              {historySubTab === 'events' && (
-                <div className="p-5 sm:p-6 space-y-5">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200 items-end">
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                        Canonical Event Name
-                      </label>
-                      <input
-                        type="text"
-                        value={newEventName}
-                        onChange={(e) => setNewEventName(e.target.value)}
-                        placeholder="e.g., Women 50 Freestyle"
-                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                        Optional Alias
-                      </label>
-                      <input
-                        type="text"
-                        value={newEventAlias}
-                        onChange={(e) => setNewEventAlias(e.target.value)}
-                        placeholder="e.g., 50 Free"
-                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const clean = newEventName.trim();
-                        if (!clean) return;
-                        const evKey = normalizeEventKey(clean) || clean.toLowerCase();
-                        const created = {
-                          id: `ev-${Date.now()}`,
-                          canonicalName: clean,
-                          eventKey: evKey,
-                          gender: clean.toLowerCase().startsWith('men') ? 'Men' : 'Women',
-                          isRelay: clean.toLowerCase().includes('relay'),
-                          aliases: newEventAlias.trim() ? [newEventAlias.trim()] : [],
-                        };
-                        updateMasterEvents([...masterEvents, created], [created]);
-                        setNewEventName('');
-                        setNewEventAlias('');
-                      }}
-                      className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
-                    >
-                      + Add Canonical Event
-                    </button>
-                  </div>
-
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[460px]">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
-                        <tr>
-                          <th className="py-2.5 px-4">Canonical Event</th>
-                          <th className="py-2.5 px-4">Gender</th>
-                          <th className="py-2.5 px-4">Aliases</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {masterEvents.map((ev) => (
-                          <tr key={ev.id} className="hover:bg-slate-50">
-                            <td className="py-2 px-4 font-bold text-slate-900">
-                              {ev.canonicalName}
-                            </td>
-                            <td className="py-2 px-4 text-slate-600">{ev.gender}</td>
-                            <td className="py-2 px-4 text-slate-500">
-                              {(ev.aliases || []).join(', ') || '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* SUB-TAB E: COMMITTED DATABASE */}
-              {historySubTab === 'database' && (
-                <div className="p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3.5">
-                    <div className="flex flex-wrap items-center gap-2 flex-1">
-                      <input
-                        type="text"
-                        value={dbSearchName}
-                        onChange={(e) => {
-                          setDbSearchName(e.target.value);
-                          setDbPage(1);
-                        }}
-                        placeholder="Search athlete..."
-                        className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg min-w-[160px]"
-                      />
-                      <select
-                        value={dbFilterEvent}
-                        onChange={(e) => {
-                          setDbFilterEvent(e.target.value);
-                          setDbPage(1);
-                        }}
-                        className="px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg max-w-[190px]"
-                      >
-                        <option value="ALL">All Events</option>
-                        {dbFilterOptions.events.map((ev) => (
-                          <option key={ev} value={ev}>
-                            {ev}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        value={dbFilterCompetition}
-                        onChange={(e) => {
-                          setDbFilterCompetition(e.target.value);
-                          setDbPage(1);
-                        }}
-                        className="px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg max-w-[190px]"
-                      >
-                        <option value="ALL">All Competitions</option>
-                        {dbFilterOptions.competitions.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="text"
-                        value={dbFilterDate}
-                        onChange={(e) => {
-                          setDbFilterDate(e.target.value);
-                          setDbPage(1);
-                        }}
-                        placeholder="Date (YYYY-MM)..."
-                        className="px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-200 rounded-lg w-32"
-                      />
-                      <select
-                        value={dbFilterType}
-                        onChange={(e) => {
-                          setDbFilterType(e.target.value);
-                          setDbPage(1);
-                        }}
-                        className="px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg"
-                      >
-                        <option value="ALL">All Types</option>
-                        <option value="OFFICIAL">Official Individual</option>
-                        <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
-                        <option value="INTERMEDIATE_SPLIT">Split (S)</option>
-                        <option value="RELAY_WIN">Relay</option>
-                      </select>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
                       {selectedDbIds.size > 0 && (
                         <button
                           type="button"
@@ -8962,6 +7798,162 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Duplicate & Conflict Scanner Panel */}
+                  {showDbDuplicateScanner && (
+                    <div className="bg-amber-50/75 border border-amber-200 rounded-2xl p-4 sm:p-5 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <h3 className="text-sm font-extrabold text-amber-950 flex items-center gap-1.5">
+                            <AlertCircle className="w-4 h-4 text-amber-700" />
+                            Duplicate &amp; Near-Match Cleanup ({duplicateDbClusters.length} Cluster
+                            {duplicateDbClusters.length === 1 ? '' : 's'})
+                          </h3>
+                          <p className="text-xs text-amber-800 mt-0.5">
+                            Groups swims sharing the same athlete, event, and time within ±2 days
+                            (catching re-imports, multi-day date shifts, or competition aliases).
+                          </p>
+                        </div>
+
+                        {duplicateDbClusters.some((c) => c.isExactDuplicate) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const extraIds = [];
+                              duplicateDbClusters.forEach((c) => {
+                                if (c.isExactDuplicate && c.records.length > 1) {
+                                  c.records.slice(1).forEach((r) => extraIds.push(r.id));
+                                }
+                              });
+                              if (extraIds.length > 0) setPendingDbDeleteIds(extraIds);
+                            }}
+                            className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-amber-700 hover:bg-amber-600 text-white shadow-2xs transition cursor-pointer"
+                          >
+                            Stage Exact Duplicate Removals (
+                            {duplicateDbClusters.reduce(
+                              (acc, c) =>
+                                acc + (c.isExactDuplicate ? Math.max(0, c.records.length - 1) : 0),
+                              0
+                            )}
+                            )
+                          </button>
+                        )}
+                      </div>
+
+                      {duplicateDbClusters.length === 0 ? (
+                        <div className="bg-white border border-amber-200/80 rounded-xl p-6 text-center text-xs text-emerald-800 font-semibold flex items-center justify-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>
+                            No duplicate or conflicting time clusters found in your database!
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 max-h-[440px] overflow-y-auto pr-1">
+                          {duplicateDbClusters.map((cluster) => (
+                            <div
+                              key={cluster.id}
+                              className="bg-white border border-amber-200 rounded-xl overflow-hidden shadow-2xs"
+                            >
+                              <div className="px-4 py-2.5 bg-amber-100/70 border-b border-amber-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-extrabold text-slate-900">
+                                    {cluster.swimmerName}
+                                  </span>
+                                  <span className="text-slate-600">• {cluster.eventLabel}</span>
+                                  <span className="font-mono font-extrabold text-cyan-900">
+                                    ({cluster.time})
+                                  </span>
+                                </div>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                                    cluster.isExactDuplicate
+                                      ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                                      : 'bg-amber-200 text-amber-950'
+                                  }`}
+                                >
+                                  {cluster.isExactDuplicate
+                                    ? `Exact Duplicate (${cluster.records.length}×)`
+                                    : `Near-Match Conflict (${cluster.records.length}×)`}
+                                </span>
+                              </div>
+
+                              <div className="divide-y divide-slate-100">
+                                {cluster.records.map((rec) => {
+                                  const placeUp = String(rec.place || '').toUpperCase();
+                                  const typeBadge =
+                                    rec.swimType === 'RELAY_LEADOFF' || placeUp === 'R'
+                                      ? 'Relay Lead-Off (R)'
+                                      : rec.swimType === 'INTERMEDIATE_SPLIT' || placeUp === 'S'
+                                      ? 'Split (S)'
+                                      : rec.swimType === 'RELAY_WIN'
+                                      ? 'Relay Win'
+                                      : rec.swimType === 'RELAY_TEAM'
+                                      ? 'Relay Result'
+                                      : 'Official';
+
+                                  return (
+                                    <div
+                                      key={rec.id}
+                                      className="px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs hover:bg-slate-50"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                        <span className="font-mono font-bold text-slate-800">
+                                          {formatDisplayDateMDY(rec.date)}
+                                        </span>
+                                        <span className="font-semibold text-slate-700">
+                                          {rec.competition || '—'}
+                                        </span>
+                                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold text-[10px]">
+                                          {rec.round || 'Finals'}
+                                        </span>
+                                        {rec.place && (
+                                          <span className="px-2 py-0.5 rounded bg-cyan-50 text-cyan-800 font-bold text-[10px]">
+                                            Place: #{rec.place}
+                                          </span>
+                                        )}
+                                        <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold text-[10px]">
+                                          {typeBadge}
+                                        </span>
+                                        {rec.classYear && (
+                                          <span className="text-[11px] text-slate-500">
+                                            Class: {rec.classYear}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const others = cluster.records
+                                              .filter((r) => r.id !== rec.id)
+                                              .map((r) => r.id);
+                                            if (others.length > 0) {
+                                              handleDeleteDbRecords(others);
+                                            }
+                                          }}
+                                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer"
+                                        >
+                                          Keep Only This
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteDbRecords([rec.id])}
+                                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition cursor-pointer"
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {pendingDbDeleteIds && pendingDbDeleteIds.length > 0 && (
                     <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
