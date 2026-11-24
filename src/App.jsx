@@ -1812,6 +1812,7 @@ export default function App() {
   });
   const [selectedHeatEventLabel, setSelectedHeatEventLabel] = useState('');
   const [selectedHeatNum, setSelectedHeatNum] = useState('ALL');
+  const [isHeatSheetFullscreen, setIsHeatSheetFullscreen] = useState(false);
   const [broadcastGraphicTheme, setBroadcastGraphicTheme] = useState('slate');
   const [selectedPngHeaderMarks, setSelectedPngHeaderMarks] = useState(new Set(['PROGRAM_RECORD']));
   const [isExportingAllGraphics, setIsExportingAllGraphics] = useState(false);
@@ -8565,9 +8566,7 @@ export default function App() {
                               );
                             case 'date':
                             default: {
-                              const cmp = String(a.date || '').localeCompare(
-                                String(b.date || '')
-                              );
+                              const cmp = String(a.date || '').localeCompare(String(b.date || ''));
                               if (cmp !== 0) return cmp * dir;
                               return String(a.canonicalName || '').localeCompare(
                                 String(b.canonicalName || '')
@@ -8576,264 +8575,216 @@ export default function App() {
                           }
                         });
 
-                      const toggleCompSort = (key) => {
-                        setCompSortConfig((prev) => ({
-                          key,
-                          direction:
-                            prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
-                        }));
-                      };
-
                       return (
                         <div className="space-y-3">
-                          {/* Competition Search, Date Filter & Count Bar */}
                           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div className="flex flex-wrap items-center gap-2.5 flex-1">
-                              <div className="relative flex-1 min-w-[180px] max-w-xs">
+                              <div className="relative flex-1 min-w-[200px] max-w-xs">
                                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                                 <input
                                   type="text"
                                   value={compSearchQuery}
                                   onChange={(e) => setCompSearchQuery(e.target.value)}
-                                  placeholder="Search meet, location, or alias..."
+                                  placeholder="Search competition, location, or alias..."
                                   className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
                                 />
                               </div>
-
                               <input
                                 type="text"
                                 value={compFilterDate}
                                 onChange={(e) => setCompFilterDate(e.target.value)}
-                                placeholder="Filter date (e.g., 2026 or 2026-11)"
-                                className="w-48 px-3 py-1.5 text-xs font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                placeholder="Date (YYYY-MM)..."
+                                className="px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-200 rounded-lg w-36 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                               />
                             </div>
-
-                            <div className="flex items-center gap-3 text-xs text-slate-600 shrink-0">
-                              <span>
-                                Showing <strong>{filteredSortedComps.length}</strong> of{' '}
-                                <strong>{masterCompetitions.length}</strong>
-                              </span>
-                              {(compSearchQuery || compFilterDate) && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setCompSearchQuery('');
-                                    setCompFilterDate('');
-                                  }}
-                                  className="font-bold text-cyan-700 hover:underline cursor-pointer"
-                                >
-                                  Reset
-                                </button>
-                              )}
+                            <div className="text-xs text-slate-600">
+                              Showing <strong>{filteredSortedComps.length}</strong> of{' '}
+                              <strong>{masterCompetitions.length}</strong>
                             </div>
                           </div>
 
-                          {filteredSortedComps.length === 0 ? (
-                            <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                              No competitions match your active search or date filter.
-                            </div>
-                          ) : (
-                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                              <table className="w-full text-left text-xs">
-                                <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
-                                  <tr>
-                                    <th
-                                      onClick={() => toggleCompSort('canonicalName')}
-                                      className="py-2.5 px-4 cursor-pointer hover:text-slate-900 select-none"
-                                    >
-                                      <div className="inline-flex items-center gap-1">
-                                        <span>Canonical Competition</span>
-                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                      </div>
-                                    </th>
-                                    <th
-                                      onClick={() => toggleCompSort('date')}
-                                      className="py-2.5 px-4 cursor-pointer hover:text-slate-900 select-none"
-                                    >
-                                      <div className="inline-flex items-center gap-1">
-                                        <span>Date</span>
-                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                      </div>
-                                    </th>
-                                    <th
-                                      onClick={() => toggleCompSort('defaultLocation')}
-                                      className="py-2.5 px-4 cursor-pointer hover:text-slate-900 select-none"
-                                    >
-                                      <div className="inline-flex items-center gap-1">
-                                        <span>Default Location</span>
-                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                      </div>
-                                    </th>
-                                    <th className="py-2.5 px-4">Saved Aliases</th>
-                                    <th className="py-2.5 px-4 text-center">Actions</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                  {filteredSortedComps.map((comp) => {
-                                    const isEditingComp = editingCompId === comp.id;
-                                    if (isEditingComp) {
-                                      return (
-                                        <tr key={comp.id} className="bg-cyan-50/70">
-                                          <td className="py-2.5 px-4">
-                                            <input
-                                              type="text"
-                                              value={editCompDraft.canonicalName}
-                                              onChange={(e) =>
-                                                setEditCompDraft((prev) => ({
-                                                  ...prev,
-                                                  canonicalName: e.target.value,
-                                                }))
-                                              }
-                                              className="w-full px-2.5 py-1.5 text-xs font-bold bg-white border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                                            />
-                                            <label className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan-900 cursor-pointer">
-                                              <input
-                                                type="checkbox"
-                                                checked={editCompDraft.propagateToDb}
-                                                onChange={(e) =>
-                                                  setEditCompDraft((prev) => ({
-                                                    ...prev,
-                                                    propagateToDb: e.target.checked,
-                                                  }))
-                                                }
-                                                className="rounded text-cyan-600"
-                                              />
-                                              Update matching DB rows
-                                            </label>
-                                          </td>
-                                          <td className="py-2.5 px-4 align-top">
-                                            <input
-                                              type="date"
-                                              value={editCompDraft.date}
-                                              onChange={(e) =>
-                                                setEditCompDraft((prev) => ({
-                                                  ...prev,
-                                                  date: e.target.value,
-                                                }))
-                                              }
-                                              className="px-2 py-1.5 text-xs font-mono bg-white border border-cyan-300 rounded-lg"
-                                            />
-                                          </td>
-                                          <td className="py-2.5 px-4 align-top">
-                                            <input
-                                              type="text"
-                                              value={editCompDraft.defaultLocation}
-                                              onChange={(e) =>
-                                                setEditCompDraft((prev) => ({
-                                                  ...prev,
-                                                  defaultLocation: e.target.value,
-                                                }))
-                                              }
-                                              placeholder="Location..."
-                                              className="w-full px-2.5 py-1.5 text-xs bg-white border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                                            />
-                                          </td>
-                                          <td className="py-2.5 px-4 align-top">
-                                            <input
-                                              type="text"
-                                              value={editCompDraft.aliasesText}
-                                              onChange={(e) =>
-                                                setEditCompDraft((prev) => ({
-                                                  ...prev,
-                                                  aliasesText: e.target.value,
-                                                }))
-                                              }
-                                              placeholder="Semicolon or comma separated aliases..."
-                                              className="w-full px-2.5 py-1.5 text-xs bg-white border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                                            />
-                                          </td>
-                                          <td className="py-2.5 px-4 text-center align-top">
-                                            <div className="inline-flex items-center gap-1">
-                                              <button
-                                                type="button"
-                                                onClick={() => handleSaveMasterCompetitionEdit(comp)}
-                                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
-                                              >
-                                                Save
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => setEditingCompId(null)}
-                                                className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
-                                              >
-                                                Cancel
-                                              </button>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      );
+                          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                                <tr>
+                                  <th
+                                    onClick={() =>
+                                      setCompSortConfig((p) => ({
+                                        key: 'canonicalName',
+                                        direction:
+                                          p.key === 'canonicalName' && p.direction === 'asc'
+                                            ? 'desc'
+                                            : 'asc',
+                                      }))
                                     }
-
+                                    className="py-2.5 px-4 cursor-pointer hover:text-slate-900"
+                                  >
+                                    Competition Name
+                                  </th>
+                                  <th
+                                    onClick={() =>
+                                      setCompSortConfig((p) => ({
+                                        key: 'date',
+                                        direction:
+                                          p.key === 'date' && p.direction === 'desc'
+                                            ? 'asc'
+                                            : 'desc',
+                                      }))
+                                    }
+                                    className="py-2.5 px-4 cursor-pointer hover:text-slate-900"
+                                  >
+                                    Date
+                                  </th>
+                                  <th className="py-2.5 px-4">Location</th>
+                                  <th className="py-2.5 px-4">Aliases</th>
+                                  <th className="py-2.5 px-4 text-center">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {filteredSortedComps.map((comp) => {
+                                  const isEditing = editingCompId === comp.id;
+                                  if (isEditing) {
                                     return (
-                                      <tr key={comp.id} className="hover:bg-slate-50">
-                                        <td className="py-2.5 px-4 font-bold text-slate-900">
-                                          {comp.canonicalName}
+                                      <tr key={comp.id} className="bg-cyan-50/70">
+                                        <td className="py-2 px-4">
+                                          <input
+                                            type="text"
+                                            value={editCompDraft.canonicalName}
+                                            onChange={(e) =>
+                                              setEditCompDraft((p) => ({
+                                                ...p,
+                                                canonicalName: e.target.value,
+                                              }))
+                                            }
+                                            className="w-full px-2 py-1 text-xs font-bold bg-white border border-cyan-300 rounded"
+                                          />
+                                          <label className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-cyan-900 cursor-pointer">
+                                            <input
+                                              type="checkbox"
+                                              checked={editCompDraft.propagateToDb}
+                                              onChange={(e) =>
+                                                setEditCompDraft((p) => ({
+                                                  ...p,
+                                                  propagateToDb: e.target.checked,
+                                                }))
+                                              }
+                                            />
+                                            Update matching DB rows
+                                          </label>
                                         </td>
-                                        <td className="py-2.5 px-4 font-mono text-slate-600">
-                                          {comp.date || 'Any Date'}
+                                        <td className="py-2 px-4 align-top">
+                                          <input
+                                            type="date"
+                                            value={editCompDraft.date}
+                                            onChange={(e) =>
+                                              setEditCompDraft((p) => ({
+                                                ...p,
+                                                date: e.target.value,
+                                              }))
+                                            }
+                                            className="px-2 py-1 text-xs font-mono bg-white border border-cyan-300 rounded"
+                                          />
                                         </td>
-                                        <td className="py-2.5 px-4 text-slate-600">
-                                          {comp.defaultLocation || '—'}
+                                        <td className="py-2 px-4 align-top">
+                                          <input
+                                            type="text"
+                                            value={editCompDraft.defaultLocation}
+                                            onChange={(e) =>
+                                              setEditCompDraft((p) => ({
+                                                ...p,
+                                                defaultLocation: e.target.value,
+                                              }))
+                                            }
+                                            className="w-full px-2 py-1 text-xs bg-white border border-cyan-300 rounded"
+                                          />
                                         </td>
-                                        <td className="py-2.5 px-4 text-slate-500">
-                                          {(comp.aliases || []).length > 0 ? (
-                                            <div className="flex flex-wrap gap-1">
-                                              {comp.aliases.map((al) => (
-                                                <span
-                                                  key={al}
-                                                  className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
-                                                >
-                                                  {al}
-                                                </span>
-                                              ))}
-                                            </div>
-                                          ) : (
-                                            <span className="text-slate-400 italic">None</span>
-                                          )}
+                                        <td className="py-2 px-4 align-top">
+                                          <input
+                                            type="text"
+                                            value={editCompDraft.aliasesText}
+                                            onChange={(e) =>
+                                              setEditCompDraft((p) => ({
+                                                ...p,
+                                                aliasesText: e.target.value,
+                                              }))
+                                            }
+                                            className="w-full px-2 py-1 text-xs bg-white border border-cyan-300 rounded"
+                                          />
                                         </td>
-                                        <td className="py-2.5 px-4 text-center">
-                                          <div className="inline-flex items-center gap-1.5">
+                                        <td className="py-2 px-4 text-center align-top">
+                                          <div className="inline-flex gap-1">
                                             <button
                                               type="button"
-                                              onClick={() => {
-                                                setEditingCompId(comp.id);
-                                                setEditCompDraft({
-                                                  canonicalName: comp.canonicalName || '',
-                                                  date: normalizeDateIso(comp.date || ''),
-                                                  defaultLocation: comp.defaultLocation || '',
-                                                  aliasesText: (comp.aliases || []).join('; '),
-                                                  propagateToDb: true,
-                                                });
-                                              }}
-                                              className="px-2 py-1 rounded text-[11px] font-bold text-cyan-700 hover:bg-cyan-50 border border-cyan-200 cursor-pointer"
+                                              onClick={() => handleSaveMasterCompetitionEdit(comp)}
+                                              className="px-2 py-1 rounded text-[11px] font-bold bg-emerald-600 text-white cursor-pointer"
                                             >
-                                              Edit
+                                              Save
                                             </button>
                                             <button
                                               type="button"
-                                              onClick={() =>
-                                                updateMasterCompetitions(
-                                                  masterCompetitions.filter(
-                                                    (item) => item.id !== comp.id
-                                                  ),
-                                                  null,
-                                                  comp.id
-                                                )
-                                              }
-                                              className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                              onClick={() => setEditingCompId(null)}
+                                              className="px-2 py-1 rounded text-[11px] bg-white border border-slate-200 cursor-pointer"
                                             >
-                                              <Trash2 className="w-3.5 h-3.5" />
+                                              Cancel
                                             </button>
                                           </div>
                                         </td>
                                       </tr>
                                     );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
+                                  }
+                                  return (
+                                    <tr key={comp.id} className="hover:bg-slate-50">
+                                      <td className="py-2.5 px-4 font-bold text-slate-900">
+                                        {comp.canonicalName}
+                                      </td>
+                                      <td className="py-2.5 px-4 font-mono text-slate-600">
+                                        {comp.date ? formatDisplayDateMDY(comp.date) : 'Any Date'}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-slate-600">
+                                        {comp.defaultLocation || '—'}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-slate-500">
+                                        {(comp.aliases || []).join(', ') || '—'}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-center">
+                                        <div className="inline-flex items-center gap-1.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingCompId(comp.id);
+                                              setEditCompDraft({
+                                                canonicalName: comp.canonicalName || '',
+                                                date: normalizeDateIso(comp.date || ''),
+                                                defaultLocation: comp.defaultLocation || '',
+                                                aliasesText: (comp.aliases || []).join('; '),
+                                                propagateToDb: true,
+                                              });
+                                            }}
+                                            className="px-2 py-1 rounded text-[11px] font-bold text-cyan-700 hover:bg-cyan-50 border border-cyan-200 cursor-pointer"
+                                          >
+                                            Edit
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              updateMasterCompetitions(
+                                                masterCompetitions.filter((c) => c.id !== comp.id),
+                                                null,
+                                                comp.id
+                                              )
+                                            }
+                                            className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       );
                     })()
@@ -8841,11 +8792,11 @@ export default function App() {
                 </div>
               )}
 
-              {/* SUB-TAB C2: MASTER EVENTS */}
+              {/* SUB-TAB D: MASTER EVENTS */}
               {historySubTab === 'events' && (
                 <div className="p-5 sm:p-6 space-y-5">
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row md:items-end gap-3">
-                    <div className="flex-1">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200 items-end">
+                    <div>
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
                         Canonical Event Name
                       </label>
@@ -8853,113 +8804,64 @@ export default function App() {
                         type="text"
                         value={newEventName}
                         onChange={(e) => setNewEventName(e.target.value)}
-                        placeholder="e.g., Women 100 Freestyle"
-                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        placeholder="e.g., Women 50 Freestyle"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
                       />
                     </div>
-                    <div className="flex-1">
+                    <div>
                       <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                        Optional Alias (e.g., W 100 Free)
+                        Optional Alias
                       </label>
                       <input
                         type="text"
                         value={newEventAlias}
                         onChange={(e) => setNewEventAlias(e.target.value)}
-                        placeholder="e.g., W 100 Free"
-                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        placeholder="e.g., 50 Free"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
                       />
                     </div>
                     <button
+                      type="button"
                       onClick={() => {
-                        const cleanName = newEventName.trim();
-                        if (!cleanName) return;
-                        const evKey = normalizeEventKey(cleanName) || cleanName.toLowerCase();
-                        const existing = masterEvents.find(
-                          (ev) => ev.canonicalName.toLowerCase() === cleanName.toLowerCase()
-                        );
-                        if (existing) {
-                          if (newEventAlias.trim()) {
-                            const updated = {
-                              ...existing,
-                              aliases: Array.from(
-                                new Set([...(existing.aliases || []), newEventAlias.trim()])
-                              ),
-                            };
-                            updateMasterEvents(
-                              masterEvents.map((e) => (e.id === existing.id ? updated : e)),
-                              [updated]
-                            );
-                          }
-                        } else {
-                          const created = {
-                            id: `ev-${Date.now()}`,
-                            canonicalName: cleanName,
-                            eventKey: evKey,
-                            gender: cleanName.toLowerCase().startsWith('men') ? 'Men' : 'Women',
-                            isRelay: cleanName.toLowerCase().includes('relay'),
-                            aliases: newEventAlias.trim() ? [newEventAlias.trim()] : [],
-                          };
-                          updateMasterEvents([...masterEvents, created], [created]);
-                        }
+                        const clean = newEventName.trim();
+                        if (!clean) return;
+                        const evKey = normalizeEventKey(clean) || clean.toLowerCase();
+                        const created = {
+                          id: `ev-${Date.now()}`,
+                          canonicalName: clean,
+                          eventKey: evKey,
+                          gender: clean.toLowerCase().startsWith('men') ? 'Men' : 'Women',
+                          isRelay: clean.toLowerCase().includes('relay'),
+                          aliases: newEventAlias.trim() ? [newEventAlias.trim()] : [],
+                        };
+                        updateMasterEvents([...masterEvents, created], [created]);
                         setNewEventName('');
                         setNewEventAlias('');
                       }}
-                      className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+                      className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
                     >
-                      Save Event / Alias
+                      + Add Canonical Event
                     </button>
                   </div>
 
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[460px]">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                      <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
                         <tr>
                           <th className="py-2.5 px-4">Canonical Event</th>
                           <th className="py-2.5 px-4">Gender</th>
-                          <th className="py-2.5 px-4">Type</th>
-                          <th className="py-2.5 px-4">Saved Aliases</th>
-                          <th className="py-2.5 px-4 text-center">Remove</th>
+                          <th className="py-2.5 px-4">Aliases</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {masterEvents.map((ev) => (
                           <tr key={ev.id} className="hover:bg-slate-50">
-                            <td className="py-2.5 px-4 font-bold text-slate-900">
+                            <td className="py-2 px-4 font-bold text-slate-900">
                               {ev.canonicalName}
                             </td>
-                            <td className="py-2.5 px-4 text-slate-600">{ev.gender}</td>
-                            <td className="py-2.5 px-4 text-slate-600">
-                              {ev.isRelay ? 'Relay' : 'Individual'}
-                            </td>
-                            <td className="py-2.5 px-4 text-slate-500">
-                              {(ev.aliases || []).length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {ev.aliases.map((al) => (
-                                    <span
-                                      key={al}
-                                      className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
-                                    >
-                                      {al}
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="text-slate-400 italic">Auto-normalized</span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-4 text-center">
-                              <button
-                                onClick={() =>
-                                  updateMasterEvents(
-                                    masterEvents.filter((item) => item.id !== ev.id),
-                                    null,
-                                    ev.id
-                                  )
-                                }
-                                className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                            <td className="py-2 px-4 text-slate-600">{ev.gender}</td>
+                            <td className="py-2 px-4 text-slate-500">
+                              {(ev.aliases || []).join(', ') || '—'}
                             </td>
                           </tr>
                         ))}
@@ -8969,633 +8871,363 @@ export default function App() {
                 </div>
               )}
 
-              {/* SUB-TAB D: COMMITTED DATABASE */}
+              {/* SUB-TAB E: COMMITTED DATABASE */}
               {historySubTab === 'database' && (
                 <div className="p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-xs font-bold text-slate-700">
-                      {filteredSortedDbRecords.length === historicalRecords.length
-                        ? `${historicalRecords.length} total committed records`
-                        : `Showing ${filteredSortedDbRecords.length} matching records (of ${historicalRecords.length} total)`}
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                    <div className="flex flex-wrap items-center gap-2 flex-1">
+                      <input
+                        type="text"
+                        value={dbSearchName}
+                        onChange={(e) => {
+                          setDbSearchName(e.target.value);
+                          setDbPage(1);
+                        }}
+                        placeholder="Search athlete..."
+                        className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg min-w-[160px]"
+                      />
+                      <select
+                        value={dbFilterEvent}
+                        onChange={(e) => {
+                          setDbFilterEvent(e.target.value);
+                          setDbPage(1);
+                        }}
+                        className="px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg max-w-[190px]"
+                      >
+                        <option value="ALL">All Events</option>
+                        {dbFilterOptions.events.map((ev) => (
+                          <option key={ev} value={ev}>
+                            {ev}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={dbFilterCompetition}
+                        onChange={(e) => {
+                          setDbFilterCompetition(e.target.value);
+                          setDbPage(1);
+                        }}
+                        className="px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg max-w-[190px]"
+                      >
+                        <option value="ALL">All Competitions</option>
+                        {dbFilterOptions.competitions.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        value={dbFilterDate}
+                        onChange={(e) => {
+                          setDbFilterDate(e.target.value);
+                          setDbPage(1);
+                        }}
+                        placeholder="Date (YYYY-MM)..."
+                        className="px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-200 rounded-lg w-32"
+                      />
+                      <select
+                        value={dbFilterType}
+                        onChange={(e) => {
+                          setDbFilterType(e.target.value);
+                          setDbPage(1);
+                        }}
+                        className="px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg"
+                      >
+                        <option value="ALL">All Types</option>
+                        <option value="OFFICIAL">Official Individual</option>
+                        <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
+                        <option value="INTERMEDIATE_SPLIT">Split (S)</option>
+                        <option value="RELAY_WIN">Relay</option>
+                      </select>
                     </div>
+
                     <div className="flex flex-wrap items-center gap-2">
-                      {historicalRecords.length > 0 && (
-                        <>
-                          <button
-                            onClick={handleExportMasterCsv}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
-                          >
-                            <Download className="w-3.5 h-3.5 text-cyan-400" />
-                            Export Master CSV
-                          </button>
-                          <button
-                            onClick={() => {
-                              updateHistoricalRecords([], null, true);
-                              setBenchmarkStatusMsg('Cleared historical benchmark database.');
-                            }}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-200 transition cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            Clear Entire Database
-                          </button>
-                        </>
+                      {selectedDbIds.size > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setPendingDbDeleteIds(Array.from(selectedDbIds))}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-500 text-white cursor-pointer"
+                        >
+                          Delete Selected ({selectedDbIds.size})
+                        </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={handleExportMasterCsv}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5 text-cyan-400" />
+                        Export CSV
+                      </button>
                     </div>
                   </div>
 
-                  {/* Multi-Field Filter Bar */}
-                  {historicalRecords.length > 0 && (
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="text"
-                            value={dbSearchName}
-                            onChange={(e) => {
-                              setDbSearchName(e.target.value);
-                              setDbPage(1);
-                            }}
-                            placeholder="Filter by athlete name..."
-                            className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                          />
-                        </div>
-
-                        <select
-                          value={dbFilterEvent}
-                          onChange={(e) => {
-                            setDbFilterEvent(e.target.value);
-                            setDbPage(1);
-                          }}
-                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                        >
-                          <option value="ALL">All Events ({dbFilterOptions.events.length})</option>
-                          {dbFilterOptions.events.map((ev) => (
-                            <option key={ev} value={ev}>
-                              {ev}
-                            </option>
-                          ))}
-                        </select>
-
-                        <select
-                          value={dbFilterCompetition}
-                          onChange={(e) => {
-                            setDbFilterCompetition(e.target.value);
-                            setDbPage(1);
-                          }}
-                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                        >
-                          <option value="ALL">
-                            All Competitions ({dbFilterOptions.competitions.length})
-                          </option>
-                          {dbFilterOptions.competitions.map((comp) => (
-                            <option key={comp} value={comp}>
-                              {comp}
-                            </option>
-                          ))}
-                        </select>
-
-                        <input
-                          type="text"
-                          value={dbFilterDate}
-                          onChange={(e) => {
-                            setDbFilterDate(e.target.value);
-                            setDbPage(1);
-                          }}
-                          placeholder="Filter date (e.g., 2026 or 2026-02)"
-                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                        />
-
-                        <select
-                          value={dbFilterType}
-                          onChange={(e) => {
-                            setDbFilterType(e.target.value);
-                            setDbPage(1);
-                          }}
-                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                        >
-                          <option value="ALL">All Record Types</option>
-                          <option value="OFFICIAL">Official Individual</option>
-                          <option value="RELAY_LEADOFF">Relay Lead-Off (R)</option>
-                          <option value="INTERMEDIATE_SPLIT">Intermediate Split (S)</option>
-                          <option value="RELAY_WIN">Relay Win</option>
-                        </select>
-                      </div>
-
-                      {(dbSearchName ||
-                        dbFilterEvent !== 'ALL' ||
-                        dbFilterCompetition !== 'ALL' ||
-                        dbFilterDate ||
-                        dbFilterType !== 'ALL') && (
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <button
-                            onClick={() =>
-                              setPendingDbDeleteIds(filteredSortedDbRecords.map((r) => r.id))
-                            }
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition cursor-pointer"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            Delete All {filteredSortedDbRecords.length} Filtered Records
-                          </button>
-                          <button
-                            onClick={() => {
-                              setDbSearchName('');
-                              setDbFilterEvent('ALL');
-                              setDbFilterCompetition('ALL');
-                              setDbFilterDate('');
-                              setDbFilterType('ALL');
-                              setDbPage(1);
-                            }}
-                            className="text-[11px] font-bold text-cyan-700 hover:underline cursor-pointer"
-                          >
-                            Reset All Filters
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Selected Rows Action Bar */}
-                  {selectedDbIds.size > 0 && (
-                    <div className="bg-slate-900 text-white px-4 py-2.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-cyan-300">
-                          {selectedDbIds.size} record{selectedDbIds.size === 1 ? '' : 's'} selected
-                        </span>
-                        <button
-                          onClick={() => setSelectedDbIds(new Set())}
-                          className="text-slate-300 hover:text-white underline cursor-pointer"
-                        >
-                          Clear selection
-                        </button>
-                      </div>
-                      <button
-                        onClick={() => setPendingDbDeleteIds(Array.from(selectedDbIds))}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold bg-red-600 hover:bg-red-500 text-white transition cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Delete Selected ({selectedDbIds.size})
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Inline Two-Step Delete Confirmation Banner */}
                   {pendingDbDeleteIds && pendingDbDeleteIds.length > 0 && (
-                    <div className="bg-red-50 border border-red-300 text-red-950 px-4 py-3 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
-                        <span>
-                          Permanently delete{' '}
-                          <strong>
-                            {pendingDbDeleteIds.length} database record
-                            {pendingDbDeleteIds.length === 1 ? '' : 's'}
-                          </strong>{' '}
-                          from local storage and Firestore?
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <span className="font-bold text-red-900">
+                        Permanently delete {pendingDbDeleteIds.length} record
+                        {pendingDbDeleteIds.length === 1 ? '' : 's'} from the database?
+                      </span>
+                      <div className="flex gap-2">
                         <button
+                          type="button"
+                          onClick={() => handleDeleteDbRecords(pendingDbDeleteIds)}
+                          className="px-3 py-1.5 rounded-lg font-bold bg-red-600 text-white cursor-pointer"
+                        >
+                          Confirm Delete
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => setPendingDbDeleteIds(null)}
-                          className="px-3 py-1.5 rounded-lg font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
+                          className="px-3 py-1.5 rounded-lg font-semibold bg-white border border-slate-200 cursor-pointer"
                         >
                           Cancel
                         </button>
-                        <button
-                          onClick={() => handleDeleteDbRecords(pendingDbDeleteIds)}
-                          className="px-3.5 py-1.5 rounded-lg font-extrabold bg-red-600 hover:bg-red-500 text-white cursor-pointer"
-                        >
-                          Yes, Delete Permanently
-                        </button>
                       </div>
                     </div>
                   )}
 
-                  {historicalRecords.length === 0 ? (
-                    <div className="text-center py-12 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                      No historical performances committed yet. Import rows from Google Sheets in
-                      the first tab or commit a `.cl2` meet in Post-Meet Tools.
-                    </div>
-                  ) : filteredSortedDbRecords.length === 0 ? (
-                    <div className="text-center py-10 text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                      No database records match your active filters.
-                    </div>
-                  ) : (
-                    <>
-                      <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[540px]">
-                        <table className="w-full text-left text-xs">
-                          <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0 z-10">
-                            <tr>
-                              <th className="py-2.5 px-3 w-9">
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="py-2.5 px-3 w-9">
+                            <input
+                              type="checkbox"
+                              checked={
+                                paginatedDbRecords.length > 0 &&
+                                paginatedDbRecords.every((r) => selectedDbIds.has(r.id))
+                              }
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setSelectedDbIds((prev) => {
+                                  const next = new Set(prev);
+                                  paginatedDbRecords.forEach((r) => {
+                                    if (checked) next.add(r.id);
+                                    else next.delete(r.id);
+                                  });
+                                  return next;
+                                });
+                              }}
+                            />
+                          </th>
+                          <th
+                            onClick={() => handleDbSort('swimmerName')}
+                            className="py-2.5 px-3 cursor-pointer hover:text-cyan-300"
+                          >
+                            Athlete
+                          </th>
+                          <th
+                            onClick={() => handleDbSort('eventLabel')}
+                            className="py-2.5 px-3 cursor-pointer hover:text-cyan-300"
+                          >
+                            Event
+                          </th>
+                          <th
+                            onClick={() => handleDbSort('time')}
+                            className="py-2.5 px-3 cursor-pointer hover:text-cyan-300"
+                          >
+                            Time
+                          </th>
+                          <th
+                            onClick={() => handleDbSort('competition')}
+                            className="py-2.5 px-3 cursor-pointer hover:text-cyan-300"
+                          >
+                            Competition
+                          </th>
+                          <th
+                            onClick={() => handleDbSort('date')}
+                            className="py-2.5 px-3 cursor-pointer hover:text-cyan-300"
+                          >
+                            Date
+                          </th>
+                          <th className="py-2.5 px-3 text-center">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {paginatedDbRecords.map((rec) => {
+                          const isEditing = editingDbRowId === rec.id;
+                          if (isEditing) {
+                            return (
+                              <tr key={rec.id} className="bg-cyan-50/70">
+                                <td className="py-2 px-3" />
+                                <td className="py-2 px-3">
+                                  <input
+                                    type="text"
+                                    value={editDbDraft.swimmerName}
+                                    onChange={(e) =>
+                                      setEditDbDraft((p) => ({
+                                        ...p,
+                                        swimmerName: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-2 py-1 text-xs font-bold bg-white border border-cyan-300 rounded"
+                                  />
+                                </td>
+                                <td className="py-2 px-3">
+                                  <input
+                                    type="text"
+                                    value={editDbDraft.eventLabel}
+                                    onChange={(e) =>
+                                      setEditDbDraft((p) => ({
+                                        ...p,
+                                        eventLabel: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-2 py-1 text-xs bg-white border border-cyan-300 rounded"
+                                  />
+                                </td>
+                                <td className="py-2 px-3">
+                                  <input
+                                    type="text"
+                                    value={editDbDraft.time}
+                                    onChange={(e) =>
+                                      setEditDbDraft((p) => ({ ...p, time: e.target.value }))
+                                    }
+                                    className="w-24 px-2 py-1 text-xs font-mono font-bold bg-white border border-cyan-300 rounded"
+                                  />
+                                </td>
+                                <td className="py-2 px-3">
+                                  <input
+                                    type="text"
+                                    value={editDbDraft.competition}
+                                    onChange={(e) =>
+                                      setEditDbDraft((p) => ({
+                                        ...p,
+                                        competition: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-2 py-1 text-xs bg-white border border-cyan-300 rounded"
+                                  />
+                                </td>
+                                <td className="py-2 px-3">
+                                  <input
+                                    type="date"
+                                    value={editDbDraft.date}
+                                    onChange={(e) =>
+                                      setEditDbDraft((p) => ({ ...p, date: e.target.value }))
+                                    }
+                                    className="px-2 py-1 text-xs font-mono bg-white border border-cyan-300 rounded"
+                                  />
+                                </td>
+                                <td className="py-2 px-3 text-center">
+                                  <div className="inline-flex gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveDbRecordEdit(rec)}
+                                      className="px-2 py-1 rounded text-[11px] font-bold bg-emerald-600 text-white cursor-pointer"
+                                    >
+                                      Save
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingDbRowId(null)}
+                                      className="px-2 py-1 rounded text-[11px] bg-white border border-slate-200 cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          }
+                          return (
+                            <tr key={rec.id} className="hover:bg-slate-50">
+                              <td className="py-2 px-3">
                                 <input
                                   type="checkbox"
-                                  checked={
-                                    paginatedDbRecords.length > 0 &&
-                                    paginatedDbRecords.every((r) => selectedDbIds.has(r.id))
-                                  }
+                                  checked={selectedDbIds.has(rec.id)}
                                   onChange={(e) => {
                                     const checked = e.target.checked;
                                     setSelectedDbIds((prev) => {
                                       const next = new Set(prev);
-                                      paginatedDbRecords.forEach((r) => {
-                                        if (checked) next.add(r.id);
-                                        else next.delete(r.id);
-                                      });
+                                      if (checked) next.add(rec.id);
+                                      else next.delete(rec.id);
                                       return next;
                                     });
                                   }}
-                                  title="Select all rows on this page"
-                                  className="rounded text-cyan-600 cursor-pointer"
                                 />
-                              </th>
-                              <th
-                                onClick={() => handleDbSort('swimmerName')}
-                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
-                              >
-                                <div className="inline-flex items-center gap-1">
-                                  <span>Athlete</span>
-                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              </td>
+                              <td className="py-2 px-3 font-bold text-slate-900">
+                                {rec.swimmerName}
+                                {rec.classYear ? ` (${rec.classYear})` : ''}
+                              </td>
+                              <td className="py-2 px-3">{rec.eventLabel}</td>
+                              <td className="py-2 px-3 font-mono font-bold text-cyan-800">
+                                {rec.time}
+                                {rec.place ? ` (#${rec.place})` : ''}
+                              </td>
+                              <td className="py-2 px-3 text-slate-600">
+                                {rec.competition || '—'}
+                              </td>
+                              <td className="py-2 px-3 font-mono text-slate-500">
+                                {formatDisplayDateMDY(rec.date)}
+                              </td>
+                              <td className="py-2 px-3 text-center">
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingDbRowId(rec.id);
+                                      setEditDbDraft({
+                                        swimmerName: rec.swimmerName || '',
+                                        classYear: rec.classYear || '',
+                                        eventLabel: rec.eventLabel || '',
+                                        time: rec.time || '',
+                                        competition: rec.competition || '',
+                                        date: normalizeDateIso(rec.date || ''),
+                                      });
+                                    }}
+                                    className="px-2 py-0.5 rounded text-[11px] font-bold text-cyan-700 hover:bg-cyan-50 border border-cyan-200 cursor-pointer"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPendingDbDeleteIds([rec.id])}
+                                    className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
-                              </th>
-                              <th className="py-2.5 px-3">Class</th>
-                              <th
-                                onClick={() => handleDbSort('eventLabel')}
-                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
-                              >
-                                <div className="inline-flex items-center gap-1">
-                                  <span>Event</span>
-                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                </div>
-                              </th>
-                              <th
-                                onClick={() => handleDbSort('time')}
-                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
-                              >
-                                <div className="inline-flex items-center gap-1">
-                                  <span>Time</span>
-                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                </div>
-                              </th>
-                              <th
-                                onClick={() => handleDbSort('competition')}
-                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
-                              >
-                                <div className="inline-flex items-center gap-1">
-                                  <span>Competition</span>
-                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                </div>
-                              </th>
-                              <th
-                                onClick={() => handleDbSort('date')}
-                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
-                              >
-                                <div className="inline-flex items-center gap-1">
-                                  <span>Date</span>
-                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                </div>
-                              </th>
-                              <th
-                                onClick={() => handleDbSort('type')}
-                                className="py-2.5 px-3 cursor-pointer hover:text-slate-900 select-none"
-                              >
-                                <div className="inline-flex items-center gap-1">
-                                  <span>Type</span>
-                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                </div>
-                              </th>
-                              <th className="py-2.5 px-3 text-center w-24">Actions</th>
+                              </td>
                             </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {paginatedDbRecords.map((r) => {
-                              const isChecked = selectedDbIds.has(r.id);
-                              const isEditingRow = editingDbRowId === r.id;
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
 
-                              if (isEditingRow) {
-                                return (
-                                  <tr key={r.id} className="bg-cyan-50/75">
-                                    <td className="py-2 px-3">
-                                      <input
-                                        type="checkbox"
-                                        checked={isChecked}
-                                        onChange={(e) => {
-                                          const checked = e.target.checked;
-                                          setSelectedDbIds((prev) => {
-                                            const next = new Set(prev);
-                                            if (checked) next.add(r.id);
-                                            else next.delete(r.id);
-                                            return next;
-                                          });
-                                        }}
-                                        className="rounded text-cyan-600 cursor-pointer"
-                                      />
-                                    </td>
-                                    <td className="py-2 px-3">
-                                      <input
-                                        type="text"
-                                        list="master-roster-datalist"
-                                        value={editDbDraft.swimmerName}
-                                        onChange={(e) =>
-                                          setEditDbDraft((prev) => ({
-                                            ...prev,
-                                            swimmerName: e.target.value,
-                                          }))
-                                        }
-                                        className="w-full min-w-[140px] px-2 py-1 text-xs font-bold bg-white border border-cyan-300 rounded"
-                                      />
-                                    </td>
-                                    <td className="py-2 px-3">
-                                      <select
-                                        value={editDbDraft.classYear}
-                                        onChange={(e) =>
-                                          setEditDbDraft((prev) => ({
-                                            ...prev,
-                                            classYear: e.target.value,
-                                          }))
-                                        }
-                                        className="px-1.5 py-1 text-xs bg-white border border-cyan-300 rounded"
-                                      >
-                                        <option value="">—</option>
-                                        <option value="FR">FR</option>
-                                        <option value="SO">SO</option>
-                                        <option value="JR">JR</option>
-                                        <option value="SR">SR</option>
-                                        <option value="GR">GR</option>
-                                      </select>
-                                    </td>
-                                    <td className="py-2 px-3">
-                                      <select
-                                        value={editDbDraft.eventLabel}
-                                        onChange={(e) =>
-                                          setEditDbDraft((prev) => ({
-                                            ...prev,
-                                            eventLabel: e.target.value,
-                                          }))
-                                        }
-                                        className="w-full min-w-[165px] px-2 py-1 text-xs bg-white border border-cyan-300 rounded"
-                                      >
-                                        {!CANONICAL_EVENTS.includes(editDbDraft.eventLabel) &&
-                                          editDbDraft.eventLabel && (
-                                            <option value={editDbDraft.eventLabel}>
-                                              {editDbDraft.eventLabel}
-                                            </option>
-                                          )}
-                                        {CANONICAL_EVENTS.map((ev) => (
-                                          <option key={ev} value={ev}>
-                                            {ev}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </td>
-                                    <td className="py-2 px-3">
-                                      <input
-                                        type="text"
-                                        value={editDbDraft.time}
-                                        onChange={(e) =>
-                                          setEditDbDraft((prev) => ({
-                                            ...prev,
-                                            time: e.target.value,
-                                          }))
-                                        }
-                                        className="w-24 px-2 py-1 text-xs font-mono font-bold bg-white border border-cyan-300 rounded"
-                                      />
-                                    </td>
-                                    <td className="py-2 px-3">
-                                      <input
-                                        type="text"
-                                        value={editDbDraft.competition}
-                                        onChange={(e) =>
-                                          setEditDbDraft((prev) => ({
-                                            ...prev,
-                                            competition: e.target.value,
-                                          }))
-                                        }
-                                        className="w-full min-w-[140px] px-2 py-1 text-xs bg-white border border-cyan-300 rounded"
-                                      />
-                                    </td>
-                                    <td className="py-2 px-3">
-                                      <input
-                                        type="date"
-                                        value={editDbDraft.date}
-                                        onChange={(e) =>
-                                          setEditDbDraft((prev) => ({
-                                            ...prev,
-                                            date: e.target.value,
-                                          }))
-                                        }
-                                        className="px-2 py-1 text-xs font-mono bg-white border border-cyan-300 rounded"
-                                      />
-                                    </td>
-                                    <td className="py-2 px-3 text-slate-500 text-[11px]">
-                                      {r.swimType || 'OFFICIAL'}
-                                    </td>
-                                    <td className="py-2 px-3 text-center">
-                                      <div className="inline-flex items-center gap-1">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleSaveDbRecordEdit(r)}
-                                          className="px-2 py-1 rounded text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
-                                        >
-                                          Save
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => setEditingDbRowId(null)}
-                                          className="px-1.5 py-1 rounded text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
-                                        >
-                                          Cancel
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              }
-
-                              return (
-                                <tr
-                                  key={r.id}
-                                  className={
-                                    isChecked ? 'bg-cyan-50/60' : 'hover:bg-slate-50'
-                                  }
-                                >
-                                  <td className="py-2 px-3">
-                                    <input
-                                      type="checkbox"
-                                      checked={isChecked}
-                                      onChange={(e) => {
-                                        const checked = e.target.checked;
-                                        setSelectedDbIds((prev) => {
-                                          const next = new Set(prev);
-                                          if (checked) next.add(r.id);
-                                          else next.delete(r.id);
-                                          return next;
-                                        });
-                                      }}
-                                      className="rounded text-cyan-600 cursor-pointer"
-                                    />
-                                  </td>
-                                  <td className="py-2 px-3 font-bold text-slate-900">
-                                    <button
-                                      type="button"
-                                      onClick={() => openSwimmerProfile(r.swimmerName, r.eventKey)}
-                                      className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
-                                    >
-                                      {r.swimmerName}
-                                    </button>
-                                  </td>
-                                  <td className="py-2 px-3">{r.classYear || '—'}</td>
-                                  <td className="py-2 px-3">{r.eventLabel}</td>
-                                  <td className="py-2 px-3 font-mono font-bold text-cyan-800">
-                                    {r.time}
-                                  </td>
-                                  <td className="py-2 px-3 text-slate-600">
-                                    <div className="flex flex-wrap items-center gap-1.5">
-                                      <span>{r.competition || '—'}</span>
-                                      {r.round === 'Prelims' && (
-                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">
-                                          Prelims (SF)
-                                        </span>
-                                      )}
-                                      {r.round === 'Time Trial' && (
-                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">
-                                          Time Trial (TT)
-                                        </span>
-                                      )}
-                                    </div>
-                                  </td>
-                                  <td className="py-2 px-3 font-mono text-slate-500">
-                                    {r.date || '—'}
-                                  </td>
-                                  <td className="py-2 px-3">
-                                    {r.swimType === 'RELAY_LEADOFF' ||
-                                    r.place === 'R' ||
-                                    r.place === 'LR' ? (
-                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800">
-                                        Relay Lead-Off (R)
-                                      </span>
-                                    ) : r.swimType === 'INTERMEDIATE_SPLIT' || r.place === 'S' ? (
-                                      <span
-                                        title={r.splitContext || 'Intermediate Distance Split'}
-                                        className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900"
-                                      >
-                                        Split (S){r.splitContext ? ` • ${r.splitContext}` : ''}
-                                      </span>
-                                    ) : r.swimType === 'RELAY_WIN' ? (
-                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
-                                        Relay Win{r.splitContext ? ` • ${r.splitContext}` : ''}
-                                      </span>
-                                    ) : (
-                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                                        Official
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="py-2 px-3 text-center">
-                                    <div className="inline-flex items-center gap-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setEditingDbRowId(r.id);
-                                          setEditDbDraft({
-                                            swimmerName: r.swimmerName || '',
-                                            classYear: r.classYear || '',
-                                            eventLabel: r.eventLabel || '',
-                                            time: r.time || '',
-                                            competition: r.competition || '',
-                                            date: normalizeDateIso(r.date || ''),
-                                          });
-                                        }}
-                                        className="px-2 py-1 rounded text-[11px] font-bold text-cyan-700 hover:bg-cyan-50 border border-cyan-200 cursor-pointer"
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteDbRecords([r.id])}
-                                        title="Delete this record"
-                                        className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <datalist id="master-roster-datalist">
-                        {masterRoster
-                          .slice()
-                          .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName))
-                          .map((ath) => (
-                            <option key={ath.id} value={ath.canonicalName} />
-                          ))}
-                      </datalist>
-
-                      {/* Pagination Bar */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 text-xs text-slate-600">
-                        <div className="flex items-center gap-2">
-                          <span>
-                            Showing{' '}
-                            <strong>
-                              {(safeDbPage - 1) * dbPageSize + 1}–
-                              {Math.min(safeDbPage * dbPageSize, filteredSortedDbRecords.length)}
-                            </strong>{' '}
-                            of <strong>{filteredSortedDbRecords.length}</strong> records
-                          </span>
-                          <select
-                            value={dbPageSize}
-                            onChange={(e) => {
-                              setDbPageSize(Number(e.target.value));
-                              setDbPage(1);
-                            }}
-                            className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold"
-                          >
-                            <option value={50}>50 / page</option>
-                            <option value={100}>100 / page</option>
-                            <option value={250}>250 / page</option>
-                            <option value={500}>500 / page</option>
-                          </select>
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => setDbPage(1)}
-                            disabled={safeDbPage <= 1}
-                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
-                          >
-                            First
-                          </button>
-                          <button
-                            onClick={() => setDbPage((p) => Math.max(1, p - 1))}
-                            disabled={safeDbPage <= 1}
-                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
-                          >
-                            Prev
-                          </button>
-                          <span className="px-3 py-1.5 font-bold text-slate-800">
-                            Page {safeDbPage} of {dbTotalPages}
-                          </span>
-                          <button
-                            onClick={() => setDbPage((p) => Math.min(dbTotalPages, p + 1))}
-                            disabled={safeDbPage >= dbTotalPages}
-                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
-                          >
-                            Next
-                          </button>
-                          <button
-                            onClick={() => setDbPage(dbTotalPages)}
-                            disabled={safeDbPage >= dbTotalPages}
-                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer"
-                          >
-                            Last
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
+                  {/* Pagination Footer */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+                    <span>
+                      Showing {(safeDbPage - 1) * dbPageSize + 1}–
+                      {Math.min(safeDbPage * dbPageSize, filteredSortedDbRecords.length)} of{' '}
+                      {filteredSortedDbRecords.length} records
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={safeDbPage <= 1}
+                        onClick={() => setDbPage((p) => Math.max(1, p - 1))}
+                        className="px-2.5 py-1 rounded border border-slate-200 disabled:opacity-40 cursor-pointer"
+                      >
+                        Prev
+                      </button>
+                      <span className="font-bold">
+                        Page {safeDbPage} / {dbTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={safeDbPage >= dbTotalPages}
+                        onClick={() => setDbPage((p) => Math.min(dbTotalPages, p + 1))}
+                        className="px-2.5 py-1 rounded border border-slate-200 disabled:opacity-40 cursor-pointer"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
