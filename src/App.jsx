@@ -667,11 +667,20 @@ function parseSDIFContent(content) {
           timeTokens[timeTokens.length - 1].course || timeTokens[1].course || timeTokens[0].course;
       } else if (timeTokens.length === 2) {
         if (hasPrelimTail) {
-          // Seed + Prelim only (e.g. Erik Floren Smith: 49.74Y Seed, 48.46Y Prelim, no Finals)
-          seedTimeRaw = timeTokens[0].clean;
-          prelimTimeRaw = timeTokens[1].clean;
+          const hasFinalsSwimInTail =
+            (normalizedTail[2] && normalizedTail[2] !== '0') ||
+            (normalizedTail[3] && normalizedTail[3] !== '0');
+          if (hasFinalsSwimInTail) {
+            // No Seed (NT) + Prelim + Finals (e.g. Carly Waldman: 2:14.90Y Prelim, 2:13.49Y Finals)
+            prelimTimeRaw = timeTokens[0].clean;
+            finalsTimeRaw = timeTokens[1].clean;
+          } else {
+            // Seed + Prelim only (e.g. Erik Floren Smith: 49.74Y Seed, 48.46Y Prelim, no Finals)
+            seedTimeRaw = timeTokens[0].clean;
+            prelimTimeRaw = timeTokens[1].clean;
+          }
           courseCode = timeTokens[1].course || timeTokens[0].course;
-        } else {
+          } else {
           // Dual meet / Timed Final with Seed + Finals (e.g. 1650 Free: 9:31.92Y Seed, 15:44.79Y Finals)
           seedTimeRaw = timeTokens[0].clean;
           finalsTimeRaw = timeTokens[1].clean;
