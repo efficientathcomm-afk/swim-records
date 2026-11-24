@@ -9361,31 +9361,31 @@ export default function App() {
               {recordBookSubTab === 'top10' ? (
                 <>
                   {/* Freshman Record Spotlight Card */}
-                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
-                        <Star className="w-5 h-5" />
+                  <div className="bg-gradient-to-r from-amber-50/80 to-orange-50/70 border border-amber-200/80 rounded-xl px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-amber-500/90 text-white flex items-center justify-center shrink-0">
+                        <Star className="w-3.5 h-3.5" />
                       </div>
-                      <div>
-                        <div className="text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
                           Program Freshman Record ({toTitleEventLabel(recordBookEventKey)})
                         </div>
                         {recordBookData.freshmanRecord ? (
-                          <div className="text-sm sm:text-base font-extrabold text-slate-900">
+                          <div className="text-xs sm:text-sm font-bold text-slate-900 truncate">
                             {recordBookData.freshmanRecord.swimmerName} —{' '}
-                            <span className="font-mono text-amber-800">
+                            <span className="font-mono font-extrabold text-amber-800">
                               {recordBookData.freshmanRecord.time}
                             </span>
                           </div>
                         ) : (
-                          <div className="text-xs text-slate-600">
+                          <div className="text-[11px] text-slate-600">
                             No official Freshman (`FR`) mark recorded for this event yet.
                           </div>
                         )}
                       </div>
                     </div>
                     {recordBookData.freshmanRecord && (
-                      <div className="text-xs text-amber-900 font-medium">
+                      <div className="text-[11px] text-amber-900/80 font-medium shrink-0">
                         {recordBookData.freshmanRecord.competition} •{' '}
                         {formatDisplayDateMDY(recordBookData.freshmanRecord.date)}
                       </div>
