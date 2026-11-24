@@ -6831,6 +6831,16 @@ export default function App() {
     benchmarkIndex,
   ]);
 
+  const activeRosterKeys = useMemo(
+    () =>
+      new Set(
+        masterRoster
+          .filter((a) => a.isActive)
+          .map((a) => normalizeSwimmerKey(a.canonicalName))
+      ),
+    [masterRoster]
+  );
+
   // ============================================================================
   // RENDER
   // ============================================================================
@@ -9406,6 +9416,11 @@ export default function App() {
                               ? Number(row.rank)
                               : rowIndex + 1;
                             const isTiedRow = Boolean(row.isTied);
+                            const athRecord = resolveMasterAthlete(row.swimmerName);
+                            const canonicalSwimmerKey = normalizeSwimmerKey(
+                              athRecord ? athRecord.canonicalName : row.swimmerName
+                            );
+                            const isActiveSwimmer = activeRosterKeys.has(canonicalSwimmerKey);
                             return (
                               <tr
                                 key={`${row.id}-${rowIndex}`}
@@ -9422,13 +9437,20 @@ export default function App() {
                                   </span>
                                 </td>
                                 <td className="py-3 px-4 font-bold text-slate-900">
-                                  <button
-                                    type="button"
-                                    onClick={() => openSwimmerProfile(row.swimmerName, row.eventKey)}
-                                    className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
-                                  >
-                                    {row.swimmerName}
-                                  </button>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => openSwimmerProfile(row.swimmerName, row.eventKey)}
+                                      className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
+                                    >
+                                      {row.swimmerName}
+                                    </button>
+                                    {isActiveSwimmer && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                        Active
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="py-3 px-4 text-slate-600">{row.classYear || '—'}</td>
                                 <td className="py-3 px-4 font-mono font-extrabold text-cyan-800">
