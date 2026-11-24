@@ -9352,7 +9352,7 @@ export default function App() {
                       <table className="w-full text-left text-xs">
                         <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
                           <tr>
-                            <th className="py-3 px-4 w-24">Rank</th>
+                            <th className="py-3 px-4 min-w-[105px]">Rank</th>
                             <th className="py-3 px-4">Athlete</th>
                             <th className="py-3 px-4">Class</th>
                             <th className="py-3 px-4">Time</th>
@@ -9366,15 +9366,15 @@ export default function App() {
                               key={row.id}
                               className={row.rank === 1 ? 'bg-amber-50/40' : 'hover:bg-slate-50'}
                             >
-                              <td className="py-3 px-4 font-black text-slate-900">
-                                <div className="inline-flex items-center gap-1.5">
+                              <td className="py-3 px-4 font-black text-slate-900 whitespace-nowrap">
+                                <span className="inline-flex items-center gap-1.5">
                                   <span>#{row.rank}</span>
                                   {row.isTied && (
                                     <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300">
                                       TIE
                                     </span>
                                   )}
-                                </div>
+                                </span>
                               </td>
                               <td className="py-3 px-4 font-bold text-slate-900">
                                 <div className="flex flex-wrap items-center gap-1.5">
