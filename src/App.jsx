@@ -136,6 +136,8 @@ const STROKE_MAP = {
   '5': 'Individual Medley',
   '6': 'Freestyle Relay',
   '7': 'Medley Relay',
+  H: 'Diving',
+  P: 'Platform Diving',
 };
 
 const COURSE_MAP = {
@@ -577,6 +579,7 @@ function parseSDIFContent(content) {
       const genderCode = sliceCol(line, 67, 67) || sliceCol(line, 66, 66);
       const distance = sliceCol(line, 68, 71);
       const strokeCode = sliceCol(line, 72, 72);
+      const isDivingEvent = strokeCode === 'H' || strokeCode === 'P';
       const eventNumber = sliceCol(line, 73, 76);
       const parsedEventNum = parseInt(eventNumber, 10) || eventNumber;
       const isTimeTrialEvent =
@@ -595,7 +598,7 @@ function parseSDIFContent(content) {
       const afterDateIdx = dateMatch ? 80 + dateMatch.index + 8 : 94;
       const timeZoneStr = line.slice(afterDateIdx, afterDateIdx + 38);
       const afterFinalsMatch = line.slice(afterDateIdx).match(
-        /(?:(?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi
+        /(?:(?:\d{1,2}:)?\d{2,3}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi
       );
       let tailZone = line.slice(afterDateIdx + 38, afterDateIdx + 68);
       if (afterFinalsMatch && afterFinalsMatch.length > 0) {
@@ -632,7 +635,7 @@ function parseSDIFContent(content) {
         !isTimedFinalTail && normalizedTail.length >= 5 && /^\d+$/.test(normalizedTail[4]);
 
       const timeTokens = Array.from(
-        timeZoneStr.matchAll(/((?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
+        timeZoneStr.matchAll(/((?:\d{1,2}:)?\d{2,3}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
       ).map((m) => ({
         full: `${m[1]}${m[2] || ''}`.toUpperCase(),
         clean: m[1].toUpperCase(),
@@ -741,7 +744,9 @@ function parseSDIFContent(content) {
 
       const strokeName = STROKE_MAP[strokeCode] || `Stroke ${strokeCode}`;
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
-      const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
+      const eventLabel = isDivingEvent
+        ? `${genderLabel} ${distance} Meter ${strokeName}`
+        : `${genderLabel} ${distance} ${strokeName}`;
       const isNonFinishStatus = (t) => ['DQ', 'SCR', 'NS'].includes(String(t || '').toUpperCase());
       const effectiveFinalsOrSwimOff = finalsTimeRaw || swimOffTimeRaw;
       const isDqFinals = isNonFinishStatus(effectiveFinalsOrSwimOff);
@@ -766,6 +771,7 @@ function parseSDIFContent(content) {
         distance: parseInt(distance, 10) || distance,
         strokeCode,
         strokeName,
+        isDiving: isDivingEvent,
         eventNumber: parsedEventNum,
         isTimeTrial: isTimeTrialEvent,
         isSwimOff: isSwimOffEvent,
@@ -787,7 +793,7 @@ function parseSDIFContent(content) {
         finalsOnlyTime: effectiveFinalsOrSwimOff || '',
         finalsTime: displayFallbackTime,
         timeSeconds: displayFallbackSec,
-        course: COURSE_MAP[courseCode] || courseCode || 'SCY',
+        course: isDivingEvent ? 'Diving' : COURSE_MAP[courseCode] || courseCode || 'SCY',
         heat,
         lane,
         place: isDqFinals ? null : place || null,
@@ -821,11 +827,15 @@ function parseSDIFContent(content) {
           name: swimmerName,
           preferredFirst: '',
           gender: genderLabel,
-          classYear: record.classYear,
+          classYear: resolvedClass,
           events: [],
         });
       }
-      roster.get(swimmerName).events.push(`${distance} ${strokeName} (${displayFallbackTime})`);
+      roster.get(swimmerName).events.push(
+        isDivingEvent
+          ? `${distance}m ${strokeName} (${displayFallbackTime})`
+          : `${distance} ${strokeName} (${displayFallbackTime})`
+      );
     } else if (recType === 'D3') {
       // Cols 17-31 hold Preferred First Name directly after the 14-char swimmer ID/checksum (cols 3-16)
       const prefFirst = sliceCol(line, 17, 31).trim();
@@ -5105,6 +5115,7 @@ export default function App() {
           eventNumber: row.eventNumber,
           eventLabel: row.eventLabel,
           course: row.course,
+          isDiving: Boolean(row.isDiving),
           isTimeTrial: Boolean(row.isTimeTrial),
           isSwimOff: Boolean(row.isSwimOff),
           rawRows: [],
@@ -5150,7 +5161,14 @@ export default function App() {
           const dir = sortConfig.direction === 'asc' ? 1 : -1;
           if (sortConfig.key === 'swimmerName') return a.swimmerName.localeCompare(b.swimmerName) * dir;
           if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
-          if (sortConfig.key === 'time') return (a.displaySeconds - b.displaySeconds) * dir;
+          if (sortConfig.key === 'time') {
+            if (ev.isDiving) {
+              const sA = isFinite(a.displaySeconds) ? a.displaySeconds : -Infinity;
+              const sB = isFinite(b.displaySeconds) ? b.displaySeconds : -Infinity;
+              return (sB - sA) * dir;
+            }
+            return (a.displaySeconds - b.displaySeconds) * dir;
+          }
           if (sortConfig.key === 'place') {
             if (Boolean(a.isExhibition) !== Boolean(b.isExhibition)) return a.isExhibition ? 1 : -1;
             return ((a.displayPlace ?? 9999) - (b.displayPlace ?? 9999)) * dir;
@@ -5159,6 +5177,11 @@ export default function App() {
           const pA = a.displayPlace ?? 9999;
           const pB = b.displayPlace ?? 9999;
           if (pA !== pB) return pA - pB;
+          if (ev.isDiving) {
+            const sA = isFinite(a.displaySeconds) ? a.displaySeconds : -Infinity;
+            const sB = isFinite(b.displaySeconds) ? b.displaySeconds : -Infinity;
+            return sB - sA;
+          }
           return a.displaySeconds - b.displaySeconds;
         });
 
@@ -5169,10 +5192,16 @@ export default function App() {
           eventLabel: ev.eventLabel,
           roundTag: ev.isSwimOff ? 'Swim-Off' : ev.isTimeTrial ? 'Time Trial' : '',
           isPrelimCard: false,
+          isDiving: ev.isDiving,
           hasSubHeaders: false,
           course: ev.course,
           swims,
-          fastestTimeSec: validTimes.length > 0 ? Math.min(...validTimes) : Infinity,
+          fastestTimeSec:
+            validTimes.length > 0
+              ? ev.isDiving
+                ? Math.max(...validTimes)
+                : Math.min(...validTimes)
+              : Infinity,
         });
         return;
       }
@@ -13476,7 +13505,9 @@ export default function App() {
                                     const behindSec =
                                       isFinite(row.displaySeconds) &&
                                       isFinite(eventGroup.fastestTimeSec)
-                                        ? row.displaySeconds - eventGroup.fastestTimeSec
+                                        ? eventGroup.isDiving
+                                          ? eventGroup.fastestTimeSec - row.displaySeconds
+                                          : row.displaySeconds - eventGroup.fastestTimeSec
                                         : Infinity;
                                     const displaySwimmer = formatSwimmerDisplay(
                                       row.swimmerName,
@@ -13646,7 +13677,9 @@ export default function App() {
                                                 </span>
                                               ) : (
                                                 <span className="text-slate-500">
-                                                  +{behindSec.toFixed(2)}s
+                                                  {eventGroup.isDiving
+                                                    ? `-${behindSec.toFixed(2)} pts`
+                                                    : `+${behindSec.toFixed(2)}s`}
                                                 </span>
                                               )
                                             ) : (
