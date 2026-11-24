@@ -14329,7 +14329,32 @@ export default function App() {
                                             </div>
                                           </td>
                                           <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums">
-                                            {row.displayTime}
+                                            <div>{row.displayTime}</div>
+                                            {!eventGroup.isPrelimCard &&
+                                              !eventGroup.isDiving &&
+                                              !row.isDqRow &&
+                                              isFinite(row.displaySeconds) &&
+                                              isFinite(row.prelimSeconds) && (() => {
+                                                const delta = row.displaySeconds - row.prelimSeconds;
+                                                const isSame = Math.abs(delta) < 0.005;
+                                                const isDrop = delta <= -0.005;
+                                                return (
+                                                  <div
+                                                    title={`Prelims: ${row.prelimTime}`}
+                                                    className={`text-[11px] font-semibold mt-0.5 ${
+                                                      isSame
+                                                        ? 'text-slate-400'
+                                                        : isDrop
+                                                        ? 'text-emerald-600'
+                                                        : 'text-red-600'
+                                                    }`}
+                                                  >
+                                                    {isSame
+                                                      ? '0.00s vs P'
+                                                      : `${isDrop ? '' : '+'}${delta.toFixed(2)}s vs P`}
+                                                  </div>
+                                                );
+                                              })()}
                                           </td>
                                           <td className="py-3 px-3 text-right font-mono text-xs tabular-nums">
                                             {isFinite(behindSec) ? (
