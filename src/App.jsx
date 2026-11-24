@@ -1796,6 +1796,7 @@ export default function App() {
   const [winsCompetitionFilter, setWinsCompetitionFilter] = useState('ALL');
   const [winsActiveOnly, setWinsActiveOnly] = useState(false);
   const [winsCurrentSeasonOnly, setWinsCurrentSeasonOnly] = useState(false);
+  const [winsSortConfig, setWinsSortConfig] = useState({ key: 'totalWins', direction: 'desc' });
   const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
 
   const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'relayopt' | 'standards'
@@ -5152,13 +5153,35 @@ export default function App() {
           multiWinMeets,
         };
       })
-      .sort(
-        (a, b) =>
-          b.totalWins - a.totalWins ||
-          b.multiWinEventsTotal - a.multiWinEventsTotal ||
-          b.indWins - a.indWins ||
-          compareByLastName(a.swimmerName, b.swimmerName)
-      );
+      .sort((a, b) => {
+        const dir = winsSortConfig.direction === 'asc' ? 1 : -1;
+        switch (winsSortConfig.key) {
+          case 'swimmerName':
+            return compareByLastName(a.swimmerName, b.swimmerName) * dir;
+          case 'indWins': {
+            const cmp = (a.indWins - b.indWins) * dir;
+            return cmp !== 0 ? cmp : (b.totalWins - a.totalWins) || compareByLastName(a.swimmerName, b.swimmerName);
+          }
+          case 'relWins': {
+            const cmp = (a.relWins - b.relWins) * dir;
+            return cmp !== 0 ? cmp : (b.totalWins - a.totalWins) || compareByLastName(a.swimmerName, b.swimmerName);
+          }
+          case 'multiWinEventsTotal': {
+            const cmp = (a.multiWinEventsTotal - b.multiWinEventsTotal) * dir;
+            return cmp !== 0 ? cmp : (b.totalWins - a.totalWins) || compareByLastName(a.swimmerName, b.swimmerName);
+          }
+          case 'totalWins':
+          default: {
+            const cmp = (a.totalWins - b.totalWins) * dir;
+            if (cmp !== 0) return cmp;
+            if (b.multiWinEventsTotal !== a.multiWinEventsTotal) {
+              return b.multiWinEventsTotal - a.multiWinEventsTotal;
+            }
+            if (b.indWins !== a.indWins) return b.indWins - a.indWins;
+            return compareByLastName(a.swimmerName, b.swimmerName);
+          }
+        }
+      });
   }, [
     historicalRecords,
     masterRoster,
@@ -5166,6 +5189,7 @@ export default function App() {
     winsActiveOnly,
     winsCurrentSeasonOnly,
     winsCompetitionFilter,
+    winsSortConfig,
   ]);
 
   // Post-Meet Win Summary & Multi-Win Athletes
@@ -9512,161 +9536,221 @@ export default function App() {
                       No 1st-place Finals victories recorded for {recordBookGender} yet.
                     </div>
                   ) : (
-                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
-                          <tr>
-                            <th className="py-3 px-4 w-16">Rank</th>
-                            <th className="py-3 px-4">Athlete</th>
-                            <th className="py-3 px-4 text-center">Total Wins</th>
-                            <th className="py-3 px-4 text-center">Individual</th>
-                            <th className="py-3 px-4 text-center">Relay</th>
-                            <th className="py-3 px-4">Multi-Win Meets</th>
-                            <th className="py-3 px-4 text-right">Win Log</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {allTimeWinsLeaderboard.map((ath, idx) => {
-                            const isOpen = expandedWinAthlete === ath.swimmerKey;
-                            return (
-                              <React.Fragment key={ath.swimmerKey}>
-                                <tr
-                                  className={
-                                    idx === 0 ? 'bg-amber-50/40' : 'hover:bg-slate-50'
-                                  }
+                    (() => {
+                      const toggleWinsSort = (key) => {
+                        setWinsSortConfig((prev) => ({
+                          key,
+                          direction:
+                            prev.key === key
+                              ? prev.direction === 'desc'
+                                ? 'asc'
+                                : 'desc'
+                              : key === 'swimmerName'
+                              ? 'asc'
+                              : 'desc',
+                        }));
+                      };
+
+                      return (
+                        <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
+                              <tr>
+                                <th className="py-3 px-4 w-16">Rank</th>
+                                <th
+                                  onClick={() => toggleWinsSort('swimmerName')}
+                                  className="py-3 px-4 cursor-pointer hover:text-cyan-300 select-none"
                                 >
-                                  <td className="py-3 px-4 font-black text-slate-900">
-                                    #{idx + 1}
-                                  </td>
-                                  <td className="py-3 px-4 font-bold text-slate-900">
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => openSwimmerProfile(ath.swimmerName)}
-                                        className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
-                                      >
-                                        {ath.swimmerName}
-                                      </button>
-                                      {ath.isActive && (
-                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                                          Active
-                                        </span>
-                                      )}
-                                    </div>
-                                  </td>
-                                  <td className="py-3 px-4 text-center font-black text-sm text-cyan-800">
-                                    {ath.totalWins}
-                                  </td>
-                                  <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
-                                    {ath.indWins}
-                                  </td>
-                                  <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
-                                    {ath.relWins}
-                                  </td>
-                                  <td className="py-3 px-4">
-                                    {ath.multiWinEventsTotal > 0 ? (
-                                      <div className="flex flex-wrap items-center gap-1">
-                                        {ath.twoWinEvents > 0 && (
-                                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-900 border border-sky-200">
-                                            {ath.twoWinEvents}× 2-Win
-                                          </span>
-                                        )}
-                                        {ath.threeWinEvents > 0 && (
-                                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-200">
-                                            {ath.threeWinEvents}× 3-Win
-                                          </span>
-                                        )}
-                                        {ath.fourPlusWinEvents > 0 && (
-                                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-200">
-                                            {ath.fourPlusWinEvents}× 4+ Win
-                                          </span>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <span className="text-slate-400">—</span>
-                                    )}
-                                  </td>
-                                  <td className="py-3 px-4 text-right">
-                                    <button
-                                      onClick={() =>
-                                        setExpandedWinAthlete(isOpen ? null : ath.swimmerKey)
+                                  <div className="inline-flex items-center gap-1">
+                                    <span>Athlete</span>
+                                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                  </div>
+                                </th>
+                                <th
+                                  onClick={() => toggleWinsSort('totalWins')}
+                                  className="py-3 px-4 text-center cursor-pointer hover:text-cyan-300 select-none"
+                                >
+                                  <div className="inline-flex items-center justify-center gap-1">
+                                    <span>Total Wins</span>
+                                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                  </div>
+                                </th>
+                                <th
+                                  onClick={() => toggleWinsSort('indWins')}
+                                  className="py-3 px-4 text-center cursor-pointer hover:text-cyan-300 select-none"
+                                >
+                                  <div className="inline-flex items-center justify-center gap-1">
+                                    <span>Individual</span>
+                                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                  </div>
+                                </th>
+                                <th
+                                  onClick={() => toggleWinsSort('relWins')}
+                                  className="py-3 px-4 text-center cursor-pointer hover:text-cyan-300 select-none"
+                                >
+                                  <div className="inline-flex items-center justify-center gap-1">
+                                    <span>Relay</span>
+                                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                  </div>
+                                </th>
+                                <th
+                                  onClick={() => toggleWinsSort('multiWinEventsTotal')}
+                                  className="py-3 px-4 cursor-pointer hover:text-cyan-300 select-none"
+                                >
+                                  <div className="inline-flex items-center gap-1">
+                                    <span>Multi-Win Meets</span>
+                                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                  </div>
+                                </th>
+                                <th className="py-3 px-4 text-right">Win Log</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {allTimeWinsLeaderboard.map((ath, idx) => {
+                                const isOpen = expandedWinAthlete === ath.swimmerKey;
+                                return (
+                                  <React.Fragment key={ath.swimmerKey}>
+                                    <tr
+                                      className={
+                                        idx === 0 ? 'bg-amber-50/40' : 'hover:bg-slate-50'
                                       }
-                                      className="inline-flex items-center gap-1 text-xs font-bold text-cyan-700 hover:underline cursor-pointer"
                                     >
-                                      {isOpen ? 'Hide' : 'View'} ({ath.winLog.length})
-                                      {isOpen ? (
-                                        <ChevronUp className="w-3.5 h-3.5" />
-                                      ) : (
-                                        <ChevronDown className="w-3.5 h-3.5" />
-                                      )}
-                                    </button>
-                                  </td>
-                                </tr>
-                                {isOpen && (
-                                  <tr className="bg-slate-50">
-                                    <td colSpan={7} className="px-4 py-3 space-y-3">
-                                      {ath.multiWinMeets.length > 0 && (
-                                        <div className="space-y-1.5">
-                                          <div className="text-[10px] font-extrabold uppercase tracking-wider text-purple-900">
-                                            Multi-Win Meet Performances ({ath.multiWinMeets.length}
-                                            )
+                                      <td className="py-3 px-4 font-black text-slate-900">
+                                        #{idx + 1}
+                                      </td>
+                                      <td className="py-3 px-4 font-bold text-slate-900">
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => openSwimmerProfile(ath.swimmerName)}
+                                            className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
+                                          >
+                                            {ath.swimmerName}
+                                          </button>
+                                          {ath.isActive && (
+                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                              Active
+                                            </span>
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td className="py-3 px-4 text-center font-black text-sm text-cyan-800">
+                                        {ath.totalWins}
+                                      </td>
+                                      <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
+                                        {ath.indWins}
+                                      </td>
+                                      <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
+                                        {ath.relWins}
+                                      </td>
+                                      <td className="py-3 px-4">
+                                        {ath.multiWinEventsTotal > 0 ? (
+                                          <div className="flex flex-wrap items-center gap-1">
+                                            {ath.twoWinEvents > 0 && (
+                                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-900 border border-sky-200">
+                                                {ath.twoWinEvents}× 2-Win
+                                              </span>
+                                            )}
+                                            {ath.threeWinEvents > 0 && (
+                                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-200">
+                                                {ath.threeWinEvents}× 3-Win
+                                              </span>
+                                            )}
+                                            {ath.fourPlusWinEvents > 0 && (
+                                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-200">
+                                                {ath.fourPlusWinEvents}× 4+ Win
+                                              </span>
+                                            )}
                                           </div>
-                                          <div className="flex flex-wrap gap-2">
-                                            {ath.multiWinMeets.map((mw) => (
+                                        ) : (
+                                          <span className="text-slate-400">—</span>
+                                        )}
+                                      </td>
+                                      <td className="py-3 px-4 text-right">
+                                        <button
+                                          onClick={() =>
+                                            setExpandedWinAthlete(isOpen ? null : ath.swimmerKey)
+                                          }
+                                          className="inline-flex items-center gap-1 text-xs font-bold text-cyan-700 hover:underline cursor-pointer"
+                                        >
+                                          {isOpen ? 'Hide' : 'View'} ({ath.winLog.length})
+                                          {isOpen ? (
+                                            <ChevronUp className="w-3.5 h-3.5" />
+                                          ) : (
+                                            <ChevronDown className="w-3.5 h-3.5" />
+                                          )}
+                                        </button>
+                                      </td>
+                                    </tr>
+                                    {isOpen && (
+                                      <tr className="bg-slate-50">
+                                        <td colSpan={7} className="px-4 py-3 space-y-3">
+                                          {ath.multiWinMeets.length > 0 && (
+                                            <div className="space-y-1.5">
+                                              <div className="text-[10px] font-extrabold uppercase tracking-wider text-purple-900">
+                                                Multi-Win Meet Performances ({ath.multiWinMeets.length}
+                                                )
+                                              </div>
+                                              <div className="flex flex-wrap gap-2">
+                                                {ath.multiWinMeets.map((mw) => (
+                                                  <div
+                                                    key={mw.meetKey}
+                                                    className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-1.5 text-[11px]"
+                                                  >
+                                                    <span className="font-extrabold text-purple-950">
+                                                      {mw.winCount}-Win Meet:
+                                                    </span>{' '}
+                                                    <span className="font-bold text-slate-900">
+                                                      {mw.competition}
+                                                    </span>
+                                                    {mw.date && (
+                                                      <span className="text-slate-500 ml-1">
+                                                        ({formatDisplayDateMDY(mw.date)})
+                                                      </span>
+                                                    )}
+                                                    <div className="text-[10px] text-purple-800 mt-0.5">
+                                                      {mw.wins
+                                                        .map((x) => `${x.eventLabel} (${x.time})`)
+                                                        .join(' • ')}
+                                                    </div>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                            {ath.winLog.map((w) => (
                                               <div
-                                                key={mw.meetKey}
-                                                className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-1.5 text-[11px]"
+                                                key={w.id}
+                                                className="bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2 text-[11px]"
                                               >
-                                                <span className="font-extrabold text-purple-950">
-                                                  {mw.winCount}-Win Meet:
-                                                </span>{' '}
-                                                <span className="font-bold text-slate-900">
-                                                  {mw.competition}
-                                                </span>
-                                                {mw.date && (
-                                                  <span className="text-slate-500 ml-1">
-                                                    ({formatDisplayDateMDY(mw.date)})
-                                                  </span>
-                                                )}
-                                                <div className="text-[10px] text-purple-800 mt-0.5">
-                                                  {mw.wins.map((x) => `${x.eventLabel} (${x.time})`).join(' • ')}
+                                                <div>
+                                                  <div className="font-bold text-slate-900">
+                                                    {w.eventLabel}
+                                                    {w.splitContext ? ` (${w.splitContext})` : ''}
+                                                  </div>
+                                                  <div className="text-slate-500">
+                                                    {w.competition || 'Meet'} •{' '}
+                                                    {formatDisplayDateMDY(w.date)}
+                                                  </div>
                                                 </div>
+                                                <span className="font-mono font-extrabold text-cyan-800 shrink-0">
+                                                  {w.time}
+                                                </span>
                                               </div>
                                             ))}
                                           </div>
-                                        </div>
-                                      )}
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                        {ath.winLog.map((w) => (
-                                          <div
-                                            key={w.id}
-                                            className="bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2 text-[11px]"
-                                          >
-                                            <div>
-                                              <div className="font-bold text-slate-900">
-                                                {w.eventLabel}
-                                                {w.splitContext ? ` (${w.splitContext})` : ''}
-                                              </div>
-                                              <div className="text-slate-500">
-                                                {w.competition || 'Meet'} •{' '}
-                                                {formatDisplayDateMDY(w.date)}
-                                              </div>
-                                            </div>
-                                            <span className="font-mono font-extrabold text-cyan-800 shrink-0">
-                                              {w.time}
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )}
-                              </React.Fragment>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </React.Fragment>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })()
                   )}
                 </div>
               )}
