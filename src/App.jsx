@@ -632,10 +632,13 @@ function parseSDIFContent(content) {
       }
       const isTimedFinalTail = /^\d+\.$/.test(normalizedTail[3] || '');
       const hasPrelimTail =
-        !isTimedFinalTail && normalizedTail.length >= 5 && /^\d+$/.test(normalizedTail[4]);
-
+        !isTimedFinalTail &&
+        normalizedTail.length >= 5 &&
+        /^\d+$/.test(normalizedTail[4]) &&
+        !/^0\d$/.test(normalizedTail[4]) &&
+        !/^\d{3,}$/.test(normalizedTail[4]);
       const timeTokens = Array.from(
-        timeZoneStr.matchAll(/((?:\d{1,2}:)?\d{2,3}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
+        timeZoneStr.matchAll(/(?:(\d{1,2}:)?\d{2,3}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
       ).map((m) => ({
         full: `${m[1]}${m[2] || ''}`.toUpperCase(),
         clean: m[1].toUpperCase(),
