@@ -9964,818 +9964,1034 @@ export default function App() {
                 </div>
               </div>
 
-              {/* SUB-TAB 1: HEAT SHEET & 1920x1080 BROADCAST GRAPHICS */}
+              {/* SUB-TAB 1: HEAT SHEET (LANES 1-8) + TEAM HEX COLOR SETUP */}
               {inMeetSubTab === 'heatsheet' && (
-                <div className="p-5 sm:p-6 space-y-5">
+                <div
+                  className={
+                    isHeatSheetFullscreen
+                      ? 'fixed inset-0 z-50 bg-white overflow-y-auto p-4 sm:p-6 space-y-4'
+                      : 'p-5 sm:p-6 space-y-5'
+                  }
+                >
                   {!parsedData ? (
                     <div className="text-center py-10 space-y-3 border border-dashed border-slate-200 rounded-xl">
                       <p className="text-sm text-slate-600">
-                        Load a `.cl2` / `.sd3` meet file in Section 4 (or load the sample meet) to
-                        view heat sheets and export 1920×1080 broadcast PNG lane graphics.
+                        Import a `.cl2` meet or pre-meet/psych file in{' '}
+                        <strong>Section 4 (Import Meet Results)</strong> or load the sample meet to
+                        view lane-by-lane heat sheets.
                       </p>
                       <button
-                        onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA, { autoSave: false })}
-                        className="inline-flex items-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                        type="button"
+                        onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
                       >
                         Load Sample Meet
                       </button>
                     </div>
                   ) : (
-                    (() => {
-                      const eventOptionMap = new Map();
-                      parsedData.individualResults.forEach((r) => {
-                        if (!eventOptionMap.has(r.eventLabel)) {
-                          eventOptionMap.set(r.eventLabel, {
-                            label: r.eventLabel,
-                            num: r.eventNumber,
-                            isRelay: false,
-                          });
-                        }
-                      });
-                      parsedData.relayResults.forEach((r) => {
-                        if (!eventOptionMap.has(r.eventLabel)) {
-                          eventOptionMap.set(r.eventLabel, {
-                            label: r.eventLabel,
-                            num: r.eventNumber,
-                            isRelay: true,
-                          });
-                        }
-                      });
-                      const eventOptions = Array.from(eventOptionMap.values()).sort(
-                        (a, b) => Number(a.num) - Number(b.num)
-                      );
-                      const activeEvIdx = Math.max(
-                        0,
-                        eventOptions.findIndex((e) => e.label === selectedHeatEventLabel)
-                      );
-                      const activeEvObj = eventOptions[activeEvIdx] || null;
-                      const prevEvObj = activeEvIdx > 0 ? eventOptions[activeEvIdx - 1] : null;
-                      const nextEvObj =
-                        activeEvIdx < eventOptions.length - 1
-                          ? eventOptions[activeEvIdx + 1]
-                          : null;
-
-                      const evSwims = activeEvObj
-                        ? activeEvObj.isRelay
-                          ? parsedData.relayResults.filter((r) => r.eventLabel === activeEvObj.label)
-                          : parsedData.individualResults.filter(
-                              (r) => r.eventLabel === activeEvObj.label
-                            )
-                        : [];
-
-                      const heats = Array.from(
-                        new Set(evSwims.map((r) => r.heat).filter(Boolean))
-                      ).sort((a, b) => Number(a) - Number(b));
-
-                      const filteredByHeat =
-                        selectedHeatNum !== 'ALL' && heats.includes(selectedHeatNum)
-                          ? evSwims.filter((r) => String(r.heat) === String(selectedHeatNum))
-                          : evSwims;
-
-                      const laneMap = new Map();
-                      filteredByHeat.forEach((sw) => {
-                        const ln = parseInt(sw.lane, 10);
-                        if (ln >= 1 && ln <= 8 && !laneMap.has(ln)) {
-                          laneMap.set(ln, sw);
-                        }
-                      });
-
-                      const activeEvKey = activeEvObj ? normalizeEventKey(activeEvObj.label) : '';
-                      const eventStandards = qualStandards.filter(
-                        (s) => s.eventKey === activeEvKey
-                      );
-                      const seasonStart = getCurrentSeasonStart();
-                      const officialEvPool = historicalRecords.filter(
-                        (r) => r.isOfficial !== false && r.eventKey === activeEvKey
-                      );
-                      const bestBySw = new Map();
-                      officialEvPool.forEach((r) => {
-                        if (
-                          !bestBySw.has(r.swimmerKey) ||
-                          Number(r.seconds) < Number(bestBySw.get(r.swimmerKey).seconds)
-                        ) {
-                          bestBySw.set(r.swimmerKey, r);
-                        }
-                      });
-                      const sortedEvBests = Array.from(bestBySw.values()).sort(
-                        (a, b) => Number(a.seconds) - Number(b.seconds)
-                      );
-                      const schoolRec = sortedEvBests[0] || null;
-                      const tenthBestRec = sortedEvBests[9] || null;
-                      const freshmanRec =
-                        activeEvObj && !activeEvObj.isRelay
-                          ? officialEvPool
-                              .filter((r) => normalizeClass(r.classYear) === 'FR')
-                              .sort((a, b) => Number(a.seconds) - Number(b.seconds))[0] || null
-                          : null;
-
-                      const rankBySwimmer = new Map();
-                      sortedEvBests.forEach((rec, idx) => {
-                        if (idx < 10) rankBySwimmer.set(rec.swimmerKey, idx + 1);
-                      });
-
-                      const getLaneBroadcasterIntel = (sw) => {
-                        if (!sw || !activeEvObj) return null;
-                        const isRelay = Boolean(activeEvObj.isRelay);
-                        const resolvedLegs = isRelay
-                          ? (sw.legs || []).map((l) => {
-                              const disp = formatSwimmerDisplay(l.swimmerName, l.preferredFirst);
-                              const m = resolveMasterAthlete(disp);
-                              return m ? m.canonicalName : disp;
-                            })
-                          : [];
-
-                        const nameDisplay = isRelay
-                          ? sw.relayTitle || `${sw.teamName} "${sw.relayLetter || 'A'}"`
-                          : formatSwimmerDisplay(sw.swimmerName, sw.preferredFirst);
-
-                        const resolvedAth = !isRelay ? resolveMasterAthlete(nameDisplay) : null;
-                        const canonicalName = resolvedAth ? resolvedAth.canonicalName : nameDisplay;
-                        const swKey = isRelay
-                          ? normalizeSwimmerKey(resolvedLegs.join(', '))
-                          : normalizeSwimmerKey(canonicalName);
-
-                        const swHist = officialEvPool
-                          .filter((r) => r.swimmerKey === swKey)
-                          .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
-                        const fullSwHist = swHist.filter(
-                          (r) =>
-                            r.swimType !== 'INTERMEDIATE_SPLIT' &&
-                            String(r.place || '').toUpperCase() !== 'S'
-                        );
-                        const pbPool = fullSwHist.length > 0 ? fullSwHist : swHist;
-                        const pbRec =
-                          pbPool.length > 0
-                            ? pbPool.reduce((b, c) =>
-                                Number(c.seconds) < Number(b.seconds) ? c : b
-                              )
-                            : null;
-
-                        const sbPool = pbPool.filter(
-                          (r) => r.dateObj && r.dateObj >= seasonStart
-                        );
-                        const sbRec =
-                          sbPool.length > 0
-                            ? sbPool.reduce((b, c) =>
-                                Number(c.seconds) < Number(b.seconds) ? c : b
-                              )
-                            : null;
-
-                        const allTimeRank = rankBySwimmer.get(swKey) || null;
-                        const isFrRecHolder =
-                          !isRelay &&
-                          freshmanRec &&
-                          normalizeSwimmerKey(freshmanRec.swimmerName) === swKey;
-
-                        const seedSec = timeToSeconds(sw.seedTime);
-                        const finalsSec = timeToSeconds(sw.finalsTime);
-                        const refSec =
-                          finalsSec !== null && finalsSec > 0
-                            ? finalsSec
-                            : seedSec !== null && seedSec > 0
-                            ? seedSec
-                            : null;
-                        const refTimeStr =
-                          finalsSec !== null && finalsSec > 0
-                            ? sw.finalsTime
-                            : seedSec !== null && seedSec > 0
-                            ? sw.seedTime
-                            : '';
-
-                        const hitStds = refTimeStr
-                          ? evaluateStandardsForSwim(activeEvObj.label, refTimeStr)
-                          : [];
-
-                        // Advanced Broadcaster Trend & Talking Points
-                        const notes = [];
-                        if (
-                          seedSec !== null &&
-                          pbRec &&
-                          Math.abs(seedSec - Number(pbRec.seconds)) < 0.01
-                        ) {
-                          notes.push('Seeded right at Career PB');
-                        } else if (seedSec !== null && pbRec && seedSec < Number(pbRec.seconds)) {
-                          notes.push(
-                            `Seed is ${(Number(pbRec.seconds) - seedSec).toFixed(2)}s faster than DB PB`
-                          );
-                        } else if (
-                          seedSec !== null &&
-                          sbRec &&
-                          seedSec <= Number(sbRec.seconds) + 0.02
-                        ) {
-                          notes.push('Seeded at/under Season Best');
-                        }
-
-                        if (!allTimeRank && tenthBestRec && refSec !== null) {
-                          const gapToTop10 = refSec - Number(tenthBestRec.seconds);
-                          if (gapToTop10 > 0 && gapToTop10 <= 1.5) {
-                            notes.push(
-                              `${gapToTop10.toFixed(2)}s off All-Time #10 (${tenthBestRec.time})`
-                            );
-                          }
-                        }
-
-                        if (schoolRec && refSec !== null && allTimeRank !== 1) {
-                          const gapToRec = refSec - Number(schoolRec.seconds);
-                          if (gapToRec > 0 && gapToRec <= 1.2) {
-                            notes.push(
-                              `${gapToRec.toFixed(2)}s off School Record (${schoolRec.time})`
-                            );
-                          }
-                        }
-
-                        if (
-                          !isRelay &&
-                          normalizeClass(sw.classYear) === 'FR' &&
-                          freshmanRec &&
-                          refSec !== null &&
-                          !isFrRecHolder
-                        ) {
-                          const gapToFr = refSec - Number(freshmanRec.seconds);
-                          if (gapToFr > 0 && gapToFr <= 1.5) {
-                            notes.push(
-                              `${gapToFr.toFixed(2)}s off FR Record (${freshmanRec.time})`
-                            );
-                          }
-                        }
-
-                        if (fullSwHist.length >= 2) {
-                          const latest = fullSwHist[fullSwHist.length - 1];
-                          const prev = fullSwHist[fullSwHist.length - 2];
-                          const diff = Number(latest.seconds) - Number(prev.seconds);
-                          if (diff <= -0.05) {
-                            notes.push(
-                              `Trending down (-${Math.abs(diff).toFixed(2)}s last outing)`
-                            );
-                          } else if (
-                            pbRec &&
-                            latest.id === pbRec.id &&
-                            fullSwHist.length >= 2
-                          ) {
-                            notes.push(`Set Career PB at ${latest.competition || 'last meet'}`);
-                          }
-                        }
-
-                        return {
-                          nameDisplay,
-                          canonicalName,
-                          isRelay,
-                          resolvedLegs,
-                          pbRec,
-                          sbRec,
-                          allTimeRank,
-                          isFrRecHolder,
-                          hitStds,
-                          notes,
-                        };
-                      };
-
-                      const headerCheckboxes = [
-                        { key: 'PROGRAM_RECORD', label: 'Program Record' },
-                        { key: 'FRESHMAN_RECORD', label: 'Freshman Record' },
-                        ...eventStandards.map((s) => ({
-                          key: `STD_${s.id}`,
-                          label: `${s.label} (${s.time})`,
-                        })),
-                      ];
-
-                      return (
-                        <div className="space-y-4">
-                          {/* One-Handed Deck Event & Heat Stepper Bar */}
-                          <div className="bg-slate-900 text-white rounded-2xl p-3.5 sm:p-4 space-y-3 shadow-sm">
-                            <div className="flex items-stretch justify-between gap-2">
-                              <button
-                                type="button"
-                                disabled={!prevEvObj}
-                                onClick={() => {
-                                  if (!prevEvObj) return;
-                                  setSelectedHeatEventLabel(prevEvObj.label);
-                                  setSelectedHeatNum('ALL');
-                                }}
-                                className="min-h-[46px] px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-[0.99] disabled:opacity-35 text-xs font-extrabold flex items-center gap-1.5 border border-slate-700 transition cursor-pointer shrink-0"
-                              >
-                                <span>← Prev</span>
-                                {prevEvObj && (
-                                  <span className="hidden sm:inline text-cyan-300 font-mono">
-                                    #{prevEvObj.num}
-                                  </span>
-                                )}
-                              </button>
-
-                              <div className="flex-1 min-w-0 flex flex-col justify-center text-center px-1">
-                                <div className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">
-                                  Event {activeEvObj ? `#${activeEvObj.num}` : '—'} of{' '}
-                                  {eventOptions.length}
-                                </div>
-                                <div className="text-sm sm:text-base font-extrabold truncate">
-                                  {activeEvObj?.label || 'No Event'}
-                                </div>
-                              </div>
-
-                              <button
-                                type="button"
-                                disabled={!nextEvObj}
-                                onClick={() => {
-                                  if (!nextEvObj) return;
-                                  setSelectedHeatEventLabel(nextEvObj.label);
-                                  setSelectedHeatNum('ALL');
-                                }}
-                                className="min-h-[46px] px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] disabled:opacity-35 text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer shrink-0"
-                              >
-                                {nextEvObj && (
-                                  <span className="hidden sm:inline text-indigo-100 font-mono">
-                                    #{nextEvObj.num}
-                                  </span>
-                                )}
-                                <span>Next →</span>
-                              </button>
-                            </div>
-
-                            {/* Horizontal Quick-Jump Event Number Chips */}
-                            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                              {eventOptions.map((ev) => {
-                                const isCur = activeEvObj?.label === ev.label;
-                                return (
-                                  <button
-                                    key={ev.label}
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedHeatEventLabel(ev.label);
-                                      setSelectedHeatNum('ALL');
-                                    }}
-                                    title={ev.label}
-                                    className={`min-h-[38px] min-w-[44px] px-2.5 rounded-lg text-xs font-mono font-extrabold transition cursor-pointer shrink-0 ${
-                                      isCur
-                                        ? 'bg-cyan-400 text-slate-950 shadow-xs'
-                                        : 'bg-slate-800/90 text-slate-300 hover:bg-slate-700 border border-slate-700/80'
-                                    }`}
-                                  >
-                                    #{ev.num}
-                                  </button>
-                                );
-                              })}
-                            </div>
-
-                            {/* Large Tap-Target Heat Pills */}
-                            {heats.length > 0 && (
-                              <div className="flex items-center gap-1.5 overflow-x-auto pt-1 border-t border-slate-800">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1 shrink-0">
-                                  Heat:
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedHeatNum('ALL')}
-                                  className={`min-h-[38px] px-3 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 ${
-                                    selectedHeatNum === 'ALL'
-                                      ? 'bg-white text-slate-900'
-                                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                                  }`}
-                                >
-                                  All / Fast
-                                </button>
-                                {heats.map((h) => (
-                                  <button
-                                    key={h}
-                                    type="button"
-                                    onClick={() => setSelectedHeatNum(h)}
-                                    className={`min-h-[38px] min-w-[44px] px-3 rounded-lg text-xs font-mono font-extrabold transition cursor-pointer shrink-0 ${
-                                      String(selectedHeatNum) === String(h)
-                                        ? 'bg-cyan-500 text-slate-950'
-                                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                                    }`}
-                                  >
-                                    H{h}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
+                    <>
+                      {/* Team Hex Color Bar (Pre-Meet / Multi-Team Setup — hidden in Full Screen) */}
+                      {!isHeatSheetFullscreen && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                              Team Color Coding (Lane End-Bars)
+                            </span>
+                            <span className="text-[11px] text-slate-500">
+                              Pick a color or enter a hex code per team
+                            </span>
                           </div>
-
-                          {/* Team Colors & Controls */}
-                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-                              <div className="md:col-span-2">
-                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                                  Select Event
-                                </label>
-                                <select
-                                  value={activeEvObj?.label || ''}
-                                  onChange={(e) => {
-                                    setSelectedHeatEventLabel(e.target.value);
-                                    setSelectedHeatNum('ALL');
-                                  }}
-                                  className="w-full min-h-[42px] px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
-                                >
-                                  {eventOptions.map((ev) => (
-                                    <option key={ev.label} value={ev.label}>
-                                      Event #{ev.num} — {ev.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-
-                              <div>
-                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                                  Heat Filter
-                                </label>
-                                <select
-                                  value={selectedHeatNum}
-                                  onChange={(e) => setSelectedHeatNum(e.target.value)}
-                                  className="w-full min-h-[42px] px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
-                                >
-                                  <option value="ALL">All / Fast Heat</option>
-                                  {heats.map((h) => (
-                                    <option key={h} value={h}>
-                                      Heat {h}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-
-                              <div>
-                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                                  Graphic Background
-                                </label>
-                                <select
-                                  value={broadcastGraphicTheme}
-                                  onChange={(e) => setBroadcastGraphicTheme(e.target.value)}
-                                  className="w-full min-h-[42px] px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
-                                >
-                                  <option value="slate">Dark Broadcast Slate</option>
-                                  <option value="transparent">Transparent Overlay (OBS/vMix)</option>
-                                </select>
-                              </div>
-                            </div>
-
-                            {/* Team Accent Color Pickers */}
-                            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200/80">
-                              <div className="flex flex-wrap items-center gap-3">
-                                <span className="text-[11px] font-bold uppercase text-slate-500">
-                                  Team Lane Colors:
-                                </span>
-                                {parsedData.teams.map((t) => (
-                                  <label
-                                    key={t.code}
-                                    className="inline-flex items-center gap-1.5 min-h-[38px] text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-3 py-1.5 rounded-lg cursor-pointer"
-                                  >
-                                    <input
-                                      type="color"
-                                      value={getTeamHexColor(t.code, t.name)}
-                                      onChange={(e) =>
-                                        handleSetTeamHexColor(t.code, e.target.value)
-                                      }
-                                      className="w-4 h-4 rounded cursor-pointer border-0 bg-transparent"
-                                    />
-                                    <span>{t.name}</span>
-                                  </label>
-                                ))}
-                              </div>
-
-                              <div className="flex flex-wrap items-center gap-2">
-                                {activeEvObj && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const url = renderBroadcastHeatGraphicPng(
-                                        activeEvObj,
-                                        selectedHeatNum,
-                                        laneMap,
-                                        broadcastGraphicTheme,
-                                        selectedPngHeaderMarks
-                                      );
-                                      const safeEv = activeEvObj.label
-                                        .replace(/[^a-z0-9]+/gi, '_')
-                                        .replace(/^_|_$/g, '');
-                                      triggerPngDownload(
-                                        url,
-                                        `Ev${String(activeEvObj.num).padStart(2, '0')}_${safeEv}_Heat${
-                                          selectedHeatNum === 'ALL' ? '1' : selectedHeatNum
-                                        }.png`
-                                      );
-                                    }}
-                                    className="inline-flex items-center gap-1.5 min-h-[42px] px-3.5 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition cursor-pointer"
-                                  >
-                                    <Download className="w-3.5 h-3.5" />
-                                    Export Heat PNG (1920×1080)
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  disabled={isExportingAllGraphics}
-                                  onClick={handleExportAllMeetGraphics}
-                                  className="inline-flex items-center gap-1.5 min-h-[42px] px-3 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white transition cursor-pointer"
-                                >
-                                  <Download className="w-3.5 h-3.5 text-cyan-400" />
-                                  {isExportingAllGraphics
-                                    ? 'Exporting Meet PNGs...'
-                                    : 'Batch Export All Heats'}
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Header Reference Callouts for PNG */}
-                            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200/80 text-xs">
-                              <span className="text-[11px] font-bold uppercase text-slate-500">
-                                Header Reference Marks:
-                              </span>
-                              {headerCheckboxes.map((cb) => (
-                                <label
-                                  key={cb.key}
-                                  className="inline-flex items-center gap-1.5 min-h-[36px] px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-semibold text-slate-700 cursor-pointer"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedPngHeaderMarks.has(cb.key)}
-                                    onChange={(e) => {
-                                      setSelectedPngHeaderMarks((prev) => {
-                                        const next = new Set(prev);
-                                        if (e.target.checked) next.add(cb.key);
-                                        else next.delete(cb.key);
-                                        return next;
-                                      });
-                                    }}
-                                    className="rounded text-indigo-600"
-                                  />
-                                  <span>{cb.label}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Mobile Deck Lane Cards (High-Contrast One-Handed View) */}
-                          <div className="grid grid-cols-1 gap-2.5 md:hidden">
-                            {[1, 2, 3, 4, 5, 6, 7, 8].map((laneNum) => {
-                              const sw = laneMap.get(laneNum);
-                              if (!sw) {
-                                return (
-                                  <div
-                                    key={laneNum}
-                                    className="rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 flex items-center justify-between text-xs text-slate-400"
-                                  >
-                                    <span className="font-mono font-black text-slate-500">
-                                      LANE {laneNum}
-                                    </span>
-                                    <span className="italic">Open Lane</span>
-                                  </div>
-                                );
-                              }
-                              const teamHex = getTeamHexColor(sw.teamCode, sw.teamName);
-                              const intel = getLaneBroadcasterIntel(sw);
+                          <div className="flex flex-wrap gap-3">
+                            {parsedData.teams.map((t) => {
+                              const hex = getTeamHexColor(t.code, t.name);
                               return (
                                 <div
-                                  key={laneNum}
-                                  onClick={() =>
-                                    !intel.isRelay &&
-                                    openSwimmerProfile(intel.canonicalName, activeEvKey)
-                                  }
-                                  style={{ borderLeft: `6px solid ${teamHex}` }}
-                                  className={`rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-2 min-h-[68px] ${
-                                    !intel.isRelay
-                                      ? 'active:bg-indigo-50/60 cursor-pointer'
-                                      : ''
-                                  }`}
+                                  key={t.code}
+                                  className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs"
                                 >
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="flex items-start gap-3 min-w-0">
-                                      <div
-                                        style={{ backgroundColor: teamHex }}
-                                        className="w-9 h-9 rounded-lg text-white font-mono font-black text-base flex items-center justify-center shrink-0 mt-0.5"
-                                      >
-                                        {laneNum}
-                                      </div>
-                                      <div className="min-w-0">
-                                        <div className="font-extrabold text-sm text-slate-900 flex flex-wrap items-center gap-1.5">
-                                          <span className="truncate">{intel.nameDisplay}</span>
-                                          {!intel.isRelay && sw.classYear && (
-                                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-bold">
-                                              {sw.classYear}
-                                            </span>
-                                          )}
-                                          {intel.allTimeRank && (
-                                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-extrabold">
-                                              {intel.allTimeRank === 1
-                                                ? 'School Record'
-                                                : `#${intel.allTimeRank} All-Time`}
-                                            </span>
-                                          )}
-                                          {intel.isFrRecHolder && (
-                                            <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-900 text-[10px] font-extrabold">
-                                              FR Record
-                                            </span>
-                                          )}
-                                        </div>
-                                        <div className="text-xs text-slate-500 truncate">
-                                          {sw.teamName}
-                                          {intel.isRelay && intel.resolvedLegs.length > 0
-                                            ? ` • ${intel.resolvedLegs.join(', ')}`
-                                            : ''}
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    <div className="text-right font-mono shrink-0">
-                                      <div className="text-xs font-semibold text-slate-500">
-                                        Seed {sw.seedTime || 'NT'}
-                                      </div>
-                                      <div className="text-sm font-black text-cyan-800">
-                                        {sw.finalsTime && sw.finalsTime !== 'NT'
-                                          ? sw.finalsTime
-                                          : '—'}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* PB / SB & Broadcaster Trend Strip */}
-                                  <div className="pt-1.5 border-t border-slate-100 flex flex-wrap items-center gap-2 text-[11px]">
-                                    <span className="font-mono font-bold text-cyan-800 bg-cyan-50 px-2 py-0.5 rounded">
-                                      PB: {intel.pbRec ? intel.pbRec.time : '—'}
-                                    </span>
-                                    <span className="font-mono font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                                      SB: {intel.sbRec ? intel.sbRec.time : '—'}
-                                    </span>
-                                    {intel.hitStds.map((s) => (
-                                      <span
-                                        key={s.id}
-                                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${getStandardBadgeStyle(
-                                          s.label
-                                        )}`}
-                                      >
-                                        {s.label}
-                                      </span>
-                                    ))}
-                                    {intel.notes.map((n, nIdx) => (
-                                      <span
-                                        key={nIdx}
-                                        className="text-indigo-700 font-semibold"
-                                      >
-                                        • {n}
-                                      </span>
-                                    ))}
-                                  </div>
+                                  <input
+                                    type="color"
+                                    value={hex.startsWith('#') && hex.length === 7 ? hex : '#0284c7'}
+                                    onChange={(e) => handleSetTeamHexColor(t.code, e.target.value)}
+                                    className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent p-0"
+                                  />
+                                  <span className="font-bold text-slate-800">{t.name}</span>
+                                  <input
+                                    type="text"
+                                    value={hex}
+                                    onChange={(e) => handleSetTeamHexColor(t.code, e.target.value)}
+                                    maxLength={7}
+                                    className="w-16 font-mono text-[11px] px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded"
+                                  />
                                 </div>
                               );
                             })}
                           </div>
+                        </div>
+                      )}
 
-                          {/* Desktop 8-Lane Deck & Broadcaster Intelligence Table */}
-                          <div className="hidden md:block overflow-x-auto border border-slate-200 rounded-xl">
-                            <table className="w-full text-left text-xs">
-                              <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
-                                <tr>
-                                  <th className="py-3 px-3 w-14 text-center">Lane</th>
-                                  <th className="py-3 px-3">Swimmer / Relay</th>
-                                  <th className="py-3 px-3">Career PB</th>
-                                  <th className="py-3 px-3">Season Best</th>
-                                  <th className="py-3 px-3">Broadcaster Notes &amp; Trends</th>
-                                  <th className="py-3 px-3 text-right">Seed / Entry</th>
-                                  <th className="py-3 px-4 text-right">Finals</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100">
-                                {[1, 2, 3, 4, 5, 6, 7, 8].map((laneNum) => {
-                                  const sw = laneMap.get(laneNum);
-                                  if (!sw) {
+                      {(() => {
+                        const eventOptionMap = new Map();
+                        parsedData.individualResults.forEach((r) => {
+                          if (!eventOptionMap.has(r.eventLabel)) {
+                            eventOptionMap.set(r.eventLabel, {
+                              label: r.eventLabel,
+                              num: r.eventNumber,
+                              isRelay: false,
+                            });
+                          }
+                        });
+                        parsedData.relayResults.forEach((r) => {
+                          if (!eventOptionMap.has(r.eventLabel)) {
+                            eventOptionMap.set(r.eventLabel, {
+                              label: r.eventLabel,
+                              num: r.eventNumber,
+                              isRelay: true,
+                            });
+                          }
+                        });
+                        const eventOptions = Array.from(eventOptionMap.values()).sort(
+                          (a, b) => Number(a.num) - Number(b.num)
+                        );
+                        const activeEventIdx = Math.max(
+                          0,
+                          eventOptions.findIndex((e) => e.label === selectedHeatEventLabel)
+                        );
+                        const activeEventObj = eventOptions[activeEventIdx] || null;
+                        const prevEventObj =
+                          activeEventIdx > 0 ? eventOptions[activeEventIdx - 1] : null;
+                        const nextEventObj =
+                          activeEventIdx < eventOptions.length - 1
+                            ? eventOptions[activeEventIdx + 1]
+                            : null;
+                        const activeEventLabel = activeEventObj?.label || '';
+                        const isRelayEvent = Boolean(activeEventObj?.isRelay);
+
+                        const eventSwims = isRelayEvent
+                          ? parsedData.relayResults.filter((r) => r.eventLabel === activeEventLabel)
+                          : parsedData.individualResults.filter(
+                              (r) => r.eventLabel === activeEventLabel
+                            );
+                        const availableHeats = Array.from(
+                          new Set(eventSwims.map((r) => r.heat).filter(Boolean))
+                        ).sort((a, b) => Number(a) - Number(b));
+
+                        const effectiveHeat =
+                          selectedHeatNum !== 'ALL' && availableHeats.includes(selectedHeatNum)
+                            ? selectedHeatNum
+                            : availableHeats[0] || 'ALL';
+                        const activeHeatIdx = availableHeats.findIndex(
+                          (h) => String(h) === String(effectiveHeat)
+                        );
+                        const prevHeatVal =
+                          activeHeatIdx > 0 ? availableHeats[activeHeatIdx - 1] : null;
+                        const nextHeatVal =
+                          activeHeatIdx >= 0 && activeHeatIdx < availableHeats.length - 1
+                            ? availableHeats[activeHeatIdx + 1]
+                            : null;
+
+                        const heatSwims =
+                          effectiveHeat === 'ALL'
+                            ? eventSwims
+                            : eventSwims.filter((r) => String(r.heat) === String(effectiveHeat));
+
+                        const laneMap = new Map();
+                        heatSwims.forEach((r) => {
+                          const ln = parseInt(r.lane, 10);
+                          if (ln >= 1 && ln <= 8 && !laneMap.has(ln)) {
+                            laneMap.set(ln, r);
+                          }
+                        });
+
+                        // Pre-compute All-Time Top 10 for the active event + Reference Benchmarks
+                        const activeEvKey = normalizeEventKey(activeEventLabel);
+                        const officialEvPool = historicalRecords.filter(
+                          (r) => r.isOfficial !== false && r.eventKey === activeEvKey
+                        );
+                        const allTimeRankBySwimmer = new Map();
+                        const bestBySw = new Map();
+                        officialEvPool.forEach((r) => {
+                          if (
+                            !bestBySw.has(r.swimmerKey) ||
+                            r.seconds < bestBySw.get(r.swimmerKey).seconds
+                          ) {
+                            bestBySw.set(r.swimmerKey, r);
+                          }
+                        });
+                        Array.from(bestBySw.entries())
+                          .sort((a, b) => a[1].seconds - b[1].seconds)
+                          .forEach(([k], idx) => {
+                            if (idx < 10) allTimeRankBySwimmer.set(k, idx + 1);
+                          });
+
+                        const sortedEvBests = Array.from(bestBySw.values()).sort(
+                          (a, b) => a.seconds - b.seconds
+                        );
+                        const schoolRecordMark = sortedEvBests[0] || null;
+                        const tenthMark = sortedEvBests[9] || null;
+                        const freshmanRecordMark = isRelayEvent
+                          ? null
+                          : officialEvPool
+                              .filter((r) => normalizeClass(r.classYear) === 'FR')
+                              .sort((a, b) => a.seconds - b.seconds)[0] || null;
+                        const matchingStandards = qualStandards.filter(
+                          (s) => s.eventKey === activeEvKey
+                        );
+
+                        return (
+                          <div className="space-y-4">
+                            {/* Tablet-Friendly Event & Heat Stepper Bar + Full-Screen Toggle */}
+                            <div className="bg-slate-900 text-white rounded-2xl p-3.5 sm:p-4 space-y-3 shadow-sm">
+                              <div className="flex flex-wrap items-stretch justify-between gap-2.5">
+                                {/* Prev / Event Selector / Next */}
+                                <div className="flex items-stretch gap-2 flex-1 min-w-[260px]">
+                                  <button
+                                    type="button"
+                                    disabled={!prevEventObj}
+                                    onClick={() => {
+                                      if (!prevEventObj) return;
+                                      setSelectedHeatEventLabel(prevEventObj.label);
+                                      setSelectedHeatNum('ALL');
+                                    }}
+                                    title={prevEventObj ? `Previous Event: #${prevEventObj.num} ${prevEventObj.label}` : 'First Event'}
+                                    className="min-h-[48px] px-4 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-[0.99] disabled:opacity-35 text-sm font-extrabold flex items-center gap-1.5 border border-slate-700 transition cursor-pointer shrink-0"
+                                  >
+                                    <span>←</span>
+                                    <span className="hidden sm:inline">Event</span>
+                                  </button>
+
+                                  <select
+                                    value={activeEventLabel}
+                                    onChange={(e) => {
+                                      setSelectedHeatEventLabel(e.target.value);
+                                      setSelectedHeatNum('ALL');
+                                    }}
+                                    className="flex-1 min-w-0 min-h-[48px] px-3.5 py-2 text-sm font-extrabold bg-slate-800 text-white border border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-400 cursor-pointer"
+                                  >
+                                    {eventOptions.map((ev) => (
+                                      <option key={ev.label} value={ev.label}>
+                                        #{ev.num} — {ev.label}
+                                      </option>
+                                    ))}
+                                  </select>
+
+                                  <button
+                                    type="button"
+                                    disabled={!nextEventObj}
+                                    onClick={() => {
+                                      if (!nextEventObj) return;
+                                      setSelectedHeatEventLabel(nextEventObj.label);
+                                      setSelectedHeatNum('ALL');
+                                    }}
+                                    title={nextEventObj ? `Next Event: #${nextEventObj.num} ${nextEventObj.label}` : 'Last Event'}
+                                    className="min-h-[48px] px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] disabled:opacity-35 text-sm font-extrabold flex items-center gap-1.5 transition cursor-pointer shrink-0"
+                                  >
+                                    <span className="hidden sm:inline">Event</span>
+                                    <span>→</span>
+                                  </button>
+                                </div>
+
+                                {/* Prev Heat / Heat Pills / Next Heat + Full Screen Toggle */}
+                                <div className="flex flex-wrap items-stretch gap-2">
+                                  {availableHeats.length > 0 && (
+                                    <div className="flex items-stretch gap-1.5 bg-slate-800/90 p-1 rounded-xl border border-slate-700">
+                                      <button
+                                        type="button"
+                                        disabled={!prevHeatVal}
+                                        onClick={() => prevHeatVal && setSelectedHeatNum(prevHeatVal)}
+                                        title="Previous Heat"
+                                        className="min-h-[40px] px-3.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-35 text-sm font-extrabold transition cursor-pointer"
+                                      >
+                                        ← Heat
+                                      </button>
+                                      {availableHeats.map((h) => (
+                                        <button
+                                          key={h}
+                                          type="button"
+                                          onClick={() => setSelectedHeatNum(h)}
+                                          className={`min-h-[40px] min-w-[48px] px-3.5 rounded-lg text-sm font-extrabold transition cursor-pointer ${
+                                            String(effectiveHeat) === String(h)
+                                              ? 'bg-cyan-400 text-slate-950 shadow-xs'
+                                              : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+                                          }`}
+                                        >
+                                          Heat {h}
+                                        </button>
+                                      ))}
+                                      <button
+                                        type="button"
+                                        disabled={!nextHeatVal}
+                                        onClick={() => nextHeatVal && setSelectedHeatNum(nextHeatVal)}
+                                        title="Next Heat"
+                                        className="min-h-[40px] px-3.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-35 text-sm font-extrabold transition cursor-pointer"
+                                      >
+                                        Heat →
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsHeatSheetFullscreen((prev) => !prev)}
+                                    className={`min-h-[48px] px-4 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer flex items-center gap-1.5 border ${
+                                      isHeatSheetFullscreen
+                                        ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400'
+                                        : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border-slate-600'
+                                    }`}
+                                  >
+                                    <span>{isHeatSheetFullscreen ? '✕ Exit Full Screen' : '⛶ Full Screen'}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Broadcast 1920x1080 PNG Graphics Export Controls & Header Standards (hidden in Full Screen) */}
+                            {!isHeatSheetFullscreen && (
+                              <>
+                                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 text-white px-3.5 py-2.5 rounded-xl">
+                                  <span className="text-xs font-bold text-slate-300">
+                                    Broadcast 1920×1080 PNG Graphics:
+                                  </span>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="flex bg-slate-800 p-0.5 rounded-lg text-[11px] font-bold">
+                                      <button
+                                        type="button"
+                                        onClick={() => setBroadcastGraphicTheme('slate')}
+                                        className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                                          broadcastGraphicTheme === 'slate'
+                                            ? 'bg-cyan-600 text-white'
+                                            : 'text-slate-300 hover:text-white'
+                                        }`}
+                                      >
+                                        Full Slate
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setBroadcastGraphicTheme('transparent')}
+                                        className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                                          broadcastGraphicTheme === 'transparent'
+                                            ? 'bg-cyan-600 text-white'
+                                            : 'text-slate-300 hover:text-white'
+                                        }`}
+                                      >
+                                        Transparent Key
+                                      </button>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      disabled={!activeEventObj}
+                                      onClick={() => {
+                                        if (!activeEventObj) return;
+                                        const hVal = effectiveHeat === 'ALL' ? '1' : effectiveHeat;
+                                        const safeEv = activeEventObj.label
+                                          .replace(/[^a-z0-9]+/gi, '_')
+                                          .replace(/^_|_$/g, '');
+                                        const evPad = String(activeEventObj.num).padStart(2, '0');
+                                        const dataUrl = renderBroadcastHeatGraphicPng(
+                                          activeEventObj,
+                                          hVal,
+                                          laneMap,
+                                          broadcastGraphicTheme,
+                                          selectedPngHeaderMarks
+                                        );
+                                        triggerPngDownload(
+                                          dataUrl,
+                                          `Ev${evPad}_${safeEv}_Heat${hVal}.png`
+                                        );
+                                      }}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition cursor-pointer"
+                                    >
+                                      <Download className="w-3.5 h-3.5" />
+                                      <span>Export Heat PNG</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      disabled={isExportingAllGraphics}
+                                      onClick={handleExportAllMeetGraphics}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition cursor-pointer"
+                                    >
+                                      <Layers className="w-3.5 h-3.5" />
+                                      <span>
+                                        {isExportingAllGraphics
+                                          ? 'Exporting...'
+                                          : 'Export All Heats (1080p)'}
+                                      </span>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Broadcast PNG Header Standards & Records Checkboxes */}
+                                <div className="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                                    PNG Header Callouts:
+                                  </span>
+                                  {[
+                                    {
+                                      key: 'PROGRAM_RECORD',
+                                      label: schoolRecordMark
+                                        ? `Program Record (${schoolRecordMark.time})`
+                                        : 'Program Record',
+                                      disabled: !schoolRecordMark,
+                                    },
+                                    ...(!isRelayEvent
+                                      ? [
+                                          {
+                                            key: 'FRESHMAN_RECORD',
+                                            label: freshmanRecordMark
+                                              ? `Freshman Record (${freshmanRecordMark.time})`
+                                              : 'Freshman Record',
+                                            disabled: !freshmanRecordMark,
+                                          },
+                                        ]
+                                      : []),
+                                    ...matchingStandards.map((std) => ({
+                                      key: `STD_${std.id}`,
+                                      label: `${std.label} (${std.time}${
+                                        std.holder ? ` — ${std.holder}` : ''
+                                      })`,
+                                      disabled: false,
+                                    })),
+                                  ].map((chk) => {
+                                    const checked = selectedPngHeaderMarks.has(chk.key);
                                     return (
-                                      <tr key={laneNum} className="bg-slate-50/60 text-slate-400">
-                                        <td className="py-3 px-3 text-center font-mono font-bold">
+                                      <label
+                                        key={chk.key}
+                                        className={`inline-flex items-center gap-1.5 font-semibold select-none ${
+                                          chk.disabled
+                                            ? 'text-slate-400 cursor-not-allowed'
+                                            : 'text-slate-800 cursor-pointer'
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          disabled={chk.disabled}
+                                          checked={!chk.disabled && checked}
+                                          onChange={(e) => {
+                                            const isChecked = e.target.checked;
+                                            setSelectedPngHeaderMarks((prev) => {
+                                              const next = new Set(prev);
+                                              if (isChecked) next.add(chk.key);
+                                              else next.delete(chk.key);
+                                              return next;
+                                            });
+                                          }}
+                                          className="rounded text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <span>{chk.label}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            )}
+
+                            {/* Event Benchmarks & Defined Standards/Records Strip */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                              <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-amber-800">
+                                  #1 Program Record
+                                </div>
+                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                  {schoolRecordMark ? (
+                                    <>
+                                      <span className="font-mono text-amber-900">
+                                        {schoolRecordMark.time}
+                                      </span>{' '}
+                                      — {schoolRecordMark.swimmerName}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-500 font-normal">No mark in DB</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-indigo-800">
+                                  #10 All-Time Cut
+                                </div>
+                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                  {tenthMark ? (
+                                    <>
+                                      <span className="font-mono text-indigo-900">
+                                        {tenthMark.time}
+                                      </span>{' '}
+                                      — {tenthMark.swimmerName}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-500 font-normal">
+                                      {sortedEvBests.length > 0
+                                        ? `Open spot (${sortedEvBests.length}/10 swimmers)`
+                                        : 'No marks in DB'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="p-3 rounded-xl bg-cyan-50/70 border border-cyan-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-cyan-800">
+                                  {isRelayEvent ? 'Relay Format' : 'Freshman (FR) Record'}
+                                </div>
+                                <div className="font-extrabold text-slate-900 mt-0.5 truncate">
+                                  {isRelayEvent ? (
+                                    <span className="text-cyan-900">4-Leg Relay Event</span>
+                                  ) : freshmanRecordMark ? (
+                                    <>
+                                      <span className="font-mono text-cyan-900">
+                                        {freshmanRecordMark.time}
+                                      </span>{' '}
+                                      — {freshmanRecordMark.swimmerName}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-500 font-normal">No FR mark</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                                <div className="text-[10px] font-bold uppercase text-slate-600">
+                                  Standards &amp; Pool Records
+                                </div>
+                                {matchingStandards.length === 0 ? (
+                                  <div className="text-slate-500 mt-0.5">None defined for event</div>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {matchingStandards.map((std) => (
+                                      <span
+                                        key={std.id}
+                                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                          std.type === 'POOL_RECORD' && !showPoolRecordBadges
+                                            ? 'bg-slate-200 text-slate-500 line-through opacity-70'
+                                            : getStandardBadgeStyle(std.label)
+                                        }`}
+                                      >
+                                        {std.label}: <span className="font-mono">{std.time}</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Lanes 1-8 Table */}
+                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                              <table className="w-full text-left text-xs">
+                                <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
+                                  <tr>
+                                    <th className="py-2.5 px-3 w-16 text-center">Lane</th>
+                                    <th className="py-2.5 px-3">
+                                      {isRelayEvent ? 'Relay Squad / Lineup' : 'Swimmer / Team'}
+                                    </th>
+                                    <th className="py-2.5 px-3">Seed / PB / SB</th>
+                                    <th className="py-2.5 px-3 text-center">Wins</th>
+                                    <th className="py-2.5 px-3">Last Swim</th>
+                                    <th className="py-2.5 px-3">Trajectory &amp; Form</th>
+                                    <th className="py-2.5 px-3">All-Time &amp; Milestones</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {[1, 2, 3, 4, 5, 6, 7, 8].map((laneNum) => {
+                                    const entry = laneMap.get(laneNum);
+                                    if (!entry) {
+                                      return (
+                                        <tr key={laneNum} className="bg-slate-50/50 text-slate-400">
+                                          <td className="py-3 px-3 text-center font-mono text-base font-black">
+                                            {laneNum}
+                                          </td>
+                                          <td colSpan={6} className="py-3 px-3 italic">
+                                            Open / Empty Lane
+                                          </td>
+                                        </tr>
+                                      );
+                                    }
+
+                                    const teamHex = getTeamHexColor(
+                                      entry.teamCode,
+                                      entry.teamName
+                                    );
+                                    const isGettysburgEntry =
+                                      String(entry.teamName || '')
+                                        .toLowerCase()
+                                        .includes('gettysburg') ||
+                                      String(entry.teamCode || '')
+                                        .toLowerCase()
+                                        .includes('gett');
+
+                                    const resolvedLegs = isRelayEvent
+                                      ? (entry.legs || []).map((l) => {
+                                          const disp = formatSwimmerDisplay(
+                                            l.swimmerName,
+                                            l.preferredFirst
+                                          );
+                                          const m = resolveMasterAthlete(disp);
+                                          return {
+                                            legOrder: l.legOrder,
+                                            name: m ? m.canonicalName : disp,
+                                            classYear: l.classYear,
+                                          };
+                                        })
+                                      : [];
+
+                                    const displaySw = isRelayEvent
+                                      ? entry.relayTitle ||
+                                        `${entry.teamName} "${entry.relayLetter || 'A'}"`
+                                      : formatSwimmerDisplay(
+                                          entry.swimmerName,
+                                          entry.preferredFirst
+                                        );
+                                    const resolvedAth = !isRelayEvent
+                                      ? resolveMasterAthlete(displaySw)
+                                      : null;
+                                    const canonicalName = resolvedAth
+                                      ? resolvedAth.canonicalName
+                                      : displaySw;
+                                    const swKey = isRelayEvent
+                                      ? normalizeSwimmerKey(
+                                          resolvedLegs.map((l) => l.name).join(', ')
+                                        )
+                                      : normalizeSwimmerKey(canonicalName);
+                                    const evKey = normalizeEventKey(entry.eventLabel);
+
+                                    const swEventHistory = isRelayEvent
+                                      ? isGettysburgEntry
+                                        ? historicalRecords
+                                            .filter(
+                                              (r) =>
+                                                r.isOfficial !== false &&
+                                                r.eventKey === evKey &&
+                                                r.swimType === 'RELAY_TEAM'
+                                            )
+                                            .sort((a, b) =>
+                                              (b.date || '').localeCompare(a.date || '')
+                                            )
+                                        : []
+                                      : historicalRecords
+                                          .filter(
+                                            (r) =>
+                                              r.isOfficial !== false &&
+                                              r.swimmerKey === swKey &&
+                                              r.eventKey === evKey &&
+                                              r.swimType !== 'INTERMEDIATE_SPLIT' &&
+                                              String(r.place || '').toUpperCase() !== 'S'
+                                          )
+                                          .sort((a, b) =>
+                                            (b.date || '').localeCompare(a.date || '')
+                                          );
+
+                                    const pbRec =
+                                      swEventHistory.length > 0
+                                        ? swEventHistory.reduce((best, cur) =>
+                                            cur.seconds < best.seconds ? cur : best
+                                          )
+                                        : null;
+
+                                    const seasonStart = getCurrentSeasonStart();
+                                    const sbSwims = swEventHistory.filter(
+                                      (r) => r.dateObj && r.dateObj >= seasonStart
+                                    );
+                                    const sbRec =
+                                      sbSwims.length > 0
+                                        ? sbSwims.reduce((best, cur) =>
+                                            cur.seconds < best.seconds ? cur : best
+                                          )
+                                        : null;
+
+                                    const eventWinsCount = isRelayEvent
+                                      ? isGettysburgEntry
+                                        ? historicalRecords.filter(
+                                            (r) =>
+                                              r.eventKey === evKey &&
+                                              r.swimType === 'RELAY_TEAM' &&
+                                              String(r.place || '').trim() === '1' &&
+                                              String(r.round || 'Finals').toLowerCase() !==
+                                                'prelims' &&
+                                              String(r.round || 'Finals').toLowerCase() !==
+                                                'time trial'
+                                          ).length
+                                        : 0
+                                      : historicalRecords.filter(
+                                          (r) =>
+                                            r.eventKey === evKey &&
+                                            normalizeSwimmerKey(
+                                              resolveMasterAthlete(r.swimmerName)?.canonicalName ||
+                                                r.swimmerName
+                                            ) === swKey &&
+                                            String(r.place || '').trim() === '1' &&
+                                            String(r.round || 'Finals').toLowerCase() !==
+                                              'prelims' &&
+                                            String(r.round || 'Finals').toLowerCase() !==
+                                              'time trial'
+                                        ).length;
+
+                                    const lastSwim = swEventHistory[0] || null;
+                                    const seedSec = timeToSeconds(entry.seedTime);
+                                    const finalsSec = timeToSeconds(entry.finalsTime);
+
+                                    // 1. Trajectory & Form Signals
+                                    const trajectoryNotes = [];
+                                    if (seedSec !== null && pbRec) {
+                                      const vsPb = seedSec - pbRec.seconds;
+                                      if (Math.abs(vsPb) <= 0.02) {
+                                        trajectoryNotes.push({
+                                          text: 'Seeded at PB',
+                                          tone: 'text-indigo-700 font-bold',
+                                        });
+                                      } else if (vsPb < -0.02) {
+                                        trajectoryNotes.push({
+                                          text: `Seeded ${Math.abs(vsPb).toFixed(2)}s faster than PB`,
+                                          tone: 'text-emerald-700 font-bold',
+                                        });
+                                      } else {
+                                        trajectoryNotes.push({
+                                          text: `Seeded +${vsPb.toFixed(2)}s off PB`,
+                                          tone: 'text-slate-600',
+                                        });
+                                      }
+                                    } else if (seedSec !== null && sbRec) {
+                                      const vsSb = seedSec - sbRec.seconds;
+                                      trajectoryNotes.push({
+                                        text:
+                                          Math.abs(vsSb) <= 0.02
+                                            ? 'Seeded at SB'
+                                            : `Seeded ${vsSb > 0 ? '+' : ''}${vsSb.toFixed(2)}s vs SB`,
+                                        tone: 'text-slate-600',
+                                      });
+                                    }
+
+                                    if (swEventHistory.length >= 3) {
+                                      const [s0, s1, s2] = swEventHistory;
+                                      if (s0.seconds < s1.seconds && s1.seconds < s2.seconds) {
+                                        const drop3 = s2.seconds - s0.seconds;
+                                        trajectoryNotes.push({
+                                          text: `Dropping (-${drop3.toFixed(2)}s over last 3)`,
+                                          tone: 'text-emerald-700 font-bold',
+                                        });
+                                      }
+                                    }
+                                    if (
+                                      lastSwim &&
+                                      pbRec &&
+                                      lastSwim.id === pbRec.id &&
+                                      swEventHistory.length > 1
+                                    ) {
+                                      trajectoryNotes.push({
+                                        text: 'Career-best form (PB last swim)',
+                                        tone: 'text-emerald-700 font-semibold',
+                                      });
+                                    } else if (
+                                      lastSwim &&
+                                      sbRec &&
+                                      lastSwim.id === sbRec.id &&
+                                      sbSwims.length > 1
+                                    ) {
+                                      trajectoryNotes.push({
+                                        text: 'Season-best form (SB last swim)',
+                                        tone: 'text-cyan-700 font-semibold',
+                                      });
+                                    }
+
+                                    if (finalsSec !== null && lastSwim) {
+                                      const diff = finalsSec - lastSwim.seconds;
+                                      trajectoryNotes.push({
+                                        text:
+                                          Math.abs(diff) <= 0.005
+                                            ? 'Finals matched last mark'
+                                            : `Finals ${diff < 0 ? '' : '+'}${diff.toFixed(2)}s vs last`,
+                                        tone:
+                                          diff < -0.005
+                                            ? 'text-emerald-700 font-bold'
+                                            : 'text-slate-500',
+                                      });
+                                    }
+
+                                    // 2. All-Time Gap, Barrier Watch, Last Meet Momentum, & Cut Proximity
+                                    const rankNum = isRelayEvent
+                                      ? isGettysburgEntry
+                                        ? allTimeRankBySwimmer.get(swKey)
+                                        : undefined
+                                      : allTimeRankBySwimmer.get(swKey);
+
+                                    const milestoneBullets = [];
+                                    const refSec =
+                                      pbRec?.seconds ?? (seedSec !== null ? seedSec : null);
+
+                                    if (rankNum && rankNum > 1 && sortedEvBests[rankNum - 2]) {
+                                      const aheadRec = sortedEvBests[rankNum - 2];
+                                      if (refSec !== null && refSec >= aheadRec.seconds) {
+                                        const gap = refSec - aheadRec.seconds;
+                                        milestoneBullets.push(
+                                          `#${rankNum} All-Time (${gap.toFixed(2)}s shy of #${
+                                            rankNum - 1
+                                          })`
+                                        );
+                                      }
+                                    } else if (
+                                      !rankNum &&
+                                      isGettysburgEntry &&
+                                      tenthMark &&
+                                      refSec !== null &&
+                                      refSec > tenthMark.seconds &&
+                                      refSec - tenthMark.seconds <= Math.max(2.5, tenthMark.seconds * 0.03)
+                                    ) {
+                                      milestoneBullets.push(
+                                        `${(refSec - tenthMark.seconds).toFixed(2)}s outside Top-10 (#10: ${tenthMark.time})`
+                                      );
+                                    }
+
+                                    if (pbRec && pbRec.seconds > 15) {
+                                      const pbS = pbRec.seconds;
+                                      let barrierTarget = null;
+                                      if (pbS >= 60) {
+                                        const wholeMin = Math.floor(pbS / 60) * 60;
+                                        const tenSecStep = Math.floor(pbS / 10) * 10;
+                                        const cand =
+                                          pbS - wholeMin <= 2.5 ? wholeMin : tenSecStep;
+                                        if (pbS > cand && pbS - cand <= 2.0) {
+                                          barrierTarget = cand;
+                                        }
+                                      } else {
+                                        const wholeSec = Math.floor(pbS);
+                                        if (pbS > wholeSec && pbS - wholeSec <= 0.75) {
+                                          barrierTarget = wholeSec;
+                                        }
+                                      }
+                                      if (barrierTarget !== null) {
+                                        milestoneBullets.push(
+                                          `Chasing sub-${secondsToTime(barrierTarget)} (-${(
+                                            pbS - barrierTarget
+                                          ).toFixed(2)}s)`
+                                        );
+                                      }
+                                    }
+
+                                    if (!isRelayEvent && isGettysburgEntry) {
+                                      const athAllRows = historicalRecords.filter(
+                                        (r) =>
+                                          normalizeSwimmerKey(
+                                            resolveMasterAthlete(r.swimmerName)?.canonicalName ||
+                                              r.swimmerName
+                                          ) === swKey && r.date
+                                      );
+                                      if (athAllRows.length > 0) {
+                                        const latestDate = athAllRows.reduce(
+                                          (maxD, r) => (r.date > maxD ? r.date : maxD),
+                                          ''
+                                        );
+                                        const winsLastMeet = athAllRows.filter(
+                                          (r) =>
+                                            r.date === latestDate &&
+                                            String(r.place || '').trim() === '1' &&
+                                            String(r.round || 'Finals').toLowerCase() !==
+                                              'prelims' &&
+                                            String(r.round || 'Finals').toLowerCase() !==
+                                              'time trial'
+                                        ).length;
+                                        if (winsLastMeet >= 2) {
+                                          milestoneBullets.push(
+                                            `Won ${winsLastMeet} events last meet (${formatDisplayDateMDY(
+                                              latestDate
+                                            )})`
+                                          );
+                                        } else if (
+                                          lastSwim &&
+                                          String(lastSwim.place || '').trim() === '1'
+                                        ) {
+                                          milestoneBullets.push('Won this event last time out');
+                                        }
+                                      }
+                                    }
+
+                                    const hitStandards = evaluateStandardsForSwim(
+                                      entry.eventLabel,
+                                      entry.finalsTime
+                                    );
+                                    const seasonHitStandards = sbRec
+                                      ? evaluateStandardsForSwim(entry.eventLabel, sbRec.time)
+                                      : [];
+                                    const combinedStandardsMap = new Map();
+                                    [...hitStandards, ...seasonHitStandards].forEach((std) => {
+                                      combinedStandardsMap.set(std.id, std);
+                                    });
+                                    const displayStandards = Array.from(
+                                      combinedStandardsMap.values()
+                                    );
+                                    const achievedStdIds = new Set(
+                                      displayStandards.map((s) => s.id)
+                                    );
+
+                                    if (refSec !== null) {
+                                      matchingStandards.forEach((std) => {
+                                        if (achievedStdIds.has(std.id)) return;
+                                        const stdSec = timeToSeconds(std.time);
+                                        if (
+                                          stdSec !== null &&
+                                          refSec > stdSec &&
+                                          refSec - stdSec <= Math.max(1.5, stdSec * 0.025)
+                                        ) {
+                                          milestoneBullets.push(
+                                            `${(refSec - stdSec).toFixed(2)}s from ${std.label} (${std.time})`
+                                          );
+                                        }
+                                      });
+                                    }
+
+                                    return (
+                                      <tr
+                                        key={laneNum}
+                                        className="hover:bg-slate-50/80 transition align-top"
+                                      >
+                                        <td
+                                          style={{ backgroundColor: teamHex }}
+                                          className="py-3 px-3 text-center font-mono text-xl sm:text-2xl font-black text-white select-none align-middle"
+                                        >
                                           {laneNum}
                                         </td>
-                                        <td colSpan={6} className="py-3 px-4 italic">
-                                          Open Lane
+                                        <td className="py-3 px-3">
+                                          <div className="font-bold text-slate-900">
+                                            {isRelayEvent ? (
+                                              canonicalName
+                                            ) : (
+                                              <button
+                                                type="button"
+                                                onClick={() => openSwimmerProfile(canonicalName, evKey)}
+                                                className="text-left hover:text-indigo-700 hover:underline cursor-pointer"
+                                              >
+                                                {canonicalName}
+                                              </button>
+                                            )}
+                                            {!isRelayEvent && entry.classYear
+                                              ? ` (${entry.classYear})`
+                                              : ''}
+                                          </div>
+                                          {isRelayEvent && resolvedLegs.length > 0 && (
+                                            <div className="text-[11px] text-slate-700 mt-0.5 flex flex-wrap gap-x-1">
+                                              {resolvedLegs.map((l, lIdx) => (
+                                                <span key={l.legOrder}>
+                                                  {l.legOrder}){' '}
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => openSwimmerProfile(l.name)}
+                                                    className="hover:text-indigo-700 hover:underline font-medium cursor-pointer"
+                                                  >
+                                                    {l.name}
+                                                  </button>
+                                                  {l.classYear ? ` (${l.classYear})` : ''}
+                                                  {lIdx < resolvedLegs.length - 1 ? ' •' : ''}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          )}
+                                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
+                                            <span
+                                              className="w-2 h-2 rounded-full inline-block"
+                                              style={{ backgroundColor: teamHex }}
+                                            />
+                                            <span>{entry.teamName}</span>
+                                            {entry.finalsTime && entry.finalsTime !== 'NT' && (
+                                              <span className="font-mono font-bold text-slate-800 ml-1">
+                                                - Final: {entry.finalsTime}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </td>
+                                        <td className="py-3 px-3 font-mono text-[11px] space-y-0.5">
+                                          <div>
+                                            Seed:{' '}
+                                            <strong className="text-indigo-900">
+                                              {entry.seedTime || 'NT'}
+                                            </strong>
+                                          </div>
+                                          <div>
+                                            PB:{' '}
+                                            <strong className="text-slate-900">
+                                              {pbRec ? pbRec.time : '—'}
+                                            </strong>
+                                          </div>
+                                          <div className="text-slate-500">
+                                            SB: {sbRec ? sbRec.time : '—'}
+                                          </div>
+                                        </td>
+                                        <td className="py-3 px-3 text-center font-mono font-bold text-cyan-800">
+                                          {eventWinsCount}
+                                        </td>
+                                        <td className="py-3 px-3 text-[11px]">
+                                          {lastSwim ? (
+                                            <div>
+                                              <div>
+                                                <span className="font-mono font-bold text-slate-800">
+                                                  {lastSwim.time}
+                                                </span>
+                                                <span className="text-slate-500 ml-1">
+                                                  ({formatDisplayDateMDY(lastSwim.date)})
+                                                </span>
+                                              </div>
+                                              {lastSwim.competition && (
+                                                <div className="text-[10px] text-slate-400 truncate max-w-[160px]">
+                                                  {lastSwim.competition}
+                                                </div>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-400">—</span>
+                                          )}
+                                        </td>
+                                        <td className="py-3 px-3 text-[11px]">
+                                          {trajectoryNotes.length > 0 ? (
+                                            <div className="space-y-0.5">
+                                              {trajectoryNotes.slice(0, 2).map((note, idx) => (
+                                                <div key={idx} className={note.tone}>
+                                                  {note.text}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-400">—</span>
+                                          )}
+                                        </td>
+                                        <td className="py-3 px-3">
+                                          <div className="flex flex-wrap gap-1">
+                                            {rankNum && (
+                                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">
+                                                {rankNum === 1 ? '#1 Rec' : `#${rankNum} All-Time`}
+                                              </span>
+                                            )}
+                                            {displayStandards.map((std) => (
+                                              <span
+                                                key={std.id}
+                                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${getStandardBadgeStyle(
+                                                  std.label
+                                                )}`}
+                                              >
+                                                {std.label}
+                                              </span>
+                                            ))}
+                                          </div>
+                                          {milestoneBullets.length > 0 && (
+                                            <ul className="mt-1 space-y-0.5 text-[11px] text-slate-700">
+                                              {milestoneBullets.slice(0, 3).map((b, bIdx) => (
+                                                <li key={bIdx} className="leading-snug">
+                                                  - {b}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          )}
+                                          {!rankNum &&
+                                            displayStandards.length === 0 &&
+                                            milestoneBullets.length === 0 && (
+                                              <span className="text-slate-400 text-[11px]">—</span>
+                                            )}
                                         </td>
                                       </tr>
                                     );
-                                  }
-                                  const teamHex = getTeamHexColor(sw.teamCode, sw.teamName);
-                                  const intel = getLaneBroadcasterIntel(sw);
-                                  return (
-                                    <tr
-                                      key={laneNum}
-                                      style={{ boxShadow: `inset 4px 0 0 ${teamHex}` }}
-                                      className="hover:bg-slate-50 align-top"
-                                    >
-                                      <td className="py-3 px-3 text-center font-mono font-black text-slate-900">
-                                        {laneNum}
-                                      </td>
-                                      <td className="py-3 px-3">
-                                        <div className="font-bold text-slate-900 flex flex-wrap items-center gap-1.5">
-                                          {!intel.isRelay ? (
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                openSwimmerProfile(intel.canonicalName, activeEvKey)
-                                              }
-                                              className="hover:text-cyan-700 hover:underline cursor-pointer text-left"
-                                            >
-                                              {intel.nameDisplay}
-                                            </button>
-                                          ) : (
-                                            <span>{intel.nameDisplay}</span>
-                                          )}
-                                          {!intel.isRelay && sw.classYear && (
-                                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-bold">
-                                              {sw.classYear}
-                                            </span>
-                                          )}
-                                        </div>
-                                        <div className="text-[11px] text-slate-500 mt-0.5">
-                                          {sw.teamName}
-                                          {intel.isRelay && intel.resolvedLegs.length > 0 && (
-                                            <span className="block text-[10px] text-slate-600 mt-0.5">
-                                              Legs: {intel.resolvedLegs.join(' • ')}
-                                            </span>
-                                          )}
-                                        </div>
-                                      </td>
-                                      <td className="py-3 px-3 font-mono whitespace-nowrap">
-                                        {intel.pbRec ? (
-                                          <div>
-                                            <div className="font-extrabold text-cyan-800">
-                                              {intel.pbRec.time}
-                                            </div>
-                                            <div className="text-[10px] text-slate-400 font-sans">
-                                              {formatDisplayDateMDY(intel.pbRec.date)}
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <span className="text-slate-400">—</span>
-                                        )}
-                                      </td>
-                                      <td className="py-3 px-3 font-mono whitespace-nowrap">
-                                        {intel.sbRec ? (
-                                          <div>
-                                            <div className="font-bold text-slate-800">
-                                              {intel.sbRec.time}
-                                            </div>
-                                            <div className="text-[10px] text-slate-400 font-sans">
-                                              {formatDisplayDateMDY(intel.sbRec.date)}
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <span className="text-slate-400">—</span>
-                                        )}
-                                      </td>
-                                      <td className="py-3 px-3">
-                                        <div className="flex flex-wrap items-center gap-1.5">
-                                          {intel.allTimeRank && (
-                                            <span
-                                              className={`px-2 py-0.5 rounded text-[10px] font-extrabold ${
-                                                intel.allTimeRank === 1
-                                                  ? 'bg-amber-200 text-amber-950 border border-amber-400'
-                                                  : 'bg-amber-100 text-amber-900 border border-amber-300'
-                                              }`}
-                                            >
-                                              {intel.allTimeRank === 1
-                                                ? 'School Record (#1)'
-                                                : `All-Time #${intel.allTimeRank}`}
-                                            </span>
-                                          )}
-                                          {intel.isFrRecHolder && (
-                                            <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-orange-100 text-orange-900 border border-orange-300">
-                                              FR Record Holder
-                                            </span>
-                                          )}
-                                          {intel.hitStds.map((s) => (
-                                            <span
-                                              key={s.id}
-                                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${getStandardBadgeStyle(
-                                                s.label
-                                              )}`}
-                                            >
-                                              {s.label}
-                                            </span>
-                                          ))}
-                                          {intel.notes.length > 0 ? (
-                                            intel.notes.map((n, nIdx) => (
-                                              <span
-                                                key={nIdx}
-                                                className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200/80 text-[10px] font-semibold"
-                                              >
-                                                {n}
-                                              </span>
-                                            ))
-                                          ) : !intel.allTimeRank &&
-                                            !intel.isFrRecHolder &&
-                                            intel.hitStds.length === 0 ? (
-                                            <span className="text-slate-400">—</span>
-                                          ) : null}
-                                        </div>
-                                      </td>
-                                      <td className="py-3 px-3 text-right font-mono font-semibold text-slate-700 whitespace-nowrap">
-                                        {sw.seedTime || 'NT'}
-                                      </td>
-                                      <td className="py-3 px-4 text-right font-mono font-bold text-cyan-800 whitespace-nowrap">
-                                        {sw.finalsTime || '—'}
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })()
+                        );
+                      })()}
+                    </>
                   )}
                 </div>
               )}
