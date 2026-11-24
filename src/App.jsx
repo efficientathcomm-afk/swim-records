@@ -4848,8 +4848,27 @@ export default function App() {
       }
     });
 
-    const top10 = Array.from(bestPerSwimmer.values())
-      .sort((a, b) => a.seconds - b.seconds)
+    const sortedBests = Array.from(bestPerSwimmer.values()).sort((a, b) => a.seconds - b.seconds);
+
+    // Assign standard tied ranks (e.g. two swimmers at 3rd time both get rank 3, next gets 5)
+    const rankedBests = sortedBests.map((row, idx, arr) => {
+      let rank = idx + 1;
+      if (idx > 0 && Math.abs(row.seconds - arr[idx - 1].seconds) <= 0.005) {
+        rank = arr[idx - 1].rank;
+      }
+      return { ...row, rank };
+    });
+
+    const rankCounts = new Map();
+    rankedBests.forEach((r) => {
+      rankCounts.set(r.rank, (rankCounts.get(r.rank) || 0) + 1);
+    });
+
+    const top10 = rankedBests
+      .map((r) => ({
+        ...r,
+        isTied: (rankCounts.get(r.rank) || 0) > 1,
+      }))
       .slice(0, 10);
 
     const freshmanRows = officialRows
@@ -9333,7 +9352,7 @@ export default function App() {
                       <table className="w-full text-left text-xs">
                         <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
                           <tr>
-                            <th className="py-3 px-4 w-16">Rank</th>
+                            <th className="py-3 px-4 w-24">Rank</th>
                             <th className="py-3 px-4">Athlete</th>
                             <th className="py-3 px-4">Class</th>
                             <th className="py-3 px-4">Time</th>
@@ -9342,9 +9361,21 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {recordBookData.top10.map((row, idx) => (
-                            <tr key={row.id} className={idx === 0 ? 'bg-amber-50/40' : 'hover:bg-slate-50'}>
-                              <td className="py-3 px-4 font-black text-slate-900">#{idx + 1}</td>
+                          {recordBookData.top10.map((row) => (
+                            <tr
+                              key={row.id}
+                              className={row.rank === 1 ? 'bg-amber-50/40' : 'hover:bg-slate-50'}
+                            >
+                              <td className="py-3 px-4 font-black text-slate-900">
+                                <div className="inline-flex items-center gap-1.5">
+                                  <span>#{row.rank}</span>
+                                  {row.isTied && (
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300">
+                                      TIE
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
                               <td className="py-3 px-4 font-bold text-slate-900">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <button
