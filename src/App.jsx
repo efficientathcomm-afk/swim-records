@@ -2659,7 +2659,83 @@ export default function App() {
         l.finalsSplits && l.finalsSplits.length > 0 ? l.finalsSplits : l.splits || []
       );
 
+      // Commit the team's relay result(s) (Prelims if present, plus Finals / Time Trial)
+      const resolvedLegsList = entry.legs
+        .filter((l) => Boolean(l.swimmerName))
+        .map((l) => {
+          const disp = formatSwimmerDisplay(l.swimmerName, l.preferredFirst);
+          const m = resolveMasterAthlete(disp);
+          return m ? m.canonicalName : disp;
+        });
+
+      const resolvedRelayEv = resolveMasterEvent(entry.eventLabel, entry.genderLabel);
+      let finalRelayEvKey = resolvedRelayEv
+        ? resolvedRelayEv.eventKey
+        : normalizeEventKey(entry.eventLabel, entry.genderLabel);
+      if (finalRelayEvKey && !finalRelayEvKey.endsWith('relay')) {
+        finalRelayEvKey = `${finalRelayEvKey} relay`;
+      }
+      const finalRelayEvLabel = resolvedRelayEv
+        ? resolvedRelayEv.canonicalName
+        : finalRelayEvKey
+        ? toTitleEventLabel(finalRelayEvKey)
+        : entry.eventLabel;
+      const lineupDisplay = resolvedLegsList.join(', ');
+      const lineupKey = normalizeSwimmerKey(lineupDisplay);
+
+      const pushRelayTeamRound = (roundLabel, timeStr, secVal, placeVal, idTag) => {
+        if (!isValidTimeStr(timeStr) || secVal === null || secVal <= 0 || !lineupDisplay) return;
+        const rtRowId = `cl2-rt-${entry.id}-${idTag}`;
+        const rtDate = resolveRowDate(rtRowId, entry.eventNumber, relayNaturalDate);
+        const placeStr = placeVal ? String(placeVal) : '';
+        const rtHash = `${lineupKey}|${finalRelayEvKey}|${secVal.toFixed(2)}|${rtDate}|${roundLabel}|${placeStr}`;
+        const rtDuplicate = existingHashes.has(rtHash);
+
+        rows.push({
+          id: rtRowId,
+          eventNumber: entry.eventNumber,
+          swimmerName: lineupDisplay,
+          swimmerKey: lineupKey,
+          relayLegs: resolvedLegsList,
+          classYear: '',
+          eventKey: finalRelayEvKey,
+          eventLabel: finalRelayEvLabel,
+          time: timeStr,
+          seconds: secVal,
+          date: rtDate,
+          dateObj: parseFlexibleDate(rtDate),
+          location: finalLoc,
+          competition: finalComp,
+          round: roundLabel,
+          place: placeStr,
+          swimType: 'RELAY_TEAM',
+          isOfficial: true,
+          splitContext: `"${entry.relayLetter || 'A'}" Relay`,
+          source: 'cl2_relay',
+          isDuplicate: rtDuplicate,
+          selected: !rtDuplicate && !excludedMeetCommitIds.has(rtRowId),
+        });
+      };
+
+      if (isValidTimeStr(entry.prelimTime)) {
+        pushRelayTeamRound(
+          'Prelims',
+          entry.prelimTime,
+          timeToSeconds(entry.prelimTime),
+          entry.prelimPlace,
+          'P'
+        );
+      }
+
       const effectiveRelFinals = entry.prelimTime ? entry.finalsOnlyTime : entry.finalsTime;
+      pushRelayTeamRound(
+        relayRoundName,
+        effectiveRelFinals,
+        timeToSeconds(effectiveRelFinals),
+        entry.isTimeTrial ? '' : entry.place,
+        entry.isTimeTrial ? 'TT' : 'F'
+      );
+
       if (!entry.isTimeTrial && Number(entry.place) === 1 && isValidTimeStr(effectiveRelFinals)) {
         const relaySec = timeToSeconds(effectiveRelFinals);
         if (relaySec !== null) {
@@ -13697,6 +13773,10 @@ export default function App() {
                                   {row.swimType === 'RELAY_LEADOFF' ? (
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800">
                                       Relay Lead-Off (R)
+                                    </span>
+                                  ) : row.swimType === 'RELAY_TEAM' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                      Relay Result • {row.splitContext}
                                     </span>
                                   ) : row.swimType === 'INTERMEDIATE_SPLIT' ? (
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
