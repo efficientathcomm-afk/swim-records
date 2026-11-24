@@ -5036,6 +5036,7 @@ export default function App() {
 
     const targetCompKey =
       winsCompetitionFilter !== 'ALL' ? normalizeCompKey(winsCompetitionFilter) : '';
+    const seasonStart = getCurrentSeasonStart();
 
     const athleteMap = new Map();
 
@@ -5045,6 +5046,11 @@ export default function App() {
       const roundClean = String(r.round || 'Finals').toLowerCase();
       if (placeClean !== '1') return;
       if (roundClean === 'prelims' || roundClean === 'time trial') return;
+
+      if (winsCurrentSeasonOnly) {
+        const recDate = r.dateObj || parseFlexibleDate(r.date);
+        if (!recDate || recDate < seasonStart) return;
+      }
 
       // Filter by specific recurring competition/meet if chosen
       if (targetCompKey) {
@@ -5158,6 +5164,7 @@ export default function App() {
     masterRoster,
     recordBookGender,
     winsActiveOnly,
+    winsCurrentSeasonOnly,
     winsCompetitionFilter,
   ]);
 
