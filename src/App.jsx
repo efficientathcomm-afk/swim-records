@@ -637,14 +637,20 @@ function parseSDIFContent(content) {
         /^\d+$/.test(normalizedTail[4]) &&
         !/^0\d$/.test(normalizedTail[4]) &&
         !/^\d{3,}$/.test(normalizedTail[4]);
+      // Guard m[1] because standalone status tokens (NT, DQ, SCR, NS) match the other branch of the alternation
       const timeTokens = Array.from(
-        timeZoneStr.matchAll(/(?:(\d{1,2}:)?\d{2,3}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
-      ).map((m) => ({
-        full: `${m[1]}${m[2] || ''}`.toUpperCase(),
-        clean: m[1].toUpperCase(),
-        course: (m[2] || '').toUpperCase(),
-        offset: m.index ?? 0,
-      }));
+        timeZoneStr.matchAll(/(?:(?:\d{1,2}:)?\d{2,3}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
+      ).map((m) => {
+        const rawTok = String(m[0] || '').toUpperCase();
+        const course = (m[1] || '').toUpperCase();
+        const clean = course && rawTok.endsWith(course) ? rawTok.slice(0, -1) : rawTok;
+        return {
+          full: rawTok,
+          clean,
+          course,
+          offset: m.index ?? 0,
+        };
+      });
 
       let seedTimeRaw = '';
       let prelimTimeRaw = '';
