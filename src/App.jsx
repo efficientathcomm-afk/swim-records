@@ -9469,6 +9469,98 @@ export default function App() {
                       </table>
                     </div>
                   )}
+
+                  {/* Most Career Wins in This Event (Below Top-10) */}
+                  <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
+                      <div>
+                        <h3 className="text-sm sm:text-base font-extrabold text-slate-900">
+                          Most Career Wins — {toTitleEventLabel(recordBookEventKey)}
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          1st-place Finals finishes in this event (Prelims/SF and Time Trials excluded).
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-xs">
+                        <label className="inline-flex items-center gap-1.5 font-bold text-slate-700 bg-white border border-slate-200 px-3 py-1.5 rounded-xl cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={eventWinsActiveOnly}
+                            onChange={(e) => setEventWinsActiveOnly(e.target.checked)}
+                            className="rounded text-cyan-600 focus:ring-cyan-500"
+                          />
+                          <span>Active Roster Only</span>
+                        </label>
+                        <label className="inline-flex items-center gap-1.5 font-bold text-slate-700 bg-white border border-slate-200 px-3 py-1.5 rounded-xl cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={eventWinsCurrentSeasonOnly}
+                            onChange={(e) => setEventWinsCurrentSeasonOnly(e.target.checked)}
+                            className="rounded text-cyan-600 focus:ring-cyan-500"
+                          />
+                          <span>Current Season Only</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {recordBookData.eventWinLeaders.length === 0 ? (
+                      <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl bg-white">
+                        No 1st-place Finals wins recorded for {toTitleEventLabel(recordBookEventKey)}{' '}
+                        with the active filters.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                            <tr>
+                              <th className="py-2.5 px-4 w-16">Rank</th>
+                              <th className="py-2.5 px-4">Athlete</th>
+                              <th className="py-2.5 px-4 text-center">Wins</th>
+                              <th className="py-2.5 px-4">Fastest Win</th>
+                              <th className="py-2.5 px-4">Winning Meets</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {recordBookData.eventWinLeaders.map((leader, lIdx) => (
+                              <tr key={leader.swimmerKey} className="hover:bg-slate-50">
+                                <td className="py-2.5 px-4 font-black text-slate-900">
+                                  #{lIdx + 1}
+                                </td>
+                                <td className="py-2.5 px-4 font-bold text-slate-900">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        openSwimmerProfile(leader.swimmerName, recordBookEventKey)
+                                      }
+                                      className="text-left hover:text-cyan-700 hover:underline cursor-pointer"
+                                    >
+                                      {leader.swimmerName}
+                                    </button>
+                                    {leader.isActive && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                        Active
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-4 text-center font-mono font-black text-sm text-cyan-800">
+                                  {leader.wins}
+                                </td>
+                                <td className="py-2.5 px-4 font-mono font-bold text-slate-800">
+                                  {leader.bestTime}
+                                </td>
+                                <td className="py-2.5 px-4 text-slate-600">
+                                  {leader.meets.join(' • ')}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 </>
               ) : (
                 <div className="space-y-4">
