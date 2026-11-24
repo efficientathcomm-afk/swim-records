@@ -6423,8 +6423,8 @@ export default function App() {
                 ? 'color:#059669'
                 : 'color:#dc2626';
               const label = isSame
-                ? '0.00s vs P'
-                : `${isDrop ? '' : '+'}${delta.toFixed(2)}s vs P`;
+                ? '0.00s'
+                : `${isDrop ? '' : '+'}${delta.toFixed(2)}s`;
               return `<div title="Prelims: ${escapeHtml(
                 row.prelimTime
               )}" style="font-size:0.7rem;font-weight:700;margin-top:2px;${colorStyle}">${escapeHtml(
@@ -11080,8 +11080,8 @@ export default function App() {
                                                     }`}
                                                   >
                                                     {isSame
-                                                      ? '0.00s vs P'
-                                                      : `${isDrop ? '' : '+'}${delta.toFixed(2)}s vs P`}
+                                                      ? '0.00s'
+                                                      : `${isDrop ? '' : '+'}${delta.toFixed(2)}s`}
                                                   </div>
                                                 );
                                               })()}
@@ -12168,6 +12168,16 @@ export default function App() {
                                       Time Trial
                                     </span>
                                   )}
+                                </td>
+                                <td className="py-2 px-3 font-mono font-bold text-cyan-800 whitespace-nowrap">
+                                  {row.time}
+                                  {row.place &&
+                                    row.place !== 'R' &&
+                                    row.place !== 'S' && (
+                                      <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600 font-sans">
+                                        #{row.place}
+                                      </span>
+                                    )}
                                 </td>
                                 <td className="py-2 px-3">
                                   <input
