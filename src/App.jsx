@@ -9691,6 +9691,42 @@ export default function App() {
                               athRecord ? athRecord.canonicalName : row.swimmerName
                             );
                             const isActiveSwimmer = activeRosterKeys.has(canonicalSwimmerKey);
+                            const placeUpper = String(row.place || '').trim().toUpperCase();
+                            const roundClean = String(row.round || '').trim().toLowerCase();
+                            const isPrelimMark =
+                              roundClean === 'prelims' ||
+                              roundClean === 'prelim' ||
+                              roundClean === 'sf';
+                            const isRelayLeadOffMark =
+                              row.swimType === 'RELAY_LEADOFF' ||
+                              placeUpper === 'R' ||
+                              placeUpper === 'LR';
+                            const isSplitMark =
+                              row.swimType === 'INTERMEDIATE_SPLIT' || placeUpper === 'S';
+                            const splitOriginLabel = (() => {
+                              if (!isSplitMark) return 'S';
+                              const ctx = String(row.splitContext || '').trim();
+                              if (!ctx) return 'S';
+                              // Parse "1000 Split in Women 1650 Freestyle" or "Lead-Off (Women 400 Medley Relay)"
+                              const inMatch = ctx.match(/\bin\s+(?:Women|Men)?\s*(.+)$/i);
+                              const rawRace = inMatch
+                                ? inMatch[1]
+                                : ctx.replace(/^(Women|Men)\s+/i, '');
+                              const compactRace = rawRace
+                                .replace(/\bFreestyle\b/i, 'Free')
+                                .replace(/\bBackstroke\b/i, 'Back')
+                                .replace(/\bBreaststroke\b/i, 'Breast')
+                                .replace(/\bButterfly\b/i, 'Fly')
+                                .replace(/\bIndividual Medley\b/i, 'IM')
+                                .trim();
+                              if (
+                                !compactRace ||
+                                /^Intermediate Distance Split$/i.test(compactRace)
+                              ) {
+                                return 'S';
+                              }
+                              return `S (${compactRace})`;
+                            })();
                             return (
                               <tr
                                 key={`${row.id}-${rowIndex}`}
@@ -9700,7 +9736,7 @@ export default function App() {
                                   <span className="inline-flex items-center gap-1.5">
                                     <span>#{rankNumber}</span>
                                     {isTiedRow && (
-                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300">
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-300">
                                         TIE
                                       </span>
                                     )}
@@ -9727,7 +9763,27 @@ export default function App() {
                                   {row.time}
                                 </td>
                                 <td className="py-3 px-4 text-slate-700">
-                                  {row.competition || '—'}
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span>{row.competition || '—'}</span>
+                                    {isPrelimMark && (
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
+                                        PRELIM
+                                      </span>
+                                    )}
+                                    {isRelayLeadOffMark && (
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-cyan-100 text-cyan-800 border border-cyan-200">
+                                        RELAY
+                                      </span>
+                                    )}
+                                    {isSplitMark && (
+                                      <span
+                                        title={row.splitContext || 'Intermediate Split'}
+                                        className="px-1.5 py-0.5 rounded text-[9px] font-extrabold tracking-wide bg-amber-100 text-amber-900 border border-amber-300"
+                                      >
+                                        {splitOriginLabel}
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="py-3 px-4 font-mono text-slate-500">
                                   {formatDisplayDateMDY(row.date)}
