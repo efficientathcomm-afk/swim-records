@@ -1868,6 +1868,7 @@ export default function App() {
 
   const [profileSwimmerName, setProfileSwimmerName] = useState(null);
   const [profileChartEventKey, setProfileChartEventKey] = useState('');
+  const [profileCurrentSeasonOnly, setProfileCurrentSeasonOnly] = useState(false);
 
   // File Input Refs
   const fileInputRef = useRef(null);
@@ -6676,6 +6677,7 @@ export default function App() {
     const canonical = resolved ? resolved.canonicalName : rawName.trim();
     setProfileSwimmerName(canonical);
     setProfileChartEventKey(preferredEventKey || '');
+    setProfileCurrentSeasonOnly(false);
   };
 
   // Computed Career Profile Data for the selected swimmer
@@ -6684,13 +6686,24 @@ export default function App() {
     const resolvedAth = resolveMasterAthlete(profileSwimmerName);
     const canonicalName = resolvedAth ? resolvedAth.canonicalName : profileSwimmerName;
     const swKey = normalizeSwimmerKey(canonicalName);
+    const seasonStart = getCurrentSeasonStart();
 
-    const allRows = historicalRecords.filter((r) => {
+    const allCareerRows = historicalRecords.filter((r) => {
       const m = resolveMasterAthlete(r.swimmerName);
       const k = normalizeSwimmerKey(m ? m.canonicalName : r.swimmerName);
       return k === swKey;
     });
 
+    const isInCurrentSeason = (r) => {
+      const d = r.dateObj || parseFlexibleDate(r.date);
+      return Boolean(d && d >= seasonStart);
+    };
+
+    const allRows = profileCurrentSeasonOnly
+      ? allCareerRows.filter(isInCurrentSeason)
+      : allCareerRows;
+
+    const officialCareerRows = allCareerRows.filter((r) => r.isOfficial !== false);
     const officialRows = allRows.filter((r) => r.isOfficial !== false);
     const isSplitRow = (r) =>
       r.swimType === 'INTERMEDIATE_SPLIT' || String(r.place || '').toUpperCase() === 'S';
@@ -6710,10 +6723,10 @@ export default function App() {
     });
 
     // Event Bests (Full-Distance PB, Season Best, Split Best, & Current All-Time Top-10 Rank)
-    const seasonStart = getCurrentSeasonStart();
     const eventMap = new Map();
 
-    officialRows.forEach((r) => {
+    // Seed all events from officialCareerRows so switching events/season toggle stays consistent
+    officialCareerRows.forEach((r) => {
       if (!r.eventKey) return;
       if (!eventMap.has(r.eventKey)) {
         eventMap.set(r.eventKey, {
@@ -6726,7 +6739,6 @@ export default function App() {
         });
       }
       const evEntry = eventMap.get(r.eventKey);
-      evEntry.swims.push(r);
 
       if (isSplitRow(r)) {
         if (!evEntry.splitPb || r.seconds < evEntry.splitPb.seconds) {
@@ -6736,11 +6748,19 @@ export default function App() {
         if (!evEntry.fullPb || r.seconds < evEntry.fullPb.seconds) {
           evEntry.fullPb = r;
         }
-        if (r.dateObj && r.dateObj >= seasonStart) {
+        if (isInCurrentSeason(r)) {
           if (!evEntry.fullSb || r.seconds < evEntry.fullSb.seconds) {
             evEntry.fullSb = r;
           }
         }
+      }
+    });
+
+    officialRows.forEach((r) => {
+      if (!r.eventKey) return;
+      const evEntry = eventMap.get(r.eventKey);
+      if (evEntry) {
+        evEntry.swims.push(r);
       }
     });
 
@@ -6763,6 +6783,7 @@ export default function App() {
           allTimeRank,
         };
       })
+      .filter((ev) => !profileCurrentSeasonOnly || ev.swims.length > 0)
       .sort((a, b) => a.eventLabel.localeCompare(b.eventLabel));
 
     const chronologicalLog = [...allRows].sort((a, b) =>
@@ -6785,19 +6806,30 @@ export default function App() {
 
     return {
       canonicalName,
-      gender: resolvedAth?.gender || (allRows[0]?.eventKey?.startsWith('men') ? 'Men' : 'Women'),
+      gender:
+        resolvedAth?.gender ||
+        (allCareerRows[0]?.eventKey?.startsWith('men') ? 'Men' : 'Women'),
       isActive: resolvedAth ? Boolean(resolvedAth.isActive) : null,
       aliases: resolvedAth?.aliases || [],
       indWins,
       relWins,
       totalWins: indWins + relWins,
       totalLoggedSwims: allRows.length,
+      totalCareerSwims: allCareerRows.length,
       eventSummaries,
       chronologicalLog,
       activeMeetSwims,
       selectedEvObj,
     };
-  }, [profileSwimmerName, profileChartEventKey, historicalRecords, masterRoster, parsedData, benchmarkIndex]);
+  }, [
+    profileSwimmerName,
+    profileChartEventKey,
+    profileCurrentSeasonOnly,
+    historicalRecords,
+    masterRoster,
+    parsedData,
+    benchmarkIndex,
+  ]);
 
   // ============================================================================
   // RENDER
@@ -9383,7 +9415,7 @@ export default function App() {
                                   <span className="inline-flex items-center gap-1.5">
                                     <span>#{rankNumber}</span>
                                     {isTiedRow && (
-                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-rose-100 text-rose-900 border border-rose-300">
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300">
                                         TIE
                                       </span>
                                     )}
@@ -15586,6 +15618,24 @@ export default function App() {
 
             {/* Modal Scrollable Content */}
             <div className="p-5 sm:p-6 overflow-y-auto space-y-6">
+              {/* Season Filter Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs">
+                <label className="inline-flex items-center gap-2 font-bold text-slate-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={profileCurrentSeasonOnly}
+                    onChange={(e) => setProfileCurrentSeasonOnly(e.target.checked)}
+                    className="rounded text-cyan-600 focus:ring-cyan-500"
+                  />
+                  <span>Current Season Only (Progression Graph, Wins &amp; Swim Log)</span>
+                </label>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  {profileCurrentSeasonOnly
+                    ? `${activeSwimmerProfile.totalLoggedSwims} season swims of ${activeSwimmerProfile.totalCareerSwims} career`
+                    : `All ${activeSwimmerProfile.totalCareerSwims} career swims`}
+                </span>
+              </div>
+
               {/* Career Summary KPI Cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="bg-cyan-50/70 border border-cyan-200 rounded-xl p-3.5">
@@ -15742,7 +15792,14 @@ export default function App() {
                     String(s.place || '').toUpperCase() !== 'S' &&
                     Number.isFinite(s.seconds)
                 );
-                if (chartSwims.length === 0) return null;
+                if (chartSwims.length === 0) {
+                  return (
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs text-slate-500 text-center">
+                      No {profileCurrentSeasonOnly ? 'current-season ' : ''}swims to plot for{' '}
+                      <strong>{chartEv.eventLabel}</strong>.
+                    </div>
+                  );
+                }
 
                 const times = chartSwims.map((s) => s.seconds);
                 const minSec = Math.min(...times);
@@ -15886,7 +15943,9 @@ export default function App() {
               {activeSwimmerProfile.chronologicalLog.length > 0 && (
                 <div className="space-y-2.5">
                   <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
-                    Chronological Career Swim Log ({activeSwimmerProfile.chronologicalLog.length})
+                    {profileCurrentSeasonOnly
+                      ? `Current Season Swim Log (${activeSwimmerProfile.chronologicalLog.length})`
+                      : `Chronological Career Swim Log (${activeSwimmerProfile.chronologicalLog.length})`}
                   </h3>
                   <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-64">
                     <table className="w-full text-left text-xs">
