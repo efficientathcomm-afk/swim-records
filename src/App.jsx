@@ -10214,6 +10214,1506 @@ export default function App() {
         )}
 
         {/* ==================================================================== */}
+        {/* SECTION 3: IN-MEET TOOLS (DECK & BROADCAST CONSOLE)                  */}
+        {/* ==================================================================== */}
+        {activeSection === 'inmeet' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 sm:px-6 py-4 bg-slate-900 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base sm:text-lg font-extrabold flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-indigo-400" />
+                    In-Meet Deck &amp; Broadcast Console
+                  </h2>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Heat sheets &amp; 1920×1080 broadcast PNG graphics, active swimmer lookups,
+                    relay lineup optimizer, opponent scouting, score simulator, and cuts/pool
+                    records.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 bg-slate-800 p-1 rounded-xl text-xs font-bold">
+                  {[
+                    { id: 'heatsheet', label: 'Heat Sheet & Graphics' },
+                    { id: 'roster', label: 'Active Roster Lookup' },
+                    { id: 'relayopt', label: 'Relay Optimizer' },
+                    { id: 'scout', label: 'Opponent Scout' },
+                    { id: 'scoresim', label: 'Score Simulator' },
+                    { id: 'standards', label: `Cuts & Pool Records (${qualStandards.length})` },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setInMeetSubTab(tab.id)}
+                      className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                        inMeetSubTab === tab.id
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* SUB-TAB 1: HEAT SHEET & 1920x1080 BROADCAST GRAPHICS */}
+              {inMeetSubTab === 'heatsheet' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  {!parsedData ? (
+                    <div className="text-center py-10 space-y-3 border border-dashed border-slate-200 rounded-xl">
+                      <p className="text-sm text-slate-600">
+                        Load a `.cl2` / `.sd3` meet file in Section 4 (or load the sample meet) to
+                        view heat sheets and export 1920×1080 broadcast PNG lane graphics.
+                      </p>
+                      <button
+                        onClick={() => handleProcessMeetText(SAMPLE_CL2_DATA, { autoSave: false })}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                      >
+                        Load Sample Meet
+                      </button>
+                    </div>
+                  ) : (
+                    (() => {
+                      const eventOptionMap = new Map();
+                      parsedData.individualResults.forEach((r) => {
+                        if (!eventOptionMap.has(r.eventLabel)) {
+                          eventOptionMap.set(r.eventLabel, {
+                            label: r.eventLabel,
+                            num: r.eventNumber,
+                            isRelay: false,
+                          });
+                        }
+                      });
+                      parsedData.relayResults.forEach((r) => {
+                        if (!eventOptionMap.has(r.eventLabel)) {
+                          eventOptionMap.set(r.eventLabel, {
+                            label: r.eventLabel,
+                            num: r.eventNumber,
+                            isRelay: true,
+                          });
+                        }
+                      });
+                      const eventOptions = Array.from(eventOptionMap.values()).sort(
+                        (a, b) => Number(a.num) - Number(b.num)
+                      );
+                      const activeEvObj =
+                        eventOptions.find((e) => e.label === selectedHeatEventLabel) ||
+                        eventOptions[0] ||
+                        null;
+
+                      const evSwims = activeEvObj
+                        ? activeEvObj.isRelay
+                          ? parsedData.relayResults.filter((r) => r.eventLabel === activeEvObj.label)
+                          : parsedData.individualResults.filter(
+                              (r) => r.eventLabel === activeEvObj.label
+                            )
+                        : [];
+
+                      const heats = Array.from(
+                        new Set(evSwims.map((r) => r.heat).filter(Boolean))
+                      ).sort((a, b) => Number(a) - Number(b));
+
+                      const filteredByHeat =
+                        selectedHeatNum !== 'ALL' && heats.includes(selectedHeatNum)
+                          ? evSwims.filter((r) => String(r.heat) === String(selectedHeatNum))
+                          : evSwims;
+
+                      const laneMap = new Map();
+                      filteredByHeat.forEach((sw) => {
+                        const ln = parseInt(sw.lane, 10);
+                        if (ln >= 1 && ln <= 8 && !laneMap.has(ln)) {
+                          laneMap.set(ln, sw);
+                        }
+                      });
+
+                      const activeEvKey = activeEvObj ? normalizeEventKey(activeEvObj.label) : '';
+                      const eventStandards = qualStandards.filter(
+                        (s) => s.eventKey === activeEvKey
+                      );
+                      const headerCheckboxes = [
+                        { key: 'PROGRAM_RECORD', label: 'Program Record' },
+                        { key: 'FRESHMAN_RECORD', label: 'Freshman Record' },
+                        ...eventStandards.map((s) => ({
+                          key: `STD_${s.id}`,
+                          label: `${s.label} (${s.time})`,
+                        })),
+                      ];
+
+                      return (
+                        <div className="space-y-5">
+                          {/* Team Colors & Controls */}
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                              <div className="md:col-span-2">
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Select Event
+                                </label>
+                                <select
+                                  value={activeEvObj?.label || ''}
+                                  onChange={(e) => {
+                                    setSelectedHeatEventLabel(e.target.value);
+                                    setSelectedHeatNum('ALL');
+                                  }}
+                                  className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                                >
+                                  {eventOptions.map((ev) => (
+                                    <option key={ev.label} value={ev.label}>
+                                      Event #{ev.num} — {ev.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Heat Filter
+                                </label>
+                                <select
+                                  value={selectedHeatNum}
+                                  onChange={(e) => setSelectedHeatNum(e.target.value)}
+                                  className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                                >
+                                  <option value="ALL">All / Fast Heat</option>
+                                  {heats.map((h) => (
+                                    <option key={h} value={h}>
+                                      Heat {h}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Graphic Background
+                                </label>
+                                <select
+                                  value={broadcastGraphicTheme}
+                                  onChange={(e) => setBroadcastGraphicTheme(e.target.value)}
+                                  className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                                >
+                                  <option value="slate">Dark Broadcast Slate</option>
+                                  <option value="transparent">Transparent Overlay (OBS/vMix)</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            {/* Team Accent Color Pickers */}
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200/80">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <span className="text-[11px] font-bold uppercase text-slate-500">
+                                  Team Lane Colors:
+                                </span>
+                                {parsedData.teams.map((t) => (
+                                  <label
+                                    key={t.code}
+                                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-2.5 py-1 rounded-lg cursor-pointer"
+                                  >
+                                    <input
+                                      type="color"
+                                      value={getTeamHexColor(t.code, t.name)}
+                                      onChange={(e) =>
+                                        handleSetTeamHexColor(t.code, e.target.value)
+                                      }
+                                      className="w-4 h-4 rounded cursor-pointer border-0 bg-transparent"
+                                    />
+                                    <span>{t.name}</span>
+                                  </label>
+                                ))}
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                {activeEvObj && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const url = renderBroadcastHeatGraphicPng(
+                                        activeEvObj,
+                                        selectedHeatNum,
+                                        laneMap,
+                                        broadcastGraphicTheme,
+                                        selectedPngHeaderMarks
+                                      );
+                                      const safeEv = activeEvObj.label
+                                        .replace(/[^a-z0-9]+/gi, '_')
+                                        .replace(/^_|_$/g, '');
+                                      triggerPngDownload(
+                                        url,
+                                        `Ev${String(activeEvObj.num).padStart(2, '0')}_${safeEv}_Heat${
+                                          selectedHeatNum === 'ALL' ? '1' : selectedHeatNum
+                                        }.png`
+                                      );
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition cursor-pointer"
+                                  >
+                                    <Download className="w-3.5 h-3.5" />
+                                    Export Heat PNG (1920×1080)
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={isExportingAllGraphics}
+                                  onClick={handleExportAllMeetGraphics}
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white transition cursor-pointer"
+                                >
+                                  <Download className="w-3.5 h-3.5 text-cyan-400" />
+                                  {isExportingAllGraphics
+                                    ? 'Exporting Meet PNGs...'
+                                    : 'Batch Export All Heats'}
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Header Reference Callouts for PNG */}
+                            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200/80 text-xs">
+                              <span className="text-[11px] font-bold uppercase text-slate-500">
+                                Header Reference Marks:
+                              </span>
+                              {headerCheckboxes.map((cb) => (
+                                <label
+                                  key={cb.key}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-semibold text-slate-700 cursor-pointer"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedPngHeaderMarks.has(cb.key)}
+                                    onChange={(e) => {
+                                      setSelectedPngHeaderMarks((prev) => {
+                                        const next = new Set(prev);
+                                        if (e.target.checked) next.add(cb.key);
+                                        else next.delete(cb.key);
+                                        return next;
+                                      });
+                                    }}
+                                    className="rounded text-indigo-600"
+                                  />
+                                  <span>{cb.label}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* 8-Lane Deck Preview Table */}
+                          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
+                                <tr>
+                                  <th className="py-2.5 px-3 w-16 text-center">Lane</th>
+                                  <th className="py-2.5 px-4">Swimmer / Relay</th>
+                                  <th className="py-2.5 px-4">Team</th>
+                                  <th className="py-2.5 px-4 text-right">Seed / Entry</th>
+                                  <th className="py-2.5 px-4 text-right">Finals</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {[1, 2, 3, 4, 5, 6, 7, 8].map((laneNum) => {
+                                  const sw = laneMap.get(laneNum);
+                                  if (!sw) {
+                                    return (
+                                      <tr key={laneNum} className="bg-slate-50/60 text-slate-400">
+                                        <td className="py-2.5 px-3 text-center font-mono font-bold">
+                                          {laneNum}
+                                        </td>
+                                        <td colSpan={4} className="py-2.5 px-4 italic">
+                                          Open Lane
+                                        </td>
+                                      </tr>
+                                    );
+                                  }
+                                  const teamHex = getTeamHexColor(sw.teamCode, sw.teamName);
+                                  const nameDisplay = activeEvObj?.isRelay
+                                    ? sw.relayTitle
+                                    : formatSwimmerDisplay(sw.swimmerName, sw.preferredFirst);
+                                  return (
+                                    <tr
+                                      key={laneNum}
+                                      style={{ boxShadow: `inset 4px 0 0 ${teamHex}` }}
+                                      className="hover:bg-slate-50"
+                                    >
+                                      <td className="py-2.5 px-3 text-center font-mono font-black text-slate-900">
+                                        {laneNum}
+                                      </td>
+                                      <td className="py-2.5 px-4 font-bold text-slate-900">
+                                        {!activeEvObj?.isRelay ? (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              openSwimmerProfile(nameDisplay, activeEvKey)
+                                            }
+                                            className="hover:text-cyan-700 hover:underline cursor-pointer text-left"
+                                          >
+                                            {nameDisplay}
+                                          </button>
+                                        ) : (
+                                          nameDisplay
+                                        )}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-slate-600">{sw.teamName}</td>
+                                      <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-700">
+                                        {sw.seedTime || 'NT'}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-right font-mono font-bold text-cyan-800">
+                                        {sw.finalsTime || '—'}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
+                </div>
+              )}
+
+              {/* SUB-TAB 2: ACTIVE ROSTER DECK LOOKUP */}
+              {inMeetSubTab === 'roster' && (
+                <div className="p-5 sm:p-6 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                    <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                      <div className="relative flex-1 min-w-[200px] max-w-xs">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={inMeetSearch}
+                          onChange={(e) => setInMeetSearch(e.target.value)}
+                          placeholder="Search active swimmer..."
+                          className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg"
+                        />
+                      </div>
+
+                      <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                        {['ALL', 'Women', 'Men'].map((g) => (
+                          <button
+                            key={g}
+                            onClick={() => setInMeetGenderFilter(g)}
+                            className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                              inMeetGenderFilter === g
+                                ? 'bg-white text-slate-900 shadow-xs'
+                                : 'text-slate-600'
+                            }`}
+                          >
+                            {g}
+                          </button>
+                        ))}
+                      </div>
+
+                      <select
+                        value={inMeetTargetEventKey}
+                        onChange={(e) => setInMeetTargetEventKey(e.target.value)}
+                        className="px-3 py-1.5 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                      >
+                        {CANONICAL_EVENTS.filter((e) => !e.toLowerCase().includes('relay')).map(
+                          (ev) => (
+                            <option key={ev} value={ev.toLowerCase()}>
+                              Target Event: {ev}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const seasonStart = getCurrentSeasonStart();
+                    const activeSwimmers = masterRoster
+                      .filter((ath) => {
+                        if (!ath.isActive) return false;
+                        if (inMeetGenderFilter !== 'ALL' && ath.gender !== inMeetGenderFilter) {
+                          return false;
+                        }
+                        if (
+                          inMeetSearch.trim() &&
+                          !ath.canonicalName.toLowerCase().includes(inMeetSearch.toLowerCase())
+                        ) {
+                          return false;
+                        }
+                        return true;
+                      })
+                      .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName));
+
+                    if (activeSwimmers.length === 0) {
+                      return (
+                        <div className="text-center py-10 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                          No active roster swimmers match the current filters.
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-900 text-white font-bold uppercase text-[10px]">
+                            <tr>
+                              <th className="py-2.5 px-4">Swimmer</th>
+                              <th className="py-2.5 px-4">Gender</th>
+                              <th className="py-2.5 px-4">
+                                Career PB ({toTitleEventLabel(inMeetTargetEventKey)})
+                              </th>
+                              <th className="py-2.5 px-4">Season Best</th>
+                              <th className="py-2.5 px-4 text-right">Career Profile</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {activeSwimmers.map((ath) => {
+                              const swKey = normalizeSwimmerKey(ath.canonicalName);
+                              const evMarks = historicalRecords.filter((r) => {
+                                if (r.isOfficial === false || r.eventKey !== inMeetTargetEventKey) {
+                                  return false;
+                                }
+                                const m = resolveMasterAthlete(r.swimmerName);
+                                const k = normalizeSwimmerKey(
+                                  m ? m.canonicalName : r.swimmerName
+                                );
+                                return k === swKey;
+                              });
+                              const pb =
+                                evMarks.length > 0
+                                  ? evMarks.reduce((b, c) => (c.seconds < b.seconds ? c : b))
+                                  : null;
+                              const sbMarks = evMarks.filter(
+                                (r) => r.dateObj && r.dateObj >= seasonStart
+                              );
+                              const sb =
+                                sbMarks.length > 0
+                                  ? sbMarks.reduce((b, c) => (c.seconds < b.seconds ? c : b))
+                                  : null;
+
+                              return (
+                                <tr key={ath.id} className="hover:bg-slate-50">
+                                  <td className="py-2.5 px-4 font-bold text-slate-900">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        openSwimmerProfile(ath.canonicalName, inMeetTargetEventKey)
+                                      }
+                                      className="hover:text-cyan-700 hover:underline cursor-pointer text-left"
+                                    >
+                                      {ath.canonicalName}
+                                    </button>
+                                  </td>
+                                  <td className="py-2.5 px-4 text-slate-600">{ath.gender}</td>
+                                  <td className="py-2.5 px-4 font-mono font-extrabold text-cyan-800">
+                                    {pb ? `${pb.time} (${formatDisplayDateMDY(pb.date)})` : '—'}
+                                  </td>
+                                  <td className="py-2.5 px-4 font-mono font-semibold text-slate-700">
+                                    {sb ? sb.time : '—'}
+                                  </td>
+                                  <td className="py-2.5 px-4 text-right">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        openSwimmerProfile(ath.canonicalName, inMeetTargetEventKey)
+                                      }
+                                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 cursor-pointer"
+                                    >
+                                      Open Card
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* SUB-TAB 3: RELAY LINEUP OPTIMIZER */}
+              {inMeetSubTab === 'relayopt' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4 items-end">
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Relay Event
+                      </label>
+                      <select
+                        value={relayOptEventKey}
+                        onChange={(e) => {
+                          setRelayOptEventKey(e.target.value);
+                          setRelayOptManualA(['', '', '', '']);
+                          setRelayOptManualB(['', '', '', '']);
+                        }}
+                        className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                      >
+                        {CANONICAL_EVENTS.filter((e) => e.toLowerCase().includes('relay')).map(
+                          (ev) => (
+                            <option key={ev} value={ev.toLowerCase()}>
+                              {ev}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Time Basis
+                      </label>
+                      <div className="flex bg-slate-200/70 p-0.5 rounded-lg text-xs font-bold">
+                        {[
+                          { id: 'PB', label: 'Career Best (PB)' },
+                          { id: 'SB', label: 'Season Best (SB)' },
+                        ].map((opt) => (
+                          <button
+                            key={opt.id}
+                            onClick={() => setRelayOptBasis(opt.id)}
+                            className={`flex-1 py-1.5 rounded-md transition cursor-pointer ${
+                              relayOptBasis === opt.id
+                                ? 'bg-white text-slate-900 shadow-xs'
+                                : 'text-slate-600'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Flying-Start Exchange Delta (Legs 2–4)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        value={relayOptExchangeDelta}
+                        onChange={(e) => setRelayOptExchangeDelta(parseFloat(e.target.value) || 0)}
+                        className="w-full px-3 py-2 text-xs font-mono font-bold bg-white border border-slate-200 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const isMen = relayOptEventKey.startsWith('men');
+                    const gender = isMen ? 'Men' : 'Women';
+                    const isMedley = relayOptEventKey.includes('medley');
+                    const totalDist = parseInt(relayOptEventKey.match(/\b(\d+)\b/)?.[1] || '200', 10);
+                    const legDist = Math.round(totalDist / 4);
+                    const legSpecs = isMedley
+                      ? [
+                          { leg: 1, stroke: 'Backstroke', evKey: `${gender.toLowerCase()} ${legDist} backstroke`, flying: false },
+                          { leg: 2, stroke: 'Breaststroke', evKey: `${gender.toLowerCase()} ${legDist} breaststroke`, flying: true },
+                          { leg: 3, stroke: 'Butterfly', evKey: `${gender.toLowerCase()} ${legDist} butterfly`, flying: true },
+                          { leg: 4, stroke: 'Freestyle', evKey: `${gender.toLowerCase()} ${legDist} freestyle`, flying: true },
+                        ]
+                      : [1, 2, 3, 4].map((leg) => ({
+                          leg,
+                          stroke: 'Freestyle',
+                          evKey: `${gender.toLowerCase()} ${legDist} freestyle`,
+                          flying: leg > 1,
+                        }));
+
+                    const seasonStart = getCurrentSeasonStart();
+                    const activePool = masterRoster
+                      .filter(
+                        (a) =>
+                          a.isActive &&
+                          a.gender === gender &&
+                          !relayOptExcludedKeys.has(normalizeSwimmerKey(a.canonicalName))
+                      )
+                      .sort((a, b) => compareByLastName(a.canonicalName, b.canonicalName));
+
+                    const getBestSec = (swKey, evKey) => {
+                      const marks = historicalRecords.filter((r) => {
+                        if (r.isOfficial === false || r.eventKey !== evKey) return false;
+                        const m = resolveMasterAthlete(r.swimmerName);
+                        const k = normalizeSwimmerKey(m ? m.canonicalName : r.swimmerName);
+                        if (k !== swKey) return false;
+                        if (relayOptBasis === 'SB') {
+                          return Boolean(r.dateObj && r.dateObj >= seasonStart);
+                        }
+                        return true;
+                      });
+                      if (marks.length === 0) return null;
+                      return Math.min(...marks.map((m) => m.seconds));
+                    };
+
+                    // Greedy optimal A & B assignment without reusing swimmers
+                    const usedKeys = new Set();
+                    const autoA = legSpecs.map((spec) => {
+                      let bestCand = null;
+                      activePool.forEach((ath) => {
+                        const k = normalizeSwimmerKey(ath.canonicalName);
+                        if (usedKeys.has(k)) return;
+                        const raw = getBestSec(k, spec.evKey);
+                        if (raw === null) return;
+                        const adj = Math.max(0, raw + (spec.flying ? relayOptExchangeDelta : 0));
+                        if (!bestCand || adj < bestCand.adjSec) {
+                          bestCand = { ath, rawSec: raw, adjSec: adj };
+                        }
+                      });
+                      if (bestCand) usedKeys.add(normalizeSwimmerKey(bestCand.ath.canonicalName));
+                      return bestCand;
+                    });
+
+                    const autoB = legSpecs.map((spec) => {
+                      let bestCand = null;
+                      activePool.forEach((ath) => {
+                        const k = normalizeSwimmerKey(ath.canonicalName);
+                        if (usedKeys.has(k)) return;
+                        const raw = getBestSec(k, spec.evKey);
+                        if (raw === null) return;
+                        const adj = Math.max(0, raw + (spec.flying ? relayOptExchangeDelta : 0));
+                        if (!bestCand || adj < bestCand.adjSec) {
+                          bestCand = { ath, rawSec: raw, adjSec: adj };
+                        }
+                      });
+                      if (bestCand) usedKeys.add(normalizeSwimmerKey(bestCand.ath.canonicalName));
+                      return bestCand;
+                    });
+
+                    const calcTotal = (lineup, manualOverrides) => {
+                      let sum = 0;
+                      let complete = true;
+                      lineup.forEach((autoItem, idx) => {
+                        const overrideName = manualOverrides[idx];
+                        if (overrideName) {
+                          const raw = getBestSec(
+                            normalizeSwimmerKey(overrideName),
+                            legSpecs[idx].evKey
+                          );
+                          if (raw !== null) {
+                            sum += Math.max(
+                              0,
+                              raw + (legSpecs[idx].flying ? relayOptExchangeDelta : 0)
+                            );
+                          } else {
+                            complete = false;
+                          }
+                        } else if (autoItem) {
+                          sum += autoItem.adjSec;
+                        } else {
+                          complete = false;
+                        }
+                      });
+                      return complete && sum > 0 ? secondsToTime(sum) : 'Incomplete';
+                    };
+
+                    return (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                        {[
+                          {
+                            title: 'Projected "A" Relay',
+                            lineup: autoA,
+                            manual: relayOptManualA,
+                            setManual: setRelayOptManualA,
+                          },
+                          {
+                            title: 'Projected "B" Relay',
+                            lineup: autoB,
+                            manual: relayOptManualB,
+                            setManual: setRelayOptManualB,
+                          },
+                        ].map((squad) => (
+                          <div
+                            key={squad.title}
+                            className="border border-slate-200 rounded-xl overflow-hidden bg-white"
+                          >
+                            <div className="px-4 py-3 bg-slate-900 text-white flex items-center justify-between">
+                              <span className="text-xs font-extrabold uppercase tracking-wider">
+                                {squad.title}
+                              </span>
+                              <span className="font-mono text-sm font-black text-cyan-300">
+                                Projected: {calcTotal(squad.lineup, squad.manual)}
+                              </span>
+                            </div>
+                            <div className="divide-y divide-slate-100">
+                              {legSpecs.map((spec, idx) => {
+                                const autoEntry = squad.lineup[idx];
+                                const chosenName =
+                                  squad.manual[idx] || autoEntry?.ath?.canonicalName || '';
+                                const rawSec = chosenName
+                                  ? getBestSec(normalizeSwimmerKey(chosenName), spec.evKey)
+                                  : null;
+                                const adjSec =
+                                  rawSec !== null
+                                    ? Math.max(
+                                        0,
+                                        rawSec + (spec.flying ? relayOptExchangeDelta : 0)
+                                      )
+                                    : null;
+
+                                return (
+                                  <div
+                                    key={spec.leg}
+                                    className="p-3 flex items-center justify-between gap-3 text-xs"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-[10px] font-bold uppercase text-slate-400">
+                                        Leg {spec.leg} • {legDist} {spec.stroke}
+                                      </div>
+                                      <select
+                                        value={chosenName}
+                                        onChange={(e) => {
+                                          const next = [...squad.manual];
+                                          next[idx] = e.target.value;
+                                          squad.setManual(next);
+                                        }}
+                                        className="mt-1 w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-900"
+                                      >
+                                        <option value="">-- Select Swimmer --</option>
+                                        {activePool.map((ath) => {
+                                          const s = getBestSec(
+                                            normalizeSwimmerKey(ath.canonicalName),
+                                            spec.evKey
+                                          );
+                                          return (
+                                            <option key={ath.id} value={ath.canonicalName}>
+                                              {ath.canonicalName}
+                                              {s !== null ? ` (${secondsToTime(s)})` : ''}
+                                            </option>
+                                          );
+                                        })}
+                                      </select>
+                                    </div>
+                                    <div className="text-right font-mono shrink-0">
+                                      <div className="font-bold text-cyan-800">
+                                        {adjSec !== null ? secondsToTime(adjSec) : '—'}
+                                      </div>
+                                      {rawSec !== null && spec.flying && (
+                                        <div className="text-[10px] text-slate-400">
+                                          Flat {secondsToTime(rawSec)}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* SUB-TAB 4: SWIMCLOUD OPPONENT SCOUT */}
+              {inMeetSubTab === 'scout' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4 items-end">
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Opponent Team Name
+                      </label>
+                      <input
+                        type="text"
+                        value={newScoutTeamName}
+                        onChange={(e) => setNewScoutTeamName(e.target.value)}
+                        placeholder="e.g., Franklin & Marshall"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Swimcloud Team URL or ID
+                      </label>
+                      <input
+                        type="text"
+                        value={newScoutSwimcloudInput}
+                        onChange={(e) => setNewScoutSwimcloudInput(e.target.value)}
+                        placeholder="e.g., swimcloud.com/team/123"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Team Accent Color
+                      </label>
+                      <input
+                        type="color"
+                        value={newScoutColor}
+                        onChange={(e) => setNewScoutColor(e.target.value)}
+                        className="w-full h-9 p-1 bg-white border border-slate-200 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cleanName = newScoutTeamName.trim();
+                        if (!cleanName) return;
+                        const scId = extractSwimcloudTeamId(newScoutSwimcloudInput);
+                        const id = `scout-${Date.now()}`;
+                        const created = {
+                          id,
+                          teamName: cleanName,
+                          swimcloudTeamId: scId,
+                          color: newScoutColor,
+                          entries: [],
+                        };
+                        persistOpponentScout(created);
+                        setSelectedScoutId(id);
+                        setNewScoutTeamName('');
+                        setNewScoutSwimcloudInput('');
+                      }}
+                      className="px-4 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                    >
+                      + Create Opponent Profile
+                    </button>
+                  </div>
+
+                  {opponentScouts.length > 0 && (
+                    (() => {
+                      const activeScout =
+                        opponentScouts.find((s) => s.id === selectedScoutId) || opponentScouts[0];
+                      return (
+                        <div className="space-y-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl p-3.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <select
+                                value={activeScout?.id || ''}
+                                onChange={(e) => setSelectedScoutId(e.target.value)}
+                                className="px-3 py-1.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg"
+                              >
+                                {opponentScouts.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.teamName} ({(s.entries || []).length} times)
+                                  </option>
+                                ))}
+                              </select>
+
+                              <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-bold">
+                                {['Women', 'Men'].map((g) => (
+                                  <button
+                                    key={g}
+                                    onClick={() => setScoutGenderView(g)}
+                                    className={`px-2.5 py-1 rounded-md cursor-pointer ${
+                                      scoutGenderView === g
+                                        ? 'bg-white text-slate-900 shadow-xs'
+                                        : 'text-slate-600'
+                                    }`}
+                                  >
+                                    {g}
+                                  </button>
+                                ))}
+                              </div>
+
+                              <select
+                                value={scoutOurBasis}
+                                onChange={(e) => setScoutOurBasis(e.target.value)}
+                                className="px-2.5 py-1.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg"
+                              >
+                                <option value="SB">Compare vs. Our Season Bests</option>
+                                <option value="PB">Compare vs. Our Career Bests</option>
+                              </select>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleLoadScoutIntoSimulator(activeScout)}
+                                className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                              >
+                                Simulate Dual Meet →
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteOpponentScout(activeScout.id)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 border border-slate-200 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Paste Swimcloud Top Times */}
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-slate-800">
+                                Paste Copied Swimcloud Top Times ({scoutGenderView})
+                              </span>
+                              <select
+                                value={scoutPasteEventHint}
+                                onChange={(e) => setScoutPasteEventHint(e.target.value)}
+                                className="px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-lg"
+                              >
+                                <option value="">Auto-detect event headers in paste</option>
+                                {CANONICAL_EVENTS.filter((e) =>
+                                  e.startsWith(scoutGenderView)
+                                ).map((ev) => (
+                                  <option key={ev} value={ev.toLowerCase()}>
+                                    Force Event: {ev}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <textarea
+                              rows={4}
+                              value={scoutPasteText}
+                              onChange={(e) => setScoutPasteText(e.target.value)}
+                              placeholder="Copy rows from Swimcloud Top Times and paste here..."
+                              className="w-full p-2.5 text-xs font-mono bg-white border border-slate-200 rounded-lg"
+                            />
+                            <button
+                              type="button"
+                              disabled={!scoutPasteText.trim()}
+                              onClick={() => {
+                                const parsed = parseSwimcloudPastedTimes(
+                                  scoutPasteText,
+                                  scoutGenderView,
+                                  scoutPasteEventHint
+                                );
+                                if (parsed.length === 0) {
+                                  setBenchmarkStatusMsg(
+                                    'Could not detect Swimcloud times in pasted text.'
+                                  );
+                                  return;
+                                }
+                                const updated = {
+                                  ...activeScout,
+                                  entries: [...(activeScout.entries || []), ...parsed],
+                                };
+                                persistOpponentScout(updated);
+                                setScoutPasteText('');
+                                setBenchmarkStatusMsg(
+                                  `Added ${parsed.length} ${scoutGenderView} scouted marks to ${activeScout.teamName}.`
+                                );
+                              }}
+                              className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white cursor-pointer"
+                            >
+                              Import Pasted Times
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
+                </div>
+              )}
+
+              {/* SUB-TAB 5: DUAL-MEET SCORE SIMULATOR */}
+              {inMeetSubTab === 'scoresim' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  {!parsedData ? (
+                    <div className="text-center py-10 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      Load a meet file (or project a dual meet from Opponent Scout) to run virtual
+                      scoring simulations.
+                    </div>
+                  ) : (
+                    (() => {
+                      const indPtsTable =
+                        simScoringFormat === 'DUAL_6' ? [6, 4, 3, 2, 1] : [9, 4, 3, 2, 1];
+                      const relPtsTable =
+                        simScoringFormat === 'DUAL_6' ? [8, 4, 2] : [11, 4, 2];
+
+                      const teamTotals = new Map();
+                      parsedData.teams.forEach((t) => {
+                        teamTotals.set(t.code, {
+                          code: t.code,
+                          name: t.name,
+                          women: 0,
+                          men: 0,
+                          total: 0,
+                        });
+                      });
+
+                      const eventGroupsMap = new Map();
+                      parsedData.individualResults.forEach((r) => {
+                        if (simGenderView !== 'ALL' && r.genderLabel !== simGenderView) return;
+                        if (simScratchedIds.has(r.id)) return;
+                        const k = `${r.eventNumber}|${r.eventLabel}`;
+                        if (!eventGroupsMap.has(k)) {
+                          eventGroupsMap.set(k, {
+                            key: k,
+                            num: Number(r.eventNumber) || 999,
+                            label: r.eventLabel,
+                            gender: r.genderLabel,
+                            isRelay: false,
+                            entries: [],
+                          });
+                        }
+                        const useSeed =
+                          simTimeBasis === 'SEED' ||
+                          (simTimeBasis === 'AUTO' && !isFinite(r.timeSeconds));
+                        const sec = useSeed ? r.seedSeconds : r.timeSeconds;
+                        const dispTime = useSeed ? r.seedTime || 'NT' : r.finalsTime || 'NT';
+                        eventGroupsMap.get(k).entries.push({
+                          id: r.id,
+                          name: formatSwimmerDisplay(r.swimmerName, r.preferredFirst),
+                          teamCode: r.teamCode,
+                          teamName: r.teamName,
+                          sec: isFinite(sec) ? sec : Infinity,
+                          dispTime,
+                        });
+                      });
+
+                      parsedData.relayResults.forEach((r) => {
+                        if (simGenderView !== 'ALL' && r.genderLabel !== simGenderView) return;
+                        if (simScratchedIds.has(r.id)) return;
+                        const k = `${r.eventNumber}|${r.eventLabel}`;
+                        if (!eventGroupsMap.has(k)) {
+                          eventGroupsMap.set(k, {
+                            key: k,
+                            num: Number(r.eventNumber) || 999,
+                            label: r.eventLabel,
+                            gender: r.genderLabel,
+                            isRelay: true,
+                            entries: [],
+                          });
+                        }
+                        const useSeed =
+                          simTimeBasis === 'SEED' ||
+                          (simTimeBasis === 'AUTO' && !isFinite(r.timeSeconds));
+                        const sec = useSeed ? r.seedSeconds : r.timeSeconds;
+                        const dispTime = useSeed ? r.seedTime || 'NT' : r.finalsTime || 'NT';
+                        eventGroupsMap.get(k).entries.push({
+                          id: r.id,
+                          name: r.relayTitle,
+                          teamCode: r.teamCode,
+                          teamName: r.teamName,
+                          sec: isFinite(sec) ? sec : Infinity,
+                          dispTime,
+                        });
+                      });
+
+                      const orderedSimEvents = Array.from(eventGroupsMap.values()).sort(
+                        (a, b) => a.num - b.num
+                      );
+
+                      orderedSimEvents.forEach((ev) => {
+                        ev.entries.sort((a, b) => a.sec - b.sec);
+                        const teamScorerCount = new Map();
+                        const maxPerTeam = ev.isRelay ? 2 : 3;
+                        const ptsScale = ev.isRelay ? relPtsTable : indPtsTable;
+                        let scoreSlot = 0;
+
+                        ev.entries.forEach((ent) => {
+                          if (!isFinite(ent.sec)) {
+                            ent.simPts = 0;
+                            return;
+                          }
+                          const cnt = teamScorerCount.get(ent.teamCode) || 0;
+                          if (cnt < maxPerTeam && scoreSlot < ptsScale.length) {
+                            const pts = ptsScale[scoreSlot];
+                            ent.simPts = pts;
+                            teamScorerCount.set(ent.teamCode, cnt + 1);
+                            scoreSlot += 1;
+                            const tObj = teamTotals.get(ent.teamCode);
+                            if (tObj) {
+                              if (ev.gender === 'Women') tObj.women += pts;
+                              else if (ev.gender === 'Men') tObj.men += pts;
+                              tObj.total += pts;
+                            }
+                          } else {
+                            ent.simPts = 0;
+                          }
+                        });
+                      });
+
+                      return (
+                        <div className="space-y-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <select
+                                value={simScoringFormat}
+                                onChange={(e) => setSimScoringFormat(e.target.value)}
+                                className="px-2.5 py-1.5 font-bold bg-white border border-slate-200 rounded-lg"
+                              >
+                                <option value="DUAL_9">Dual 16-Event (9-4-3-2-1 / 11-4-2)</option>
+                                <option value="DUAL_6">Dual 11-Event (6-4-3-2-1 / 8-4-2)</option>
+                              </select>
+                              <select
+                                value={simTimeBasis}
+                                onChange={(e) => setSimTimeBasis(e.target.value)}
+                                className="px-2.5 py-1.5 font-bold bg-white border border-slate-200 rounded-lg"
+                              >
+                                <option value="AUTO">Auto (Finals if swum, else Seed)</option>
+                                <option value="SEED">Seed / Entry Times Only</option>
+                                <option value="FINALS">Finals Times Only</option>
+                              </select>
+                              <div className="flex bg-slate-200/70 p-0.5 rounded-lg font-bold">
+                                {['ALL', 'Women', 'Men'].map((g) => (
+                                  <button
+                                    key={g}
+                                    onClick={() => setSimGenderView(g)}
+                                    className={`px-2.5 py-1 rounded-md cursor-pointer ${
+                                      simGenderView === g
+                                        ? 'bg-white text-slate-900 shadow-xs'
+                                        : 'text-slate-600'
+                                    }`}
+                                  >
+                                    {g}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {simScratchedIds.size > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setSimScratchedIds(new Set())}
+                                className="font-bold text-indigo-700 hover:underline cursor-pointer"
+                              >
+                                Restore {simScratchedIds.size} Scratched
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Simulated Score Summary */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {Array.from(teamTotals.values())
+                              .sort((a, b) => b.total - a.total)
+                              .map((t) => (
+                                <div
+                                  key={t.code}
+                                  style={{
+                                    borderLeft: `4px solid ${getTeamHexColor(t.code, t.name)}`,
+                                  }}
+                                  className="p-3.5 rounded-xl border border-slate-200 bg-white flex items-center justify-between"
+                                >
+                                  <div>
+                                    <div className="font-extrabold text-sm text-slate-900">
+                                      {t.name}
+                                    </div>
+                                    <div className="text-[11px] text-slate-500">
+                                      Women: {t.women} • Men: {t.men}
+                                    </div>
+                                  </div>
+                                  <div className="text-2xl font-black font-mono text-slate-900">
+                                    {t.total}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+
+                          {/* Per-Event Breakdown */}
+                          <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+                            {orderedSimEvents.map((ev) => (
+                              <div
+                                key={ev.key}
+                                className="border border-slate-200 rounded-xl overflow-hidden bg-white"
+                              >
+                                <div className="px-3.5 py-2 bg-slate-100 text-xs font-extrabold text-slate-800 flex justify-between">
+                                  <span>
+                                    Event #{ev.num} — {ev.label}
+                                  </span>
+                                  <span className="text-slate-500">
+                                    {ev.entries.length} entries
+                                  </span>
+                                </div>
+                                <div className="divide-y divide-slate-100 text-xs">
+                                  {ev.entries.map((ent, idx) => (
+                                    <div
+                                      key={ent.id}
+                                      className="px-3.5 py-2 flex items-center justify-between gap-2"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="w-5 font-mono text-slate-400">
+                                          {idx + 1}.
+                                        </span>
+                                        <span className="font-bold text-slate-900 truncate">
+                                          {ent.name}
+                                        </span>
+                                        <span className="text-slate-500 truncate">
+                                          ({ent.teamName})
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-3 shrink-0 font-mono">
+                                        <span className="font-bold text-slate-800">
+                                          {ent.dispTime}
+                                        </span>
+                                        <span className="w-12 text-right font-extrabold text-emerald-700">
+                                          {ent.simPts > 0 ? `+${ent.simPts}` : '—'}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setSimScratchedIds((prev) => {
+                                              const next = new Set(prev);
+                                              next.add(ent.id);
+                                              return next;
+                                            })
+                                          }
+                                          className="text-[10px] font-sans font-bold text-slate-400 hover:text-red-600 cursor-pointer"
+                                        >
+                                          Scratch
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
+                </div>
+              )}
+
+              {/* SUB-TAB 6: QUALIFYING STANDARDS & POOL RECORDS */}
+              {inMeetSubTab === 'standards' && (
+                <div className="p-5 sm:p-6 space-y-5">
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Category
+                      </label>
+                      <select
+                        value={newStdType}
+                        onChange={(e) => setNewStdType(e.target.value)}
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                      >
+                        <option value="STANDARD">Qualifying Cut</option>
+                        <option value="POOL_RECORD">Pool Record</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Badge Label
+                      </label>
+                      <input
+                        type="text"
+                        value={newStdLabel}
+                        onChange={(e) => setNewStdLabel(e.target.value)}
+                        placeholder="e.g., NCAA B or Pool Record"
+                        className="w-full px-2.5 py-2 text-xs bg-white border border-slate-200 rounded-lg"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Event
+                      </label>
+                      <select
+                        value={newStdEventKey}
+                        onChange={(e) => setNewStdEventKey(e.target.value)}
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-slate-200 rounded-lg"
+                      >
+                        {CANONICAL_EVENTS.map((ev) => (
+                          <option key={ev} value={ev.toLowerCase()}>
+                            {ev}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                        Cut / Record Time
+                      </label>
+                      <input
+                        type="text"
+                        value={newStdTime}
+                        onChange={(e) => setNewStdTime(e.target.value)}
+                        placeholder="e.g., 23.15"
+                        className="w-full px-2.5 py-2 text-xs font-mono font-bold bg-white border border-slate-200 rounded-lg"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const sec = timeToSeconds(newStdTime);
+                        if (!newStdLabel.trim() || sec === null || sec <= 0) {
+                          setBenchmarkStatusMsg('Enter a valid Badge Label and Time.');
+                          return;
+                        }
+                        const created = {
+                          id: `std-${Date.now()}`,
+                          type: newStdType,
+                          label: newStdLabel.trim(),
+                          eventKey: newStdEventKey,
+                          eventLabel: toTitleEventLabel(newStdEventKey),
+                          time: newStdTime.trim(),
+                          seconds: sec,
+                          holder: newStdHolder.trim(),
+                          date: normalizeDateIso(newStdDate),
+                        };
+                        updateQualStandardsList([...qualStandards, created], created);
+                        setNewStdTime('');
+                        setNewStdHolder('');
+                        setNewStdDate('');
+                      }}
+                      className="px-4 py-2 rounded-lg text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                    >
+                      + Add Mark
+                    </button>
+
+                    {newStdType === 'POOL_RECORD' && (
+                      <>
+                        <div className="md:col-span-3">
+                          <input
+                            type="text"
+                            value={newStdHolder}
+                            onChange={(e) => setNewStdHolder(e.target.value)}
+                            placeholder="Record Holder Name (optional)"
+                            className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg"
+                          />
+                        </div>
+                        <div className="md:col-span-3">
+                          <input
+                            type="date"
+                            value={newStdDate}
+                            onChange={(e) => setNewStdDate(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-200 rounded-lg"
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {qualStandards.length === 0 ? (
+                    <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                      No qualifying standards or pool records configured yet. Add cuts above to
+                      highlight swims automatically in meet results and broadcast graphics.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                          <tr>
+                            <th className="py-2.5 px-4">Badge</th>
+                            <th className="py-2.5 px-4">Event</th>
+                            <th className="py-2.5 px-4">Time</th>
+                            <th className="py-2.5 px-4">Holder / Notes</th>
+                            <th className="py-2.5 px-4 text-center">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {qualStandards.map((std) => {
+                            const isEditing = editingStdId === std.id;
+                            if (isEditing) {
+                              return (
+                                <tr key={std.id} className="bg-indigo-50/70">
+                                  <td className="py-2 px-4">
+                                    <input
+                                      type="text"
+                                      value={editStdDraft.label}
+                                      onChange={(e) =>
+                                        setEditStdDraft((p) => ({ ...p, label: e.target.value }))
+                                      }
+                                      className="w-full px-2 py-1 text-xs font-bold bg-white border border-indigo-300 rounded"
+                                    />
+                                  </td>
+                                  <td className="py-2 px-4">
+                                    <select
+                                      value={editStdDraft.eventKey}
+                                      onChange={(e) =>
+                                        setEditStdDraft((p) => ({ ...p, eventKey: e.target.value }))
+                                      }
+                                      className="w-full px-2 py-1 text-xs bg-white border border-indigo-300 rounded"
+                                    >
+                                      {CANONICAL_EVENTS.map((ev) => (
+                                        <option key={ev} value={ev.toLowerCase()}>
+                                          {ev}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td className="py-2 px-4">
+                                    <input
+                                      type="text"
+                                      value={editStdDraft.time}
+                                      onChange={(e) =>
+                                        setEditStdDraft((p) => ({ ...p, time: e.target.value }))
+                                      }
+                                      className="w-24 px-2 py-1 text-xs font-mono font-bold bg-white border border-indigo-300 rounded"
+                                    />
+                                  </td>
+                                  <td className="py-2 px-4">
+                                    <input
+                                      type="text"
+                                      value={editStdDraft.holder}
+                                      onChange={(e) =>
+                                        setEditStdDraft((p) => ({ ...p, holder: e.target.value }))
+                                      }
+                                      placeholder="Holder..."
+                                      className="w-full px-2 py-1 text-xs bg-white border border-indigo-300 rounded"
+                                    />
+                                  </td>
+                                  <td className="py-2 px-4 text-center">
+                                    <div className="inline-flex gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSaveQualStandardEdit(std.id)}
+                                        className="px-2 py-1 rounded text-[11px] font-bold bg-emerald-600 text-white cursor-pointer"
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingStdId(null)}
+                                        className="px-2 py-1 rounded text-[11px] bg-white border border-slate-200 cursor-pointer"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            }
+                            return (
+                              <tr key={std.id} className="hover:bg-slate-50">
+                                <td className="py-2.5 px-4">
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[11px] font-bold ${getStandardBadgeStyle(
+                                      std.label
+                                    )}`}
+                                  >
+                                    {std.label}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-4 font-bold text-slate-900">
+                                  {std.eventLabel}
+                                </td>
+                                <td className="py-2.5 px-4 font-mono font-bold text-indigo-800">
+                                  {std.time}
+                                </td>
+                                <td className="py-2.5 px-4 text-slate-600">
+                                  {std.holder || '—'}
+                                  {std.date ? ` (${formatDisplayDateMDY(std.date)})` : ''}
+                                </td>
+                                <td className="py-2.5 px-4 text-center">
+                                  <div className="inline-flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingStdId(std.id);
+                                        setEditStdDraft({
+                                          type: std.type || 'STANDARD',
+                                          label: std.label || '',
+                                          eventKey: std.eventKey || 'women 50 freestyle',
+                                          time: std.time || '',
+                                          holder: std.holder || '',
+                                          date: normalizeDateIso(std.date || ''),
+                                        });
+                                      }}
+                                      className="px-2 py-1 rounded text-[11px] font-bold text-indigo-700 hover:bg-indigo-50 border border-indigo-200 cursor-pointer"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateQualStandardsList(
+                                          qualStandards.filter((item) => item.id !== std.id),
+                                          null,
+                                          std.id
+                                        )
+                                      }
+                                      className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================== */}
         {/* SECTION 4: IMPORT MEET RESULTS (EXACT ORIGINAL PARSER & LAYOUT)      */}
         {/* ==================================================================== */}
         {activeSection === 'import' && (
