@@ -5798,42 +5798,191 @@ export default function App() {
     const meetDate = parsedData.meetInfo.startDate || '';
     const meetLoc = [parsedData.meetInfo.city, parsedData.meetInfo.state].filter(Boolean).join(', ');
 
-    // Build chronological event list (Individual + Relay)
-    const eventMap = new Map();
+    // Detect which individual events have prelim swims across the meet
+    const eventHasPrelimsMap = new Map();
     parsedData.individualResults.forEach((r) => {
       const k = `${r.eventNumber}|${r.eventLabel}`;
-      if (!eventMap.has(k)) {
-        eventMap.set(k, {
+      const hasP =
+        Boolean(r.prelimTime && !['NT', 'DQ', 'SCR', 'NS'].includes(r.prelimTime)) ||
+        r.prelimPlace !== null;
+      if (hasP) eventHasPrelimsMap.set(k, true);
+    });
+
+    // Build chronological event cards (splitting into Finals + Prelims cards when prelims exist)
+    const rawEventMap = new Map();
+    parsedData.individualResults.forEach((r) => {
+      const k = `${r.eventNumber}|${r.eventLabel}`;
+      if (!rawEventMap.has(k)) {
+        rawEventMap.set(k, {
           key: k,
           eventNumber: Number(r.eventNumber) || 999,
           eventLabel: r.eventLabel,
           genderLabel: r.genderLabel,
           course: r.course,
+          isDiving: Boolean(r.isDiving),
+          isTimeTrial: Boolean(r.isTimeTrial),
+          isSwimOff: Boolean(r.isSwimOff),
           isRelay: false,
           entries: [],
         });
       }
-      eventMap.get(k).entries.push(r);
+      rawEventMap.get(k).entries.push(r);
     });
     parsedData.relayResults.forEach((r) => {
       const k = `${r.eventNumber}|${r.eventLabel}`;
-      if (!eventMap.has(k)) {
-        eventMap.set(k, {
+      if (!rawEventMap.has(k)) {
+        rawEventMap.set(k, {
           key: k,
           eventNumber: Number(r.eventNumber) || 999,
           eventLabel: r.eventLabel,
           genderLabel: r.genderLabel,
           course: r.course,
+          isDiving: false,
+          isTimeTrial: Boolean(r.isTimeTrial),
+          isSwimOff: false,
           isRelay: true,
           entries: [],
         });
       }
-      eventMap.get(k).entries.push(r);
+      rawEventMap.get(k).entries.push(r);
     });
 
-    const orderedEvents = Array.from(eventMap.values()).sort(
+    const orderedBaseEvents = Array.from(rawEventMap.values()).sort(
       (a, b) => a.eventNumber - b.eventNumber
     );
+
+    const orderedCards = [];
+    orderedBaseEvents.forEach((evGrp) => {
+      if (evGrp.isRelay) {
+        orderedCards.push({
+          ...evGrp,
+          cardKey: `${evGrp.key}-relays`,
+          roundTag: evGrp.isTimeTrial ? 'Time Trial' : '',
+          isPrelimCard: false,
+          hasSubHeaders: false,
+        });
+        return;
+      }
+
+      const hasPrelims =
+        Boolean(eventHasPrelimsMap.get(evGrp.key)) && !evGrp.isSwimOff && !evGrp.isTimeTrial;
+
+      if (!hasPrelims) {
+        const swims = evGrp.entries.map((r) => {
+          const rowIsDq = ['DQ', 'SCR', 'NS'].includes(String(r.finalsTime || '').toUpperCase());
+          return {
+            ...r,
+            displayId: r.id,
+            displayRound: r.isSwimOff ? 'Swim-Off' : r.isTimeTrial ? 'Time Trial' : 'Finals',
+            displayPlace: rowIsDq || r.isTimeTrial || r.isSwimOff ? null : r.place,
+            displayTime: r.finalsTime,
+            displaySeconds: rowIsDq ? Infinity : r.timeSeconds,
+            displayHeat: r.heat,
+            displayLane: r.lane,
+            displayPoints: rowIsDq || r.isSwimOff || r.isTimeTrial ? 0 : r.points,
+            displaySplits: r.splits || [],
+            isDqRow: rowIsDq,
+            finalTierRank: 1,
+            finalTierLabel: '',
+          };
+        });
+        orderedCards.push({
+          ...evGrp,
+          cardKey: `${evGrp.key}-finals`,
+          roundTag: evGrp.isSwimOff ? 'Swim-Off' : evGrp.isTimeTrial ? 'Time Trial' : '',
+          isPrelimCard: false,
+          hasSubHeaders: false,
+          entries: swims,
+        });
+        return;
+      }
+
+      // 1. FINALS CARD
+      const maxFinalHeat = evGrp.entries.reduce((maxH, r) => {
+        const hasF = Boolean(r.finalsOnlyTime && !['NT', 'DQ', 'SCR', 'NS'].includes(r.finalsOnlyTime));
+        if (!hasF) return maxH;
+        const h = parseInt(r.heat, 10);
+        return !Number.isNaN(h) && h > maxH ? h : maxH;
+      }, 0);
+
+      const finalsSwims = evGrp.entries
+        .filter((r) => Boolean(r.finalsOnlyTime && !['NT', 'SCR', 'NS'].includes(r.finalsOnlyTime)))
+        .map((r) => {
+          const rowIsDq = ['DQ', 'SCR', 'NS'].includes(String(r.finalsOnlyTime || '').toUpperCase());
+          const fSec = rowIsDq ? null : timeToSeconds(r.finalsOnlyTime);
+          const tier = getFinalHeatTierInfo(r.heat, rowIsDq ? null : r.place, maxFinalHeat);
+          return {
+            ...r,
+            displayId: `${r.id}-F`,
+            displayRound: 'Finals',
+            displayPlace: rowIsDq ? null : r.place,
+            displayTime: r.finalsOnlyTime,
+            displaySeconds: fSec === null ? Infinity : fSec,
+            displayHeat: r.heat,
+            displayLane: r.lane,
+            displayPoints: rowIsDq ? 0 : r.points,
+            displaySplits:
+              r.finalsSplits && r.finalsSplits.length > 0 ? r.finalsSplits : r.splits || [],
+            isDqRow: rowIsDq,
+            finalTierRank: rowIsDq ? 999 : tier.tierRank,
+            finalTierLabel: rowIsDq ? '' : tier.label,
+          };
+        });
+
+      if (finalsSwims.length > 0) {
+        orderedCards.push({
+          ...evGrp,
+          cardKey: `${evGrp.key}-finals`,
+          roundTag: 'Finals',
+          isPrelimCard: false,
+          hasSubHeaders: maxFinalHeat >= 2,
+          entries: finalsSwims,
+        });
+      }
+
+      // 2. PRELIMS CARD
+      const prelimSwims = evGrp.entries
+        .filter(
+          (r) =>
+            Boolean(r.prelimTime && !['NT', 'SCR', 'NS'].includes(r.prelimTime)) ||
+            r.prelimPlace !== null
+        )
+        .map((r) => {
+          const rowIsDq = ['DQ', 'SCR', 'NS'].includes(String(r.prelimTime || '').toUpperCase());
+          const pSec = rowIsDq ? null : timeToSeconds(r.prelimTime);
+          return {
+            ...r,
+            displayId: `${r.id}-P`,
+            displayRound: 'Prelims',
+            displayPlace: rowIsDq ? null : r.prelimPlace,
+            displayTime: r.prelimTime || 'NT',
+            displaySeconds: pSec === null ? Infinity : pSec,
+            displayHeat: r.prelimHeat,
+            displayLane: r.prelimLane,
+            displayPoints: 0,
+            displaySplits:
+              r.prelimSplits && r.prelimSplits.length > 0
+                ? r.prelimSplits
+                : !r.finalsOnlyTime
+                ? r.splits || []
+                : [],
+            isDqRow: rowIsDq,
+            finalTierRank: 1,
+            finalTierLabel: '',
+          };
+        });
+
+      if (prelimSwims.length > 0) {
+        orderedCards.push({
+          ...evGrp,
+          cardKey: `${evGrp.key}-prelims`,
+          roundTag: 'Prelims',
+          isPrelimCard: true,
+          hasSubHeaders: false,
+          entries: prelimSwims,
+        });
+      }
+    });
 
     // Team Scoreboards HTML
     const womenScores = [...(parsedData.teamScores || [])].sort(
@@ -5998,29 +6147,55 @@ export default function App() {
         : '';
 
     // Event Cards HTML
-    const eventsHtml = orderedEvents
+    const eventsHtml = orderedCards
       .map((evGrp) => {
         const sortedEntries = [...evGrp.entries].sort((a, b) => {
-          const pA = a.place ?? 9999;
-          const pB = b.place ?? 9999;
+          if (evGrp.isRelay) {
+            const pA = a.place ?? 9999;
+            const pB = b.place ?? 9999;
+            if (pA !== pB) return pA - pB;
+            return (a.timeSeconds ?? Infinity) - (b.timeSeconds ?? Infinity);
+          }
+          if (Boolean(a.isDqRow) !== Boolean(b.isDqRow)) return a.isDqRow ? 1 : -1;
+          if (!evGrp.isPrelimCard && a.finalTierRank !== b.finalTierRank) {
+            return a.finalTierRank - b.finalTierRank;
+          }
+          if (Boolean(a.isExhibition) !== Boolean(b.isExhibition)) return a.isExhibition ? 1 : -1;
+          const pA = a.displayPlace ?? 9999;
+          const pB = b.displayPlace ?? 9999;
           if (pA !== pB) return pA - pB;
-          return (a.timeSeconds ?? Infinity) - (b.timeSeconds ?? Infinity);
+          if (evGrp.isDiving) {
+            const sA = Number.isFinite(a.displaySeconds) ? a.displaySeconds : -Infinity;
+            const sB = Number.isFinite(b.displaySeconds) ? b.displaySeconds : -Infinity;
+            return sB - sA;
+          }
+          return (a.displaySeconds ?? Infinity) - (b.displaySeconds ?? Infinity);
         });
         const validTimes = sortedEntries
-          .map((e) => e.timeSeconds)
+          .map((e) => (evGrp.isRelay ? e.timeSeconds : e.displaySeconds))
           .filter((t) => Number.isFinite(t));
-        const fastestSec = validTimes.length > 0 ? Math.min(...validTimes) : Infinity;
+        const fastestSec =
+          validTimes.length > 0
+            ? evGrp.isDiving
+              ? Math.max(...validTimes)
+              : Math.min(...validTimes)
+            : Infinity;
 
         const rowsHtml = sortedEntries
-          .map((row) => {
+          .map((row, rowIdx) => {
             const teamHex = getTeamHexColor(row.teamCode, row.teamName);
+            const rowSec = evGrp.isRelay ? row.timeSeconds : row.displaySeconds;
             const behindSec =
-              Number.isFinite(row.timeSeconds) && Number.isFinite(fastestSec)
-                ? row.timeSeconds - fastestSec
+              Number.isFinite(rowSec) && Number.isFinite(fastestSec)
+                ? evGrp.isDiving
+                  ? fastestSec - rowSec
+                  : rowSec - fastestSec
                 : Infinity;
             const behindLabel = Number.isFinite(behindSec)
               ? behindSec < 0.005
-                ? '<span class="tag-winner">Winner</span>'
+                ? '<span class="tag-winner">Leader</span>'
+                : evGrp.isDiving
+                ? `-${behindSec.toFixed(2)} pts`
                 : `+${behindSec.toFixed(2)}s`
               : '—';
 
@@ -6114,21 +6289,27 @@ export default function App() {
             // Individual Swim Row
             const dispName = formatSwimmerDisplay(row.swimmerName, row.preferredFirst);
             const tags = isPrimary
-              ? benchmarkIndex.evaluateSwim(dispName, row.eventLabel, row.finalsTime, row.classYear)
+              ? benchmarkIndex.evaluateSwim(
+                  dispName,
+                  row.eventLabel,
+                  row.displayTime,
+                  row.classYear
+                )
               : [];
-            const hitStds = evaluateStandardsForSwim(row.eventLabel, row.finalsTime);
+            const hitStds = evaluateStandardsForSwim(row.eventLabel, row.displayTime);
             const badgesHtml = [
               ...tags.map((t) => `<span class="badge badge-rec">${escapeHtml(t.label)}</span>`),
               ...hitStds.map((s) => `<span class="badge badge-std">${escapeHtml(s.label)}</span>`),
             ].join('');
 
-            const hasSplits = row.splits && row.splits.length > 0;
-            const detailId = `det-${escapeHtml(row.id)}`;
+            const rowSplits = row.displaySplits || [];
+            const hasSplits = rowSplits.length > 0;
+            const detailId = `det-${escapeHtml(row.displayId || row.id)}`;
             let drawerHtml = '';
 
             if (hasSplits) {
               const analysis = calculateSplitBreakdown(
-                row.splits,
+                rowSplits,
                 row.distance,
                 row.splitInterval,
                 row.splitType
@@ -6184,7 +6365,7 @@ export default function App() {
               drawerHtml = `<tr id="${detailId}" class="split-drawer hidden">
                 <td colspan="7">
                   <div class="drawer-box">
-                    <div class="drawer-title">Split Breakdown (${
+                    <div class="drawer-title">${escapeHtml(row.displayRound)} Split Breakdown (${
                       analysis.stats?.interval || 50
                     }y Intervals) — ${escapeHtml(dispName)}</div>
                     ${barsHtml}
@@ -6204,72 +6385,113 @@ export default function App() {
               </tr>`;
             }
 
-            return `<tr class="res-row ${hasSplits ? 'clickable' : ''}" data-team="${escapeHtml(
+            const prevTierLabel =
+              rowIdx > 0 ? sortedEntries[rowIdx - 1].finalTierLabel : '';
+            const showTierBanner =
+              evGrp.hasSubHeaders &&
+              Boolean(row.finalTierLabel) &&
+              row.finalTierLabel !== prevTierLabel;
+
+            const tierBannerHtml = showTierBanner
+              ? `<tr class="tier-row"><td colspan="7">${escapeHtml(row.finalTierLabel)}</td></tr>`
+              : '';
+
+            const placeCellHtml = row.isDqRow
+              ? '<span class="badge-dq">DQ</span>'
+              : row.isExhibition
+              ? '<span class="badge-exh">EXH</span>'
+              : row.displayPlace
+              ? `<span class="place-badge p-${row.displayPlace}">${row.displayPlace}</span>`
+              : '—';
+
+            const deltaHtml = (() => {
+              if (
+                evGrp.isPrelimCard ||
+                evGrp.isDiving ||
+                row.isDqRow ||
+                !Number.isFinite(row.displaySeconds) ||
+                !Number.isFinite(row.prelimSeconds)
+              ) {
+                return '';
+              }
+              const delta = row.displaySeconds - row.prelimSeconds;
+              const isSame = Math.abs(delta) < 0.005;
+              const isDrop = delta <= -0.005;
+              const colorStyle = isSame
+                ? 'color:#94a3b8'
+                : isDrop
+                ? 'color:#059669'
+                : 'color:#dc2626';
+              const label = isSame
+                ? '0.00s'
+                : `${isDrop ? '' : '+'}${delta.toFixed(2)}s`;
+              return `<div title="Prelims: ${escapeHtml(
+                row.prelimTime
+              )}" style="font-size:0.7rem;font-weight:700;margin-top:2px;${colorStyle}">${escapeHtml(
+                label
+              )}</div>`;
+            })();
+
+            return `${tierBannerHtml}<tr class="res-row ${hasSplits ? 'clickable' : ''}" data-team="${escapeHtml(
               row.teamCode
             )}" style="border-left:4px solid ${escapeHtml(teamHex)}" ${
               hasSplits ? `onclick="toggleSplitRow('${detailId}', this)"` : ''
             }>
-              <td class="center">${
-                row.place ? `<span class="place-badge p-${row.place}">${row.place}</span>` : '—'
-              }</td>
+              <td class="center">${placeCellHtml}</td>
               <td>
                 <div class="sw-name">${escapeHtml(dispName)} ${badgesHtml}</div>
                 <div class="sw-sub">${row.classYear ? `Class: ${escapeHtml(row.classYear)} • ` : ''}${
-              row.heat ? `Heat ${escapeHtml(row.heat)}` : ''
-            }${row.heat && row.lane ? ' • ' : ''}${
-              row.lane ? `Lane ${escapeHtml(row.lane)}` : ''
+              row.displayHeat ? `Heat ${escapeHtml(row.displayHeat)}` : ''
+            }${row.displayHeat && row.displayLane ? ' • ' : ''}${
+              row.displayLane ? `Lane ${escapeHtml(row.displayLane)}` : ''
             }</div>
               </td>
               <td>${escapeHtml(row.teamName)}</td>
               <td class="mono right">
-                <div><strong>${escapeHtml(row.finalsTime)}</strong></div>
-                ${(() => {
-                  if (
-                    row.isDiving ||
-                    row.isDq ||
-                    !Number.isFinite(row.timeSeconds) ||
-                    !Number.isFinite(row.prelimSeconds)
-                  ) {
-                    return '';
-                  }
-                  const delta = row.timeSeconds - row.prelimSeconds;
-                  const isSame = Math.abs(delta) < 0.005;
-                  const isDrop = delta <= -0.005;
-                  const colorStyle = isSame
-                    ? 'color:#94a3b8'
-                    : isDrop
-                    ? 'color:#059669'
-                    : 'color:#dc2626';
-                  const label = isSame
-                    ? '0.00s'
-                    : `${isDrop ? '' : '+'}${delta.toFixed(2)}s`;
-                  return `<div title="Prelims: ${escapeHtml(
-                    row.prelimTime
-                  )}" style="font-size:0.7rem;font-weight:700;margin-top:2px;${colorStyle}">${escapeHtml(
-                    label
-                  )}</div>`;
-                })()}
+                <div><strong>${escapeHtml(row.displayTime)}</strong></div>
+                ${deltaHtml}
               </td>
               <td class="mono right">${behindLabel}</td>
-              <td class="mono center">${row.points > 0 ? row.points : '—'}</td>
+              <td class="mono center">${row.displayPoints > 0 ? row.displayPoints : '—'}</td>
               <td class="right">${
                 hasSplits
-                  ? `<button type="button" class="split-btn">Splits (${row.splits.length}) ▾</button>`
+                  ? `<button type="button" class="split-btn">Splits (${rowSplits.length}) ▾</button>`
                   : '<span class="muted">—</span>'
               }</td>
             </tr>${drawerHtml}`;
           })
           .join('');
 
+        const roundPillHtml = evGrp.roundTag
+          ? `<span class="round-pill ${evGrp.isPrelimCard ? 'round-prelim' : 'round-final'}">${escapeHtml(
+              evGrp.roundTag
+            )}</span>`
+          : '';
+
+        const timeColTitle = evGrp.isRelay
+          ? 'Finals Time'
+          : evGrp.isPrelimCard
+          ? 'Prelim Time'
+          : evGrp.roundTag === 'Swim-Off'
+          ? 'Swim-Off Time'
+          : evGrp.roundTag === 'Time Trial'
+          ? 'Time Trial'
+          : 'Finals Time';
+
         return `<section class="card event-card" data-gender="${escapeHtml(evGrp.genderLabel)}">
-          <div class="event-head">
+          <div class="event-head ${evGrp.isPrelimCard ? 'prelim-head' : ''}">
             <div class="event-title-wrap">
               <span class="ev-num">Event #${evGrp.eventNumber}</span>
               <div>
-                <h3>${escapeHtml(evGrp.eventLabel)}</h3>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                  <h3>${escapeHtml(evGrp.eventLabel)}</h3>
+                  ${roundPillHtml}
+                </div>
                 <p>${sortedEntries.length} ${
           evGrp.isRelay ? 'Relay Entries' : 'Swimmers'
-        } • ${escapeHtml(evGrp.course)}</p>
+        } • ${escapeHtml(evGrp.course)}${
+          evGrp.isPrelimCard ? ' • Preliminary Round (Unscored)' : ''
+        }</p>
               </div>
             </div>
             <button type="button" class="expand-ev-btn" onclick="toggleEventSplits(this)">Toggle Event Splits</button>
@@ -6281,7 +6503,7 @@ export default function App() {
                   <th class="center" style="width:64px">Place</th>
                   <th>${evGrp.isRelay ? 'Relay Squad' : 'Swimmer'}</th>
                   <th>Team</th>
-                  <th class="right">Finals Time</th>
+                  <th class="right">${timeColTitle}</th>
                   <th class="right">Behind</th>
                   <th class="center" style="width:60px">Pts</th>
                   <th class="right" style="width:115px">Details</th>
@@ -6418,6 +6640,26 @@ export default function App() {
     .win-events { margin: 6px 0 0; padding-left: 16px; font-size: 0.78rem; color: #334155; }
     .event-head {
       background: var(--navy); color: #fff; padding: 12px 18px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px;
+    }
+    .event-head.prelim-head { background: #1e293b; }
+    .round-pill {
+      font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 2px 9px; border-radius: 999px;
+    }
+    .round-final { background: rgba(16, 185, 129, 0.22); color: #a7f3d0; border: 1px solid rgba(52, 211, 153, 0.35); }
+    .round-prelim { background: rgba(99, 102, 241, 0.25); color: #c7d2fe; border: 1px solid rgba(129, 140, 248, 0.4); }
+    .tier-row td {
+      background: #f1f5f9; color: #334155; font-size: 0.7rem; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 0.08em; padding: 6px 14px;
+      border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    }
+    .badge-dq {
+      display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 0.65rem; font-weight: 800;
+      background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;
+    }
+    .badge-exh {
+      display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 0.65rem; font-weight: 800;
+      background: #e2e8f0; color: #475569; border: 1px solid #cbd5e1;
     }
     .event-title-wrap { display: flex; align-items: center; gap: 12px; }
     .ev-num {
