@@ -1082,6 +1082,96 @@ function parseSDIFContent(content) {
     }
   }
 
+  // Reconcile tied Finals points (Hy-Tek SDIF truncates .5 points to integers on ties)
+  const resolveTiedPointsForResults = (resultsList) => {
+    // 1. Learn canonical points per place from untied scoring entries in this meet
+    const placePointCounts = new Map();
+    const byEvent = new Map();
+
+    resultsList.forEach((rec) => {
+      if (rec.isDq || rec.isExhibition || rec.isTimeTrial || rec.isSwimOff) return;
+      if (typeof rec.place !== 'number' || rec.place <= 0) return;
+      const evKey = `${rec.eventNumber}|${rec.eventLabel}`;
+      if (!byEvent.has(evKey)) byEvent.set(evKey, []);
+      byEvent.get(evKey).push(rec);
+    });
+
+    byEvent.forEach((entries) => {
+      const placeFreq = new Map();
+      entries.forEach((e) => {
+        placeFreq.set(e.place, (placeFreq.get(e.place) || 0) + 1);
+      });
+      entries.forEach((e) => {
+        if (placeFreq.get(e.place) === 1 && e.points > 0) {
+          if (!placePointCounts.has(e.place)) placePointCounts.set(e.place, new Map());
+          const freqMap = placePointCounts.get(e.place);
+          freqMap.set(e.points, (freqMap.get(e.points) || 0) + 1);
+        }
+      });
+    });
+
+    const canonicalPtsByPlace = new Map();
+    placePointCounts.forEach((freqMap, pl) => {
+      let bestPts = 0;
+      let bestCnt = -1;
+      freqMap.forEach((cnt, pts) => {
+        if (cnt > bestCnt) {
+          bestCnt = cnt;
+          bestPts = pts;
+        }
+      });
+      if (bestPts > 0) canonicalPtsByPlace.set(pl, bestPts);
+    });
+
+    // 2. For any tied place group (2+ entries sharing the same finals place in an event),
+    // split the combined points across places [P .. P + k - 1]
+    byEvent.forEach((entries) => {
+      const byPlace = new Map();
+      entries.forEach((e) => {
+        if (!byPlace.has(e.place)) byPlace.set(e.place, []);
+        byPlace.get(e.place).push(e);
+      });
+
+      byPlace.forEach((tiedGroup, startPlace) => {
+        if (tiedGroup.length < 2) return;
+        const scoringTied = tiedGroup.filter((e) => e.points > 0);
+        if (scoringTied.length < 2) return;
+
+        const k = scoringTied.length;
+        const rawTruncatedPts = scoringTied[0].points;
+        let sumPts = 0;
+        let allKnown = true;
+
+        for (let offset = 0; offset < k; offset++) {
+          const p = startPlace + offset;
+          if (canonicalPtsByPlace.has(p)) {
+            sumPts += canonicalPtsByPlace.get(p);
+          } else {
+            allKnown = false;
+            break;
+          }
+        }
+
+        let resolvedSplitPts = null;
+        if (allKnown && sumPts > 0) {
+          resolvedSplitPts = Math.round((sumPts / k) * 100) / 100;
+        } else if (k === 2 && Number.isInteger(rawTruncatedPts)) {
+          // Hy-Tek always truncates .5 on 2-way odd-sum ties (e.g. 35 + 34 = 69 -> 34. -> 34.5)
+          resolvedSplitPts = rawTruncatedPts + 0.5;
+        }
+
+        if (resolvedSplitPts !== null && resolvedSplitPts > 0) {
+          scoringTied.forEach((e) => {
+            e.points = resolvedSplitPts;
+          });
+        }
+      });
+    });
+  };
+
+  resolveTiedPointsForResults(individualResults);
+  resolveTiedPointsForResults(relayResults);
+
   // Propagate preferredFirst and classYear across all individual & relay appearances of the same swimmer
   const preferredBySwimmerKey = new Map();
   const classBySwimmerKey = new Map();
