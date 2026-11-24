@@ -610,6 +610,25 @@ function parseSDIFContent(content) {
       const isExhibition = /X[A-Z0-9]{2,4}\s*$/i.test(line.slice(145));
       const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
       const tailTokens = cleanedTail ? cleanedTail.split(/\s+/) : [];
+      // Expand glued 3+ digit heat+lane tokens (e.g. "410" -> ["4", "10"], "310" -> ["3", "10"])
+      // so we can reliably inspect whether the tail is Timed-Final [fHeat, fLane, fPlace, pts.]
+      // or Prelim/Finals [pHeat, pLane, fHeat, fLane, pPlace, fPlace?, pts.?].
+      const normalizedTail = [];
+      for (let tIdx = 0; tIdx < tailTokens.length; tIdx++) {
+        const tok = tailTokens[tIdx];
+        if (/^\d+\.$/.test(tok)) {
+          normalizedTail.push(tok);
+          break;
+        }
+        if (/^\d{3,}$/.test(tok) && Number(tok.slice(1)) >= 10) {
+          normalizedTail.push(tok.slice(0, 1), tok.slice(1));
+        } else {
+          normalizedTail.push(tok);
+        }
+      }
+      const isTimedFinalTail = /^\d+\.$/.test(normalizedTail[3] || '');
+      const hasPrelimTail =
+        !isTimedFinalTail && normalizedTail.length >= 5 && /^\d+$/.test(normalizedTail[4]);
 
       const timeTokens = Array.from(
         timeZoneStr.matchAll(/((?:\d{1,2}:)?\d{2}\.\d{2}|NT|DQ|SCR|NS)([YSL])?/gi)
@@ -643,21 +662,19 @@ function parseSDIFContent(content) {
         courseCode =
           timeTokens[timeTokens.length - 1].course || timeTokens[1].course || timeTokens[0].course;
       } else if (timeTokens.length === 2) {
-        const hasPrelimTail = tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]);
         if (hasPrelimTail) {
           // Seed + Prelim only (e.g. Erik Floren Smith: 49.74Y Seed, 48.46Y Prelim, no Finals)
           seedTimeRaw = timeTokens[0].clean;
           prelimTimeRaw = timeTokens[1].clean;
           courseCode = timeTokens[1].course || timeTokens[0].course;
         } else {
-          // Dual meet / Timed Final with Seed + Finals
+          // Dual meet / Timed Final with Seed + Finals (e.g. 1650 Free: 9:31.92Y Seed, 15:44.79Y Finals)
           seedTimeRaw = timeTokens[0].clean;
           finalsTimeRaw = timeTokens[1].clean;
           courseCode = timeTokens[1].course || timeTokens[0].course;
         }
       } else if (timeTokens.length === 1) {
-        const hasPrelimTail = tailTokens.length >= 5 && /^\d+$/.test(tailTokens[4]);
-        if (hasPrelimTail && tailTokens[2] === '0' && tailTokens[3] === '0') {
+        if (hasPrelimTail && normalizedTail[2] === '0' && normalizedTail[3] === '0') {
           prelimTimeRaw = timeTokens[0].clean;
         } else {
           finalsTimeRaw = timeTokens[0].clean;
@@ -675,31 +692,19 @@ function parseSDIFContent(content) {
 
       const isPrelimFinalsFormat =
         !isSpecialUnscoredEvent &&
-        (Boolean(prelimTimeRaw) ||
-          (tailTokens.length >= 5 &&
-            !/^\d+\.$/.test(tailTokens[3] || '') &&
-            /^\d+$/.test(tailTokens[4])));
+        !isTimedFinalTail &&
+        (Boolean(prelimTimeRaw) || hasPrelimTail);
 
       if (isPrelimFinalsFormat) {
-        // Expand any glued 3+ digit heat+lane token (e.g., "410" -> ["4", "10"], "310" -> ["3", "10"])
-        // so [prelimHeat, prelimLane, finalsHeat, finalsLane, prelimPlace, finalsPlace, points] stay aligned.
+        // [prelimHeat, prelimLane, finalsHeat, finalsLane, prelimPlace, finalsPlace, points]
         const expandedTailTokens = [];
-        for (let tIdx = 0; tIdx < tailTokens.length; tIdx++) {
-          const tok = tailTokens[tIdx];
-          // Stop once we hit trailing event number / division codes or decimal points token
-          if (/^\d+\.$/.test(tok)) {
-            expandedTailTokens.push(tok);
-            break;
-          }
+        for (let tIdx = 0; tIdx < normalizedTail.length; tIdx++) {
+          const tok = normalizedTail[tIdx];
           // Stop if a standalone 2-digit event number appears right after prelim-only place (e.g. "... 0 0 37 05")
           if (!finalsTimeRaw && expandedTailTokens.length === 5 && /^\d{2,}$/.test(tok)) {
             break;
           }
-          if (/^\d{3,}$/.test(tok) && Number(tok.slice(1)) >= 10) {
-            expandedTailTokens.push(tok.slice(0, 1), tok.slice(1));
-          } else {
-            expandedTailTokens.push(tok);
-          }
+          expandedTailTokens.push(tok);
         }
 
         const pHeatTok = expandedTailTokens[0] || '';
@@ -722,25 +727,10 @@ function parseSDIFContent(content) {
         points = /^\d+\.$/.test(ptsTok) ? parseFloat(ptsTok) : 0;
       } else {
         // Timed-final / dual-meet tail: [finalsHeat, finalsLane, finalsPlace, points]
-        // Expand any glued 3+ digit heat+lane token (e.g., "110" -> ["1", "10"])
-        const tfTokens = [];
-        for (let tIdx = 0; tIdx < tailTokens.length; tIdx++) {
-          const tok = tailTokens[tIdx];
-          if (/^\d+\.$/.test(tok)) {
-            tfTokens.push(tok);
-            break;
-          }
-          if (/^\d{3,}$/.test(tok) && Number(tok.slice(1)) >= 10) {
-            tfTokens.push(tok.slice(0, 1), tok.slice(1));
-          } else {
-            tfTokens.push(tok);
-          }
-        }
-
-        const fHeatRaw = tfTokens[0] || '';
-        const fLaneRaw = tfTokens[1] || '';
-        const fPlaceRaw = String(tfTokens[2] || '').replace(/\./g, '');
-        const ptsTok = tfTokens[3] || '';
+        const fHeatRaw = normalizedTail[0] || '';
+        const fLaneRaw = normalizedTail[1] || '';
+        const fPlaceRaw = String(normalizedTail[2] || '').replace(/\./g, '');
+        const ptsTok = normalizedTail[3] || '';
 
         heat = fHeatRaw && fHeatRaw !== '0' ? fHeatRaw : '';
         lane = fLaneRaw && fLaneRaw !== '0' ? fLaneRaw : '';
