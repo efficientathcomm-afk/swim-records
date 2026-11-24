@@ -14350,8 +14350,8 @@ export default function App() {
                                                     }`}
                                                   >
                                                     {isSame
-                                                      ? '0.00s vs P'
-                                                      : `${isDrop ? '' : '+'}${delta.toFixed(2)}s vs P`}
+                                                      ? '0.00s'
+                                                      : `${isDrop ? '' : '+'}${delta.toFixed(2)}s`}
                                                   </div>
                                                 );
                                               })()}
