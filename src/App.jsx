@@ -1792,8 +1792,10 @@ export default function App() {
   const [recordBookGender, setRecordBookGender] = useState('Women');
   const [recordBookEventKey, setRecordBookEventKey] = useState('women 50 freestyle');
   const [eventWinsActiveOnly, setEventWinsActiveOnly] = useState(false);
+  const [eventWinsCurrentSeasonOnly, setEventWinsCurrentSeasonOnly] = useState(false);
   const [winsCompetitionFilter, setWinsCompetitionFilter] = useState('ALL');
   const [winsActiveOnly, setWinsActiveOnly] = useState(false);
+  const [winsCurrentSeasonOnly, setWinsCurrentSeasonOnly] = useState(false);
   const [expandedWinAthlete, setExpandedWinAthlete] = useState(null);
 
   const [inMeetSubTab, setInMeetSubTab] = useState('heatsheet'); // 'heatsheet' | 'roster' | 'relayopt' | 'standards'
@@ -4859,12 +4861,17 @@ export default function App() {
         .filter((a) => a.isActive)
         .map((a) => normalizeSwimmerKey(a.canonicalName))
     );
+    const seasonStart = getCurrentSeasonStart();
     const eventWinnersMap = new Map();
     historicalRecords.forEach((r) => {
       if (r.eventKey !== recordBookEventKey) return;
       if (String(r.place || '').trim() !== '1') return;
       const roundClean = String(r.round || 'Finals').toLowerCase();
       if (roundClean === 'prelims' || roundClean === 'time trial') return;
+      if (eventWinsCurrentSeasonOnly) {
+        const recDate = r.dateObj || parseFlexibleDate(r.date);
+        if (!recDate || recDate < seasonStart) return;
+      }
 
       const athRecord = resolveMasterAthlete(r.swimmerName);
       const canonicalName = athRecord ? athRecord.canonicalName : r.swimmerName;
@@ -4908,7 +4915,13 @@ export default function App() {
       totalMatchedCount: officialRows.length,
       eventWinLeaders,
     };
-  }, [historicalRecords, recordBookEventKey, masterRoster, eventWinsActiveOnly]);
+  }, [
+    historicalRecords,
+    recordBookEventKey,
+    masterRoster,
+    eventWinsActiveOnly,
+    eventWinsCurrentSeasonOnly,
+  ]);
 
   // Distinct recurring competition names for the All-Time Wins dropdown
   const recurringCompetitionsList = useMemo(() => {
@@ -5085,13 +5098,58 @@ export default function App() {
     });
 
     return Array.from(athleteMap.values())
-      .map((ath) => ({
-        ...ath,
-        winLog: ath.winLog.sort((a, b) => (b.date || '').localeCompare(a.date || '')),
-      }))
+      .map((ath) => {
+        const sortedLog = ath.winLog.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        const byMeetKey = new Map();
+        sortedLog.forEach((w) => {
+          const mKey = `${normalizeCompKey(w.competition || 'Meet')}|${normalizeDateIso(w.date || '')}`;
+          if (!byMeetKey.has(mKey)) {
+            byMeetKey.set(mKey, {
+              meetKey: mKey,
+              competition: w.competition || 'Meet',
+              date: w.date || '',
+              wins: [],
+            });
+          }
+          byMeetKey.get(mKey).wins.push(w);
+        });
+
+        let twoWinEvents = 0;
+        let threeWinEvents = 0;
+        let fourPlusWinEvents = 0;
+        const multiWinMeets = [];
+
+        byMeetKey.forEach((grp) => {
+          const cnt = grp.wins.length;
+          if (cnt >= 2) {
+            if (cnt === 2) twoWinEvents += 1;
+            else if (cnt === 3) threeWinEvents += 1;
+            else fourPlusWinEvents += 1;
+            multiWinMeets.push({
+              ...grp,
+              winCount: cnt,
+            });
+          }
+        });
+
+        multiWinMeets.sort(
+          (a, b) => b.winCount - a.winCount || (b.date || '').localeCompare(a.date || '')
+        );
+
+        return {
+          ...ath,
+          winLog: sortedLog,
+          twoWinEvents,
+          threeWinEvents,
+          fourPlusWinEvents,
+          multiWinEventsTotal: twoWinEvents + threeWinEvents + fourPlusWinEvents,
+          multiWinMeets,
+        };
+      })
       .sort(
         (a, b) =>
           b.totalWins - a.totalWins ||
+          b.multiWinEventsTotal - a.multiWinEventsTotal ||
           b.indWins - a.indWins ||
           compareByLastName(a.swimmerName, b.swimmerName)
       );
@@ -9186,6 +9244,15 @@ export default function App() {
                         />
                         Active Roster Only
                       </label>
+                      <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={winsCurrentSeasonOnly}
+                          onChange={(e) => setWinsCurrentSeasonOnly(e.target.checked)}
+                          className="rounded text-cyan-600"
+                        />
+                        Current Season Only
+                      </label>
                     </>
                   )}
                 </div>
@@ -9309,22 +9376,34 @@ export default function App() {
                           Top 10 swimmers with the most 1st-place Finals victories in this event.
                         </p>
                       </div>
-                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 cursor-pointer self-start sm:self-auto">
-                        <input
-                          type="checkbox"
-                          checked={eventWinsActiveOnly}
-                          onChange={(e) => setEventWinsActiveOnly(e.target.checked)}
-                          className="rounded text-cyan-600"
-                        />
-                        Active Roster Only
-                      </label>
+                      <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={eventWinsActiveOnly}
+                            onChange={(e) => setEventWinsActiveOnly(e.target.checked)}
+                            className="rounded text-cyan-600"
+                          />
+                          Active Roster Only
+                        </label>
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={eventWinsCurrentSeasonOnly}
+                            onChange={(e) => setEventWinsCurrentSeasonOnly(e.target.checked)}
+                            className="rounded text-cyan-600"
+                          />
+                          Current Season Only
+                        </label>
+                      </div>
                     </div>
 
                     {recordBookData.eventWinLeaders.length === 0 ? (
                       <div className="text-center py-6 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
                         No 1st-place Finals victories recorded for{' '}
                         {toTitleEventLabel(recordBookEventKey)}
-                        {eventWinsActiveOnly ? ' among active swimmers' : ''} yet.
+                        {eventWinsActiveOnly ? ' among active swimmers' : ''}
+                        {eventWinsCurrentSeasonOnly ? ' this season' : ''} yet.
                       </div>
                     ) : (
                       <div className="overflow-x-auto border border-slate-200 rounded-xl">
@@ -9382,7 +9461,7 @@ export default function App() {
                 /* ALL-TIME CAREER WINS LEADERBOARD */
                 <div className="space-y-4">
                   {/* Summary Stat Strip */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
                       <div className="text-[11px] font-bold uppercase text-slate-500">
                         Total Event Winners ({recordBookGender})
@@ -9397,6 +9476,16 @@ export default function App() {
                       </div>
                       <div className="text-xl font-black text-cyan-900 mt-0.5">
                         {allTimeWinsLeaderboard.reduce((acc, a) => acc + a.indWins, 0)}
+                      </div>
+                    </div>
+                    <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3.5">
+                      <div className="text-[11px] font-bold uppercase text-purple-800">
+                        Multi-Win Meets (2W / 3W / 4W+)
+                      </div>
+                      <div className="text-base sm:text-lg font-black text-purple-950 mt-0.5 font-mono">
+                        {allTimeWinsLeaderboard.reduce((acc, a) => acc + a.twoWinEvents, 0)} /{' '}
+                        {allTimeWinsLeaderboard.reduce((acc, a) => acc + a.threeWinEvents, 0)} /{' '}
+                        {allTimeWinsLeaderboard.reduce((acc, a) => acc + a.fourPlusWinEvents, 0)}
                       </div>
                     </div>
                     <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5">
@@ -9425,6 +9514,7 @@ export default function App() {
                             <th className="py-3 px-4 text-center">Total Wins</th>
                             <th className="py-3 px-4 text-center">Individual</th>
                             <th className="py-3 px-4 text-center">Relay</th>
+                            <th className="py-3 px-4">Multi-Win Meets</th>
                             <th className="py-3 px-4 text-right">Win Log</th>
                           </tr>
                         </thead>
@@ -9466,6 +9556,29 @@ export default function App() {
                                   <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
                                     {ath.relWins}
                                   </td>
+                                  <td className="py-3 px-4">
+                                    {ath.multiWinEventsTotal > 0 ? (
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        {ath.twoWinEvents > 0 && (
+                                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-900 border border-sky-200">
+                                            {ath.twoWinEvents}× 2-Win
+                                          </span>
+                                        )}
+                                        {ath.threeWinEvents > 0 && (
+                                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-200">
+                                            {ath.threeWinEvents}× 3-Win
+                                          </span>
+                                        )}
+                                        {ath.fourPlusWinEvents > 0 && (
+                                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-200">
+                                            {ath.fourPlusWinEvents}× 4+ Win
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400">—</span>
+                                    )}
+                                  </td>
                                   <td className="py-3 px-4 text-right">
                                     <button
                                       onClick={() =>
@@ -9484,7 +9597,38 @@ export default function App() {
                                 </tr>
                                 {isOpen && (
                                   <tr className="bg-slate-50">
-                                    <td colSpan={6} className="px-4 py-3">
+                                    <td colSpan={7} className="px-4 py-3 space-y-3">
+                                      {ath.multiWinMeets.length > 0 && (
+                                        <div className="space-y-1.5">
+                                          <div className="text-[10px] font-extrabold uppercase tracking-wider text-purple-900">
+                                            Multi-Win Meet Performances ({ath.multiWinMeets.length}
+                                            )
+                                          </div>
+                                          <div className="flex flex-wrap gap-2">
+                                            {ath.multiWinMeets.map((mw) => (
+                                              <div
+                                                key={mw.meetKey}
+                                                className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-1.5 text-[11px]"
+                                              >
+                                                <span className="font-extrabold text-purple-950">
+                                                  {mw.winCount}-Win Meet:
+                                                </span>{' '}
+                                                <span className="font-bold text-slate-900">
+                                                  {mw.competition}
+                                                </span>
+                                                {mw.date && (
+                                                  <span className="text-slate-500 ml-1">
+                                                    ({formatDisplayDateMDY(mw.date)})
+                                                  </span>
+                                                )}
+                                                <div className="text-[10px] text-purple-800 mt-0.5">
+                                                  {mw.wins.map((x) => `${x.eventLabel} (${x.time})`).join(' • ')}
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                         {ath.winLog.map((w) => (
                                           <div
