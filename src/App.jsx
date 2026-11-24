@@ -1720,6 +1720,17 @@ export default function App() {
   const [newCompDate, setNewCompDate] = useState('');
   const [newCompLocation, setNewCompLocation] = useState('');
   const [bulkCompText, setBulkCompText] = useState('');
+  const [compSearchQuery, setCompSearchQuery] = useState('');
+  const [compFilterDate, setCompFilterDate] = useState('');
+  const [compSortConfig, setCompSortConfig] = useState({ key: 'date', direction: 'desc' });
+  const [editingCompId, setEditingCompId] = useState(null);
+  const [editCompDraft, setEditCompDraft] = useState({
+    canonicalName: '',
+    date: '',
+    defaultLocation: '',
+    aliasesText: '',
+    propagateToDb: true,
+  });
   const [newEventName, setNewEventName] = useState('');
   const [newEventAlias, setNewEventAlias] = useState('');
 
@@ -2106,6 +2117,90 @@ export default function App() {
     setEditingRosterId(null);
     setBenchmarkStatusMsg(
       `Updated Master Roster entry for "${cleanName}"${
+        updatedDbCount > 0 ? ` and updated ${updatedDbCount} matching DB record(s).` : '.'
+      }`
+    );
+  };
+
+  // Save inline edits to a Master Competition (and optionally propagate name/date/location changes to Committed DB)
+  const handleSaveMasterCompetitionEdit = (comp) => {
+    const cleanName = String(editCompDraft.canonicalName || '').trim();
+    if (!cleanName) return;
+
+    const nextDate = normalizeDateIso(editCompDraft.date || '');
+    const nextLocation = String(editCompDraft.defaultLocation || '').trim();
+    const parsedAliases = Array.from(
+      new Set(
+        String(editCompDraft.aliasesText || '')
+          .split(/[;,]/)
+          .map((a) => a.trim())
+          .filter((a) => a && normalizeCompKey(a) !== normalizeCompKey(cleanName))
+      )
+    );
+
+    const updatedComp = {
+      ...comp,
+      canonicalName: cleanName,
+      date: nextDate,
+      defaultLocation: nextLocation,
+      aliases: parsedAliases,
+    };
+
+    const nextComps = masterCompetitions.map((item) =>
+      item.id === comp.id ? updatedComp : item
+    );
+    updateMasterCompetitions(nextComps, [updatedComp]);
+
+    let updatedDbCount = 0;
+    if (editCompDraft.propagateToDb) {
+      const oldCompKey = normalizeCompKey(comp.canonicalName);
+      const oldDateKey = normalizeDateIso(comp.date || '');
+      const aliasKeys = new Set(
+        [comp.canonicalName, cleanName, ...(comp.aliases || []), ...parsedAliases]
+          .map((n) => normalizeCompKey(n))
+          .filter(Boolean)
+      );
+
+      const changedDbRows = [];
+      const nextHist = historicalRecords.map((r) => {
+        const rowCompKey = normalizeCompKey(r.competition);
+        const rowDateKey = normalizeDateIso(r.date || '');
+        const nameMatches =
+          rowCompKey === oldCompKey || aliasKeys.has(rowCompKey);
+        const dateMatches =
+          !oldDateKey || !rowDateKey || rowDateKey === oldDateKey;
+
+        if (nameMatches && dateMatches) {
+          const nextRowDate = nextDate || r.date || '';
+          const nextRowLoc = nextLocation || r.location || '';
+          if (
+            r.competition !== cleanName ||
+            (r.date || '') !== nextRowDate ||
+            (r.location || '') !== nextRowLoc
+          ) {
+            const updatedRow = {
+              ...r,
+              competition: cleanName,
+              date: nextRowDate,
+              dateObj: parseFlexibleDate(nextRowDate),
+              location: nextRowLoc,
+            };
+            changedDbRows.push(updatedRow);
+            return updatedRow;
+          }
+        }
+        return r;
+      });
+
+      if (changedDbRows.length > 0) {
+        updatedDbCount = changedDbRows.length;
+        updateHistoricalRecords(nextHist, changedDbRows, false);
+      }
+    }
+
+    setEditingCompId(null);
+    setBenchmarkStatusMsg(
+      `Updated Master Competition "${cleanName}"${
         updatedDbCount > 0 ? ` and updated ${updatedDbCount} matching DB record(s).` : '.'
       }`
     );
@@ -7905,67 +8000,316 @@ export default function App() {
                       No competitions in Master Competitions yet.
                     </div>
                   ) : (
-                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
-                          <tr>
-                            <th className="py-2.5 px-4">Canonical Competition</th>
-                            <th className="py-2.5 px-4">Date</th>
-                            <th className="py-2.5 px-4">Default Location</th>
-                            <th className="py-2.5 px-4">Saved Aliases</th>
-                            <th className="py-2.5 px-4 text-center">Remove</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {masterCompetitions
-                            .slice()
-                            .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-                            .map((comp) => (
-                              <tr key={comp.id} className="hover:bg-slate-50">
-                                <td className="py-2.5 px-4 font-bold text-slate-900">
-                                  {comp.canonicalName}
-                                </td>
-                                <td className="py-2.5 px-4 font-mono text-slate-600">
-                                  {comp.date || 'Any Date'}
-                                </td>
-                                <td className="py-2.5 px-4 text-slate-600">
-                                  {comp.defaultLocation || '—'}
-                                </td>
-                                <td className="py-2.5 px-4 text-slate-500">
-                                  {(comp.aliases || []).length > 0 ? (
-                                    <div className="flex flex-wrap gap-1">
-                                      {comp.aliases.map((al) => (
-                                        <span
-                                          key={al}
-                                          className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
-                                        >
-                                          {al}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-400 italic">None</span>
-                                  )}
-                                </td>
-                                <td className="py-2.5 px-4 text-center">
-                                  <button
-                                    onClick={() =>
-                                      updateMasterCompetitions(
-                                        masterCompetitions.filter((item) => item.id !== comp.id),
-                                        null,
-                                        comp.id
-                                      )
+                    (() => {
+                      const qComp = compSearchQuery.trim().toLowerCase();
+                      const qCompDate = compFilterDate.trim().toLowerCase();
+                      const dir = compSortConfig.direction === 'asc' ? 1 : -1;
+
+                      const filteredSortedComps = masterCompetitions
+                        .filter((comp) => {
+                          if (qComp) {
+                            const hay = `${comp.canonicalName || ''} ${
+                              comp.defaultLocation || ''
+                            } ${(comp.aliases || []).join(' ')}`.toLowerCase();
+                            if (!hay.includes(qComp)) return false;
+                          }
+                          if (
+                            qCompDate &&
+                            !String(comp.date || '').toLowerCase().includes(qCompDate)
+                          ) {
+                            return false;
+                          }
+                          return true;
+                        })
+                        .slice()
+                        .sort((a, b) => {
+                          switch (compSortConfig.key) {
+                            case 'canonicalName':
+                              return (
+                                String(a.canonicalName || '').localeCompare(
+                                  String(b.canonicalName || '')
+                                ) * dir
+                              );
+                            case 'defaultLocation':
+                              return (
+                                String(a.defaultLocation || '').localeCompare(
+                                  String(b.defaultLocation || '')
+                                ) * dir
+                              );
+                            case 'date':
+                            default: {
+                              const cmp = String(a.date || '').localeCompare(
+                                String(b.date || '')
+                              );
+                              if (cmp !== 0) return cmp * dir;
+                              return String(a.canonicalName || '').localeCompare(
+                                String(b.canonicalName || '')
+                              );
+                            }
+                          }
+                        });
+
+                      const toggleCompSort = (key) => {
+                        setCompSortConfig((prev) => ({
+                          key,
+                          direction:
+                            prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
+                        }));
+                      };
+
+                      return (
+                        <div className="space-y-3">
+                          {/* Competition Search, Date Filter & Count Bar */}
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                              <div className="relative flex-1 min-w-[180px] max-w-xs">
+                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                  type="text"
+                                  value={compSearchQuery}
+                                  onChange={(e) => setCompSearchQuery(e.target.value)}
+                                  placeholder="Search meet, location, or alias..."
+                                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                />
+                              </div>
+
+                              <input
+                                type="text"
+                                value={compFilterDate}
+                                onChange={(e) => setCompFilterDate(e.target.value)}
+                                placeholder="Filter date (e.g., 2026 or 2026-11)"
+                                className="w-48 px-3 py-1.5 text-xs font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                              />
+                            </div>
+
+                            <div className="flex items-center gap-3 text-xs text-slate-600 shrink-0">
+                              <span>
+                                Showing <strong>{filteredSortedComps.length}</strong> of{' '}
+                                <strong>{masterCompetitions.length}</strong>
+                              </span>
+                              {(compSearchQuery || compFilterDate) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCompSearchQuery('');
+                                    setCompFilterDate('');
+                                  }}
+                                  className="font-bold text-cyan-700 hover:underline cursor-pointer"
+                                >
+                                  Reset
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {filteredSortedComps.length === 0 ? (
+                            <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+                              No competitions match your active search or date filter.
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                              <table className="w-full text-left text-xs">
+                                <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px]">
+                                  <tr>
+                                    <th
+                                      onClick={() => toggleCompSort('canonicalName')}
+                                      className="py-2.5 px-4 cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="inline-flex items-center gap-1">
+                                        <span>Canonical Competition</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th
+                                      onClick={() => toggleCompSort('date')}
+                                      className="py-2.5 px-4 cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="inline-flex items-center gap-1">
+                                        <span>Date</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th
+                                      onClick={() => toggleCompSort('defaultLocation')}
+                                      className="py-2.5 px-4 cursor-pointer hover:text-slate-900 select-none"
+                                    >
+                                      <div className="inline-flex items-center gap-1">
+                                        <span>Default Location</span>
+                                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </th>
+                                    <th className="py-2.5 px-4">Saved Aliases</th>
+                                    <th className="py-2.5 px-4 text-center">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {filteredSortedComps.map((comp) => {
+                                    const isEditingComp = editingCompId === comp.id;
+                                    if (isEditingComp) {
+                                      return (
+                                        <tr key={comp.id} className="bg-cyan-50/70">
+                                          <td className="py-2.5 px-4">
+                                            <input
+                                              type="text"
+                                              value={editCompDraft.canonicalName}
+                                              onChange={(e) =>
+                                                setEditCompDraft((prev) => ({
+                                                  ...prev,
+                                                  canonicalName: e.target.value,
+                                                }))
+                                              }
+                                              className="w-full px-2.5 py-1.5 text-xs font-bold bg-white border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                            />
+                                            <label className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan-900 cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={editCompDraft.propagateToDb}
+                                                onChange={(e) =>
+                                                  setEditCompDraft((prev) => ({
+                                                    ...prev,
+                                                    propagateToDb: e.target.checked,
+                                                  }))
+                                                }
+                                                className="rounded text-cyan-600"
+                                              />
+                                              Update matching DB rows
+                                            </label>
+                                          </td>
+                                          <td className="py-2.5 px-4 align-top">
+                                            <input
+                                              type="date"
+                                              value={editCompDraft.date}
+                                              onChange={(e) =>
+                                                setEditCompDraft((prev) => ({
+                                                  ...prev,
+                                                  date: e.target.value,
+                                                }))
+                                              }
+                                              className="px-2 py-1.5 text-xs font-mono bg-white border border-cyan-300 rounded-lg"
+                                            />
+                                          </td>
+                                          <td className="py-2.5 px-4 align-top">
+                                            <input
+                                              type="text"
+                                              value={editCompDraft.defaultLocation}
+                                              onChange={(e) =>
+                                                setEditCompDraft((prev) => ({
+                                                  ...prev,
+                                                  defaultLocation: e.target.value,
+                                                }))
+                                              }
+                                              placeholder="Location..."
+                                              className="w-full px-2.5 py-1.5 text-xs bg-white border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                            />
+                                          </td>
+                                          <td className="py-2.5 px-4 align-top">
+                                            <input
+                                              type="text"
+                                              value={editCompDraft.aliasesText}
+                                              onChange={(e) =>
+                                                setEditCompDraft((prev) => ({
+                                                  ...prev,
+                                                  aliasesText: e.target.value,
+                                                }))
+                                              }
+                                              placeholder="Semicolon or comma separated aliases..."
+                                              className="w-full px-2.5 py-1.5 text-xs bg-white border border-cyan-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                            />
+                                          </td>
+                                          <td className="py-2.5 px-4 text-center align-top">
+                                            <div className="inline-flex items-center gap-1">
+                                              <button
+                                                type="button"
+                                                onClick={() => handleSaveMasterCompetitionEdit(comp)}
+                                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                                              >
+                                                Save
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditingCompId(null)}
+                                                className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                                              >
+                                                Cancel
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      );
                                     }
-                                    className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                        </tbody>
-                      </table>
-                    </div>
+
+                                    return (
+                                      <tr key={comp.id} className="hover:bg-slate-50">
+                                        <td className="py-2.5 px-4 font-bold text-slate-900">
+                                          {comp.canonicalName}
+                                        </td>
+                                        <td className="py-2.5 px-4 font-mono text-slate-600">
+                                          {comp.date || 'Any Date'}
+                                        </td>
+                                        <td className="py-2.5 px-4 text-slate-600">
+                                          {comp.defaultLocation || '—'}
+                                        </td>
+                                        <td className="py-2.5 px-4 text-slate-500">
+                                          {(comp.aliases || []).length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                              {comp.aliases.map((al) => (
+                                                <span
+                                                  key={al}
+                                                  className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]"
+                                                >
+                                                  {al}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-400 italic">None</span>
+                                          )}
+                                        </td>
+                                        <td className="py-2.5 px-4 text-center">
+                                          <div className="inline-flex items-center gap-1.5">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setEditingCompId(comp.id);
+                                                setEditCompDraft({
+                                                  canonicalName: comp.canonicalName || '',
+                                                  date: normalizeDateIso(comp.date || ''),
+                                                  defaultLocation: comp.defaultLocation || '',
+                                                  aliasesText: (comp.aliases || []).join('; '),
+                                                  propagateToDb: true,
+                                                });
+                                              }}
+                                              className="px-2 py-1 rounded text-[11px] font-bold text-cyan-700 hover:bg-cyan-50 border border-cyan-200 cursor-pointer"
+                                            >
+                                              Edit
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateMasterCompetitions(
+                                                  masterCompetitions.filter(
+                                                    (item) => item.id !== comp.id
+                                                  ),
+                                                  null,
+                                                  comp.id
+                                                )
+                                              }
+                                              className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
                   )}
                 </div>
               )}
