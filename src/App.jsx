@@ -6221,7 +6221,35 @@ export default function App() {
             }</div>
               </td>
               <td>${escapeHtml(row.teamName)}</td>
-              <td class="mono right"><strong>${escapeHtml(row.finalsTime)}</strong></td>
+              <td class="mono right">
+                <div><strong>${escapeHtml(row.finalsTime)}</strong></div>
+                ${(() => {
+                  if (
+                    row.isDiving ||
+                    row.isDq ||
+                    !Number.isFinite(row.timeSeconds) ||
+                    !Number.isFinite(row.prelimSeconds)
+                  ) {
+                    return '';
+                  }
+                  const delta = row.timeSeconds - row.prelimSeconds;
+                  const isSame = Math.abs(delta) < 0.005;
+                  const isDrop = delta <= -0.005;
+                  const colorStyle = isSame
+                    ? 'color:#94a3b8'
+                    : isDrop
+                    ? 'color:#059669'
+                    : 'color:#dc2626';
+                  const label = isSame
+                    ? '0.00s'
+                    : `${isDrop ? '' : '+'}${delta.toFixed(2)}s`;
+                  return `<div title="Prelims: ${escapeHtml(
+                    row.prelimTime
+                  )}" style="font-size:0.7rem;font-weight:700;margin-top:2px;${colorStyle}">${escapeHtml(
+                    label
+                  )}</div>`;
+                })()}
+              </td>
               <td class="mono right">${behindLabel}</td>
               <td class="mono center">${row.points > 0 ? row.points : '—'}</td>
               <td class="right">${
