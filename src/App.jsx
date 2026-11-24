@@ -608,6 +608,7 @@ function parseSDIFContent(content) {
 
       // Stop before trailing division/status code (e.g. '0100' or '01' at end of line)
       const isExhibition = /X[A-Z0-9]{2,4}\s*$/i.test(line.slice(145));
+      const isDqLine = /(?:^|\s)(?:DQ|SCR|NS)[YSL]?(?:\s|$)/i.test(timeZoneStr);
       const cleanedTail = tailZone.replace(/\s+\d{4}\s*$/, '').replace(/\s+0\d\s*$/, '').trim();
       const tailTokens = cleanedTail ? cleanedTail.split(/\s+/) : [];
       // Expand glued 3+ digit heat+lane tokens (e.g. "410" -> ["4", "10"], "310" -> ["3", "10"])
@@ -741,7 +742,10 @@ function parseSDIFContent(content) {
       const strokeName = STROKE_MAP[strokeCode] || `Stroke ${strokeCode}`;
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Open';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
+      const isNonFinishStatus = (t) => ['DQ', 'SCR', 'NS'].includes(String(t || '').toUpperCase());
       const effectiveFinalsOrSwimOff = finalsTimeRaw || swimOffTimeRaw;
+      const isDqFinals = isNonFinishStatus(effectiveFinalsOrSwimOff);
+      const isDqPrelims = isNonFinishStatus(prelimTimeRaw);
       const parsedSec = timeToSeconds(effectiveFinalsOrSwimOff);
       const parsedPrelimSec = timeToSeconds(prelimTimeRaw);
       const parsedSeedSec = timeToSeconds(seedTimeRaw);
@@ -765,7 +769,11 @@ function parseSDIFContent(content) {
         eventNumber: parsedEventNum,
         isTimeTrial: isTimeTrialEvent,
         isSwimOff: isSwimOffEvent,
-        isExhibition: isExhibition || (prelimPlace === null && place === null && tailTokens[4] === '0'),
+        isDq: isDqFinals || isDqPrelims || isDqLine,
+        isExhibition:
+          !isDqFinals &&
+          !isDqPrelims &&
+          (isExhibition || (prelimPlace === null && place === null && tailTokens[4] === '0')),
         eventLabel,
         swimDate: swimIsoDate || meetInfo.isoDate || '',
         seedTime: seedTimeRaw || '',
@@ -774,7 +782,7 @@ function parseSDIFContent(content) {
         prelimSeconds: parsedPrelimSec === null ? Infinity : parsedPrelimSec,
         prelimHeat,
         prelimLane,
-        prelimPlace,
+        prelimPlace: isDqPrelims ? null : prelimPlace,
         swimOffTime: swimOffTimeRaw || '',
         finalsOnlyTime: effectiveFinalsOrSwimOff || '',
         finalsTime: displayFallbackTime,
@@ -782,8 +790,8 @@ function parseSDIFContent(content) {
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
         heat,
         lane,
-        place: place || null,
-        points,
+        place: isDqFinals ? null : place || null,
+        points: isDqFinals ? 0 : points,
         splitInterval: 50,
         splitType: 'C',
         splitPages: [],
@@ -849,6 +857,14 @@ function parseSDIFContent(content) {
       const prelimTimeRaw = sliceCol(line, 56, 63);
       const finalsTimeRaw = sliceCol(line, 72, 80);
       const courseCode = sliceCol(line, 81, 81);
+      const relayStatusMatch = line
+        .slice(55, 83)
+        .match(/\b(DQ|SCR|NS)[YSL]?\b/i);
+      const isRelayDq =
+        ['DQ', 'SCR', 'NS'].includes(String(finalsTimeRaw || '').toUpperCase()) ||
+        Boolean(relayStatusMatch);
+      const resolvedRelayFinalsRaw =
+        finalsTimeRaw || (relayStatusMatch ? relayStatusMatch[1].toUpperCase() : '');
 
       const tailZone = line.slice(81, 125).replace(/\s+\d{4}[A-Z]?\s*$/, '').trim();
       const tailTokens = tailZone ? tailZone.split(/\s+/) : [];
@@ -881,7 +897,7 @@ function parseSDIFContent(content) {
       const strokeName = STROKE_MAP[strokeCode] || 'Relay';
       const genderLabel = GENDER_MAP[genderCode] || genderCode || 'Mixed';
       const eventLabel = `${genderLabel} ${distance} ${strokeName}`;
-      const parsedSec = timeToSeconds(finalsTimeRaw);
+      const parsedSec = timeToSeconds(resolvedRelayFinalsRaw);
       const parsedPrelimSec = timeToSeconds(prelimTimeRaw);
       const parsedSeedSec = timeToSeconds(seedTimeRaw);
 
@@ -899,6 +915,7 @@ function parseSDIFContent(content) {
         strokeName,
         eventNumber: parsedRelayEventNum,
         isTimeTrial: isRelayTimeTrial,
+        isDq: isRelayDq,
         eventLabel,
         swimDate: relayIsoDate || meetInfo.isoDate || '',
         seedTime: seedTimeRaw || '',
@@ -906,15 +923,15 @@ function parseSDIFContent(content) {
         prelimTime: prelimTimeRaw || '',
         prelimSeconds: parsedPrelimSec === null ? Infinity : parsedPrelimSec,
         prelimPlace,
-        finalsOnlyTime: finalsTimeRaw || '',
-        finalsTime: finalsTimeRaw || prelimTimeRaw || 'NT',
+        finalsOnlyTime: resolvedRelayFinalsRaw || '',
+        finalsTime: resolvedRelayFinalsRaw || prelimTimeRaw || 'NT',
         timeSeconds:
           parsedSec !== null ? parsedSec : parsedPrelimSec !== null ? parsedPrelimSec : Infinity,
         course: COURSE_MAP[courseCode] || courseCode || 'SCY',
         heat,
         lane,
-        place,
-        points,
+        place: isRelayDq ? null : place,
+        points: isRelayDq ? 0 : points,
         splitInterval: 50,
         splitType: 'C',
         splitPages: [],
@@ -4996,22 +5013,27 @@ export default function App() {
 
       if (!hasPrelims) {
         // Standard Timed-Final / Dual-Meet / Time-Trial / Swim-Off Single Card
-        const swims = ev.rawRows.map((r) => ({
-          ...r,
-          displayId: r.id,
-          displayRound: r.isSwimOff ? 'Swim-Off' : r.isTimeTrial ? 'Time Trial' : 'Finals',
-          displayPlace: r.isTimeTrial || r.isSwimOff ? null : r.place,
-          displayTime: r.finalsTime,
-          displaySeconds: r.timeSeconds,
-          displayHeat: r.heat,
-          displayLane: r.lane,
-          displayPoints: r.isSwimOff || r.isTimeTrial ? 0 : r.points,
-          displaySplits: r.splits || [],
-          finalTierRank: 1,
-          finalTierLabel: '',
-        }));
+        const swims = ev.rawRows.map((r) => {
+          const rowIsDq = ['DQ', 'SCR', 'NS'].includes(String(r.finalsTime || '').toUpperCase());
+          return {
+            ...r,
+            displayId: r.id,
+            displayRound: r.isSwimOff ? 'Swim-Off' : r.isTimeTrial ? 'Time Trial' : 'Finals',
+            displayPlace: rowIsDq || r.isTimeTrial || r.isSwimOff ? null : r.place,
+            displayTime: r.finalsTime,
+            displaySeconds: rowIsDq ? Infinity : r.timeSeconds,
+            displayHeat: r.heat,
+            displayLane: r.lane,
+            displayPoints: rowIsDq || r.isSwimOff || r.isTimeTrial ? 0 : r.points,
+            displaySplits: r.splits || [],
+            isDqRow: rowIsDq,
+            finalTierRank: 1,
+            finalTierLabel: '',
+          };
+        });
 
         swims.sort((a, b) => {
+          if (Boolean(a.isDqRow) !== Boolean(b.isDqRow)) return a.isDqRow ? 1 : -1;
           const dir = sortConfig.direction === 'asc' ? 1 : -1;
           if (sortConfig.key === 'swimmerName') return a.swimmerName.localeCompare(b.swimmerName) * dir;
           if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
@@ -5056,25 +5078,29 @@ export default function App() {
       const finalsSwims = ev.rawRows
         .filter(
           (r) =>
-            Boolean(r.finalsOnlyTime && !['NT', 'DQ', 'SCR', 'NS'].includes(r.finalsOnlyTime))
+            Boolean(r.finalsOnlyTime && !['NT', 'SCR', 'NS'].includes(r.finalsOnlyTime))
         )
         .map((r) => {
-          const fSec = timeToSeconds(r.finalsOnlyTime);
-          const tier = getFinalHeatTierInfo(r.heat, r.place, maxFinalHeat);
+          const rowIsDq = ['DQ', 'SCR', 'NS'].includes(
+            String(r.finalsOnlyTime || '').toUpperCase()
+          );
+          const fSec = rowIsDq ? null : timeToSeconds(r.finalsOnlyTime);
+          const tier = getFinalHeatTierInfo(r.heat, rowIsDq ? null : r.place, maxFinalHeat);
           return {
             ...r,
             displayId: `${r.id}-F`,
             displayRound: 'Finals',
-            displayPlace: r.place,
+            displayPlace: rowIsDq ? null : r.place,
             displayTime: r.finalsOnlyTime,
             displaySeconds: fSec === null ? Infinity : fSec,
             displayHeat: r.heat,
             displayLane: r.lane,
-            displayPoints: r.points,
+            displayPoints: rowIsDq ? 0 : r.points,
             displaySplits:
               r.finalsSplits && r.finalsSplits.length > 0 ? r.finalsSplits : r.splits || [],
-            finalTierRank: tier.tierRank,
-            finalTierLabel: tier.label,
+            isDqRow: rowIsDq,
+            finalTierRank: rowIsDq ? 999 : tier.tierRank,
+            finalTierLabel: rowIsDq ? '' : tier.label,
           };
         });
 
@@ -5085,12 +5111,13 @@ export default function App() {
         sortConfig.key !== 'time';
 
       finalsSwims.sort((a, b) => {
+        if (Boolean(a.isDqRow) !== Boolean(b.isDqRow)) return a.isDqRow ? 1 : -1;
         const dir = sortConfig.direction === 'asc' ? 1 : -1;
         if (sortConfig.key === 'swimmerName') return a.swimmerName.localeCompare(b.swimmerName) * dir;
         if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
         if (sortConfig.key === 'time') return (a.displaySeconds - b.displaySeconds) * dir;
 
-        // Default & Place sort: group by A Final (Heat 1) -> B Final (Heat 2) -> C Final (Heat 3), then place
+        // Default & Place sort: group by A Final -> B Final -> C Final, then place
         if (a.finalTierRank !== b.finalTierRank) {
           return (a.finalTierRank - b.finalTierRank) * (sortConfig.key === 'place' ? dir : 1);
         }
@@ -5119,16 +5146,17 @@ export default function App() {
       const prelimSwims = ev.rawRows
         .filter(
           (r) =>
-            Boolean(r.prelimTime && !['NT', 'DQ', 'SCR', 'NS'].includes(r.prelimTime)) ||
+            Boolean(r.prelimTime && !['NT', 'SCR', 'NS'].includes(r.prelimTime)) ||
             r.prelimPlace !== null
         )
         .map((r) => {
-          const pSec = timeToSeconds(r.prelimTime);
+          const rowIsDq = ['DQ', 'SCR', 'NS'].includes(String(r.prelimTime || '').toUpperCase());
+          const pSec = rowIsDq ? null : timeToSeconds(r.prelimTime);
           return {
             ...r,
             displayId: `${r.id}-P`,
             displayRound: 'Prelims',
-            displayPlace: r.prelimPlace,
+            displayPlace: rowIsDq ? null : r.prelimPlace,
             displayTime: r.prelimTime || 'NT',
             displaySeconds: pSec === null ? Infinity : pSec,
             displayHeat: r.prelimHeat,
@@ -5140,12 +5168,14 @@ export default function App() {
                 : !r.finalsOnlyTime
                 ? r.splits || []
                 : [],
+            isDqRow: rowIsDq,
             finalTierRank: 1,
             finalTierLabel: '',
           };
         });
 
       prelimSwims.sort((a, b) => {
+        if (Boolean(a.isDqRow) !== Boolean(b.isDqRow)) return a.isDqRow ? 1 : -1;
         const dir = sortConfig.direction === 'asc' ? 1 : -1;
         if (sortConfig.key === 'swimmerName') return a.swimmerName.localeCompare(b.swimmerName) * dir;
         if (sortConfig.key === 'teamName') return a.teamName.localeCompare(b.teamName) * dir;
@@ -5232,6 +5262,14 @@ export default function App() {
 
     groups.forEach((group) => {
       group.relays.sort((a, b) => {
+        const aIsDq = Boolean(
+          a.isDq || ['DQ', 'SCR', 'NS'].includes(String(a.finalsTime || '').toUpperCase())
+        );
+        const bIsDq = Boolean(
+          b.isDq || ['DQ', 'SCR', 'NS'].includes(String(b.finalsTime || '').toUpperCase())
+        );
+        if (aIsDq !== bIsDq) return aIsDq ? 1 : -1;
+
         if (sortConfig.key === 'swimmerName') {
           const dir = sortConfig.direction === 'asc' ? 1 : -1;
           return a.relayTitle.localeCompare(b.relayTitle) * dir;
@@ -13402,7 +13440,14 @@ export default function App() {
                                             )}
                                           </td>
                                           <td className="py-3 px-3 text-center">
-                                            {row.isExhibition ? (
+                                            {row.isDqRow ? (
+                                              <span
+                                                title="Disqualified"
+                                                className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-red-100 text-red-800 border border-red-300"
+                                              >
+                                                DQ
+                                              </span>
+                                            ) : row.isExhibition ? (
                                               <span
                                                 title="Exhibition Swim"
                                                 className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-slate-200/80 text-slate-600 border border-slate-300"
@@ -13872,7 +13917,17 @@ export default function App() {
                                             )}
                                           </td>
                                           <td className="py-3 px-3 text-center">
-                                            {!eventGroup.isTimeTrial && relay.place ? (
+                                            {relay.isDq ||
+                                            ['DQ', 'SCR', 'NS'].includes(
+                                              String(relay.finalsTime || '').toUpperCase()
+                                            ) ? (
+                                              <span
+                                                title="Disqualified"
+                                                className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-red-100 text-red-800 border border-red-300"
+                                              >
+                                                DQ
+                                              </span>
+                                            ) : !eventGroup.isTimeTrial && relay.place ? (
                                               <span
                                                 className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
                                                   relay.place === 1
