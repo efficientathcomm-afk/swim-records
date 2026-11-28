@@ -1867,6 +1867,7 @@ export default function App() {
   const [simGenderView, setSimGenderView] = useState('ALL'); // 'ALL' | 'Women' | 'Men'
   const [simCustomOrders, setSimCustomOrders] = useState({}); // { [eventKey]: string[] of entry ids }
   const [simScratchedIds, setSimScratchedIds] = useState(new Set());
+  const [liveMeetPlaceOverrides, setLiveMeetPlaceOverrides] = useState({}); // { [entry.id]: '1'..'8' | 'DQ' }
 
   const [profileSwimmerName, setProfileSwimmerName] = useState(null);
   const [profileChartEventKey, setProfileChartEventKey] = useState('');
@@ -3777,6 +3778,7 @@ export default function App() {
       setExcludedMeetCommitIds(new Set());
       setSimCustomOrders({});
       setSimScratchedIds(new Set());
+      setLiveMeetPlaceOverrides({});
 
       // Assign default distinct hex colors to any teams not yet configured
       const palette = [
@@ -7285,6 +7287,141 @@ export default function App() {
     };
   }, []);
 
+  // Live Running Dual-Meet Team Scores & Earlier-Event Finishes (Official .CL2 + 1-Tap Place Overrides)
+  const liveMeetTracker = useMemo(() => {
+    if (!parsedData) {
+      return {
+        teamScores: [],
+        liveTapCount: 0,
+        earlierFinishesBySwimmer: new Map(),
+      };
+    }
+
+    const indPtsTable = simScoringFormat === 'DUAL_6' ? [6, 4, 3, 2, 1] : [9, 4, 3, 2, 1];
+    const relPtsTable = simScoringFormat === 'DUAL_6' ? [8, 4, 2] : [11, 4, 2];
+
+    const scoreMap = new Map();
+    parsedData.teams.forEach((t) => {
+      scoreMap.set(t.code, {
+        code: t.code,
+        name: t.name,
+        women: 0,
+        men: 0,
+        total: 0,
+      });
+    });
+
+    const addPts = (teamCode, gender, pts) => {
+      if (!pts || pts <= 0) return;
+      if (!scoreMap.has(teamCode)) {
+        scoreMap.set(teamCode, { code: teamCode, name: teamCode, women: 0, men: 0, total: 0 });
+      }
+      const obj = scoreMap.get(teamCode);
+      if (gender === 'Women') obj.women += pts;
+      else if (gender === 'Men') obj.men += pts;
+      obj.total += pts;
+    };
+
+    const earlierFinishesBySwimmer = new Map();
+    const recordEarlierFinish = (swKey, eventNum, eventLabel, placeNum) => {
+      if (!swKey || placeNum < 1 || placeNum > 3) return;
+      if (!earlierFinishesBySwimmer.has(swKey)) {
+        earlierFinishesBySwimmer.set(swKey, []);
+      }
+      earlierFinishesBySwimmer.get(swKey).push({
+        eventNumber: Number(eventNum) || 999,
+        eventLabel,
+        place: placeNum,
+      });
+    };
+
+    const getEffectivePlace = (entry) => {
+      if (entry.isDq) return 'DQ';
+      if (typeof entry.place === 'number' && entry.place > 0) return String(entry.place);
+      return liveMeetPlaceOverrides[entry.id] || '';
+    };
+
+    const eventBuckets = new Map();
+    const pushBucketEntry = (entry, isRelay) => {
+      if (entry.isExhibition || entry.isTimeTrial || entry.isSwimOff) return;
+      const effPlace = getEffectivePlace(entry);
+      if (!effPlace) return;
+
+      const k = `${entry.eventNumber}|${entry.eventLabel}`;
+      if (!eventBuckets.has(k)) {
+        eventBuckets.set(k, {
+          eventNumber: Number(entry.eventNumber) || 999,
+          eventLabel: entry.eventLabel,
+          gender: entry.genderLabel,
+          isRelay,
+          items: [],
+        });
+      }
+      eventBuckets.get(k).items.push({ entry, effPlace });
+    };
+
+    parsedData.individualResults.forEach((r) => pushBucketEntry(r, false));
+    parsedData.relayResults.forEach((r) => pushBucketEntry(r, true));
+
+    eventBuckets.forEach((bucket) => {
+      const hasOfficialPts = bucket.items.some((it) => Number(it.entry.points) > 0);
+      if (hasOfficialPts) {
+        bucket.items.forEach(({ entry, effPlace }) => {
+          addPts(entry.teamCode, bucket.gender, Number(entry.points) || 0);
+          const pNum = parseInt(effPlace, 10);
+          if (!bucket.isRelay && !Number.isNaN(pNum)) {
+            const disp = formatSwimmerDisplay(entry.swimmerName, entry.preferredFirst);
+            const m = resolveMasterAthlete(disp);
+            recordEarlierFinish(
+              normalizeSwimmerKey(m ? m.canonicalName : disp),
+              bucket.eventNumber,
+              bucket.eventLabel,
+              pNum
+            );
+          }
+        });
+        return;
+      }
+
+      // Score from live-tapped or placed entries using dual-meet scoring rules
+      const validPlaced = bucket.items
+        .filter((it) => /^\d+$/.test(it.effPlace))
+        .map((it) => ({ ...it, placeNum: parseInt(it.effPlace, 10) }))
+        .sort((a, b) => a.placeNum - b.placeNum);
+
+      const maxPerTeam = bucket.isRelay ? 2 : 3;
+      const ptsScale = bucket.isRelay ? relPtsTable : indPtsTable;
+      const teamCounts = new Map();
+      let slotIdx = 0;
+
+      validPlaced.forEach(({ entry, placeNum }) => {
+        if (!bucket.isRelay) {
+          const disp = formatSwimmerDisplay(entry.swimmerName, entry.preferredFirst);
+          const m = resolveMasterAthlete(disp);
+          recordEarlierFinish(
+            normalizeSwimmerKey(m ? m.canonicalName : disp),
+            bucket.eventNumber,
+            bucket.eventLabel,
+            placeNum
+          );
+        }
+
+        const cnt = teamCounts.get(entry.teamCode) || 0;
+        if (cnt < maxPerTeam && slotIdx < ptsScale.length) {
+          addPts(entry.teamCode, bucket.gender, ptsScale[slotIdx]);
+          teamCounts.set(entry.teamCode, cnt + 1);
+          slotIdx += 1;
+        }
+      });
+    });
+
+    return {
+      teamScores: Array.from(scoreMap.values()).sort((a, b) => b.total - a.total),
+      liveTapCount: Object.keys(liveMeetPlaceOverrides).length,
+      earlierFinishesBySwimmer,
+    };
+  }, [parsedData, liveMeetPlaceOverrides, simScoringFormat, masterRoster]);
+
   // ============================================================================
   // RENDER
   // ============================================================================
@@ -9235,6 +9372,109 @@ export default function App() {
                                   </button>
                                 </div>
                               </div>
+
+                              {/* Live Running Team Score Strip */}
+                              {liveMeetTracker.teamScores.length > 0 && (
+                                <div className="pt-2.5 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+                                  <div className="flex flex-wrap items-center gap-2.5">
+                                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-300">
+                                      Live Score:
+                                    </span>
+
+                                    {/* Women's Live Score Pill */}
+                                    <div className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-950/60 border border-rose-500/40">
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-rose-300">
+                                        Women
+                                      </span>
+                                      {liveMeetTracker.teamScores
+                                        .slice()
+                                        .sort((a, b) => b.women - a.women)
+                                        .map((ts, idx) => (
+                                          <span
+                                            key={`live-w-${ts.code}`}
+                                            className="inline-flex items-center gap-1 font-mono"
+                                          >
+                                            {idx > 0 && (
+                                              <span className="text-rose-400/60 mx-0.5">•</span>
+                                            )}
+                                            <span
+                                              className="w-2 h-2 rounded-full"
+                                              style={{
+                                                backgroundColor: getTeamHexColor(ts.code, ts.name),
+                                              }}
+                                            />
+                                            <span className="font-sans font-bold text-slate-200">
+                                              {ts.name}
+                                            </span>
+                                            <strong className="text-sm text-white">
+                                              {ts.women}
+                                            </strong>
+                                          </span>
+                                        ))}
+                                    </div>
+
+                                    {/* Men's Live Score Pill */}
+                                    <div className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-sky-950/60 border border-sky-500/40">
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-sky-300">
+                                        Men
+                                      </span>
+                                      {liveMeetTracker.teamScores
+                                        .slice()
+                                        .sort((a, b) => b.men - a.men)
+                                        .map((ts, idx) => (
+                                          <span
+                                            key={`live-m-${ts.code}`}
+                                            className="inline-flex items-center gap-1 font-mono"
+                                          >
+                                            {idx > 0 && (
+                                              <span className="text-sky-400/60 mx-0.5">•</span>
+                                            )}
+                                            <span
+                                              className="w-2 h-2 rounded-full"
+                                              style={{
+                                                backgroundColor: getTeamHexColor(ts.code, ts.name),
+                                              }}
+                                            />
+                                            <span className="font-sans font-bold text-slate-200">
+                                              {ts.name}
+                                            </span>
+                                            <strong className="text-sm text-white">{ts.men}</strong>
+                                          </span>
+                                        ))}
+                                    </div>
+
+                                    {/* Secondary Combined Total */}
+                                    <span className="text-[11px] font-mono text-slate-400 px-2 py-1 rounded-lg bg-slate-800/70 border border-slate-700/80">
+                                      Combined:{' '}
+                                      {liveMeetTracker.teamScores
+                                        .map((ts) => `${ts.name} ${ts.total}`)
+                                        .join(' – ')}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    {liveMeetTracker.liveTapCount > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setLiveMeetPlaceOverrides({})}
+                                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-amber-300 border border-slate-700 cursor-pointer"
+                                      >
+                                        Clear Taps ({liveMeetTracker.liveTapCount})
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsHeatSheetFullscreen(false);
+                                        setInMeetSubTab('scoresim');
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/40 text-[11px] font-bold text-emerald-300 border border-emerald-500/30 cursor-pointer"
+                                    >
+                                      Simulator →
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
 
                             {/* Broadcast 1920x1080 PNG Graphics Export Controls & Header Standards (hidden in Full Screen) */}
@@ -9480,6 +9720,7 @@ export default function App() {
                                     <th className="py-2.5 px-3">Last Swim</th>
                                     <th className="py-2.5 px-3">Trajectory &amp; Form</th>
                                     <th className="py-2.5 px-3">All-Time &amp; Milestones</th>
+                                    <th className="py-2.5 px-3">Finish / Live Tap</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -9491,7 +9732,7 @@ export default function App() {
                                           <td className="py-3 px-3 text-center font-mono text-base font-black">
                                             {laneNum}
                                           </td>
-                                          <td colSpan={6} className="py-3 px-3 italic">
+                                          <td colSpan={7} className="py-3 px-3 italic">
                                             Open / Empty Lane
                                           </td>
                                         </tr>
@@ -9828,6 +10069,36 @@ export default function App() {
                                       });
                                     }
 
+                                    // Earlier-Event Live Finish Context (e.g., "Won 1000 Freestyle earlier")
+                                    if (!isRelayEvent) {
+                                      const priorSwimsToday = (
+                                        liveMeetTracker.earlierFinishesBySwimmer.get(swKey) || []
+                                      ).filter((f) => f.eventNumber < Number(activeEventObj?.num));
+                                      priorSwimsToday.forEach((pf) => {
+                                        const cleanEvName = pf.eventLabel.replace(
+                                          /^(Women|Men)\s+/i,
+                                          ''
+                                        );
+                                        const ord =
+                                          pf.place === 1
+                                            ? 'Won'
+                                            : pf.place === 2
+                                            ? '2nd in'
+                                            : '3rd in';
+                                        milestoneBullets.unshift(
+                                          `${ord} ${cleanEvName} earlier today`
+                                        );
+                                      });
+                                    }
+
+                                    const officialPlaceVal = entry.isDq
+                                      ? 'DQ'
+                                      : typeof entry.place === 'number' && entry.place > 0
+                                      ? String(entry.place)
+                                      : '';
+                                    const liveTappedVal = liveMeetPlaceOverrides[entry.id] || '';
+                                    const activeFinishVal = officialPlaceVal || liveTappedVal;
+
                                     return (
                                       <tr
                                         key={laneNum}
@@ -9973,6 +10244,60 @@ export default function App() {
                                             milestoneBullets.length === 0 && (
                                               <span className="text-slate-400 text-[11px]">—</span>
                                             )}
+                                        </td>
+                                        <td className="py-3 px-3 align-middle">
+                                          {officialPlaceVal ? (
+                                            <span
+                                              title="Official .CL2 Result"
+                                              className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-extrabold ${
+                                                officialPlaceVal === 'DQ'
+                                                  ? 'bg-red-100 text-red-800 border border-red-200'
+                                                  : officialPlaceVal === '1'
+                                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                                  : 'bg-slate-100 text-slate-800 border border-slate-200'
+                                              }`}
+                                            >
+                                              {officialPlaceVal === 'DQ'
+                                                ? 'DQ (Official)'
+                                                : `#${officialPlaceVal} Official`}
+                                            </span>
+                                          ) : (
+                                            <div className="flex flex-wrap gap-1 max-w-[168px]">
+                                              {['1', '2', '3', '4', '5', '6', '7', '8', 'DQ'].map(
+                                                (opt) => {
+                                                  const isChosen = activeFinishVal === opt;
+                                                  return (
+                                                    <button
+                                                      key={opt}
+                                                      type="button"
+                                                      onClick={() => {
+                                                        setLiveMeetPlaceOverrides((prev) => {
+                                                          const next = { ...prev };
+                                                          if (next[entry.id] === opt) {
+                                                            delete next[entry.id];
+                                                          } else {
+                                                            next[entry.id] = opt;
+                                                          }
+                                                          return next;
+                                                        });
+                                                      }}
+                                                      className={`min-w-[30px] min-h-[30px] px-1.5 rounded-md text-[11px] font-mono font-extrabold transition cursor-pointer border ${
+                                                        isChosen
+                                                          ? opt === 'DQ'
+                                                            ? 'bg-red-600 text-white border-red-600'
+                                                            : opt === '1'
+                                                            ? 'bg-amber-500 text-slate-950 border-amber-500'
+                                                            : 'bg-cyan-600 text-white border-cyan-600'
+                                                          : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                                                      }`}
+                                                    >
+                                                      {opt}
+                                                    </button>
+                                                  );
+                                                }
+                                              )}
+                                            </div>
+                                          )}
                                         </td>
                                       </tr>
                                     );
@@ -10733,13 +11058,21 @@ export default function App() {
                         const useSeed =
                           simTimeBasis === 'SEED' ||
                           (simTimeBasis === 'AUTO' && !isFinite(r.timeSeconds));
+                        const livePlace = liveMeetPlaceOverrides[r.id] || '';
                         const sec = useSeed ? r.seedSeconds : r.timeSeconds;
-                        const dispTime = useSeed ? r.seedTime || 'NT' : r.finalsTime || 'NT';
+                        const dispTime = livePlace
+                          ? livePlace === 'DQ'
+                            ? 'DQ (Live)'
+                            : `#${livePlace} (Live)`
+                          : useSeed
+                          ? r.seedTime || 'NT'
+                          : r.finalsTime || 'NT';
                         eventGroupsMap.get(k).entries.push({
                           id: r.id,
                           name: formatSwimmerDisplay(r.swimmerName, r.preferredFirst),
                           teamCode: r.teamCode,
                           teamName: r.teamName,
+                          livePlace,
                           sec: isFinite(sec) ? sec : Infinity,
                           dispTime,
                         });
@@ -10762,13 +11095,21 @@ export default function App() {
                         const useSeed =
                           simTimeBasis === 'SEED' ||
                           (simTimeBasis === 'AUTO' && !isFinite(r.timeSeconds));
+                        const livePlace = liveMeetPlaceOverrides[r.id] || '';
                         const sec = useSeed ? r.seedSeconds : r.timeSeconds;
-                        const dispTime = useSeed ? r.seedTime || 'NT' : r.finalsTime || 'NT';
+                        const dispTime = livePlace
+                          ? livePlace === 'DQ'
+                            ? 'DQ (Live)'
+                            : `#${livePlace} (Live)`
+                          : useSeed
+                          ? r.seedTime || 'NT'
+                          : r.finalsTime || 'NT';
                         eventGroupsMap.get(k).entries.push({
                           id: r.id,
                           name: r.relayTitle,
                           teamCode: r.teamCode,
                           teamName: r.teamName,
+                          livePlace,
                           sec: isFinite(sec) ? sec : Infinity,
                           dispTime,
                         });
@@ -10779,14 +11120,31 @@ export default function App() {
                       );
 
                       orderedSimEvents.forEach((ev) => {
-                        ev.entries.sort((a, b) => a.sec - b.sec);
+                        ev.entries.sort((a, b) => {
+                          if (a.livePlace === 'DQ' && b.livePlace !== 'DQ') return 1;
+                          if (b.livePlace === 'DQ' && a.livePlace !== 'DQ') return -1;
+                          const aLiveNum = /^\d+$/.test(a.livePlace)
+                            ? parseInt(a.livePlace, 10)
+                            : null;
+                          const bLiveNum = /^\d+$/.test(b.livePlace)
+                            ? parseInt(b.livePlace, 10)
+                            : null;
+                          if (aLiveNum !== null && bLiveNum !== null) return aLiveNum - bLiveNum;
+                          if (aLiveNum !== null) return -1;
+                          if (bLiveNum !== null) return 1;
+                          return a.sec - b.sec;
+                        });
                         const teamScorerCount = new Map();
                         const maxPerTeam = ev.isRelay ? 2 : 3;
                         const ptsScale = ev.isRelay ? relPtsTable : indPtsTable;
                         let scoreSlot = 0;
 
                         ev.entries.forEach((ent) => {
-                          if (!isFinite(ent.sec)) {
+                          if (ent.livePlace === 'DQ') {
+                            ent.simPts = 0;
+                            return;
+                          }
+                          if (!/^\d+$/.test(ent.livePlace) && !isFinite(ent.sec)) {
                             ent.simPts = 0;
                             return;
                           }
@@ -10810,29 +11168,33 @@ export default function App() {
 
                       return (
                         <div className="space-y-4">
+                          {/* Simulator Controls */}
                           <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs">
                             <div className="flex flex-wrap items-center gap-2">
-                              <select
-                                value={simScoringFormat}
-                                onChange={(e) => setSimScoringFormat(e.target.value)}
-                                className="px-2.5 py-1.5 font-bold bg-white border border-slate-200 rounded-lg"
-                              >
-                                <option value="DUAL_9">Dual 16-Event (9-4-3-2-1 / 11-4-2)</option>
-                                <option value="DUAL_6">Dual 11-Event (6-4-3-2-1 / 8-4-2)</option>
-                              </select>
                               <select
                                 value={simTimeBasis}
                                 onChange={(e) => setSimTimeBasis(e.target.value)}
                                 className="px-2.5 py-1.5 font-bold bg-white border border-slate-200 rounded-lg"
                               >
-                                <option value="AUTO">Auto (Finals if swum, else Seed)</option>
-                                <option value="SEED">Seed / Entry Times Only</option>
-                                <option value="FINALS">Finals Times Only</option>
+                                <option value="AUTO">Time Basis: Auto (Live/Finals → Seed)</option>
+                                <option value="SEED">Time Basis: Seed Times Only</option>
+                                <option value="FINALS">Time Basis: Finals Times Only</option>
                               </select>
+
+                              <select
+                                value={simScoringFormat}
+                                onChange={(e) => setSimScoringFormat(e.target.value)}
+                                className="px-2.5 py-1.5 font-bold bg-white border border-slate-200 rounded-lg"
+                              >
+                                <option value="DUAL_9">Scoring: 9-4-3-2-1 / 11-4-2</option>
+                                <option value="DUAL_6">Scoring: 6-4-3-2-1 / 8-4-2</option>
+                              </select>
+
                               <div className="flex bg-slate-200/70 p-0.5 rounded-lg font-bold">
                                 {['ALL', 'Women', 'Men'].map((g) => (
                                   <button
                                     key={g}
+                                    type="button"
                                     onClick={() => setSimGenderView(g)}
                                     className={`px-2.5 py-1 rounded-md cursor-pointer ${
                                       simGenderView === g
@@ -10850,39 +11212,91 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() => setSimScratchedIds(new Set())}
-                                className="font-bold text-indigo-700 hover:underline cursor-pointer"
+                                className="px-3 py-1.5 rounded-lg font-bold bg-amber-100 text-amber-900 cursor-pointer"
                               >
                                 Restore {simScratchedIds.size} Scratched
                               </button>
                             )}
                           </div>
 
-                          {/* Simulated Score Summary */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {Array.from(teamTotals.values())
-                              .sort((a, b) => b.total - a.total)
-                              .map((t) => (
-                                <div
-                                  key={t.code}
-                                  style={{
-                                    borderLeft: `4px solid ${getTeamHexColor(t.code, t.name)}`,
-                                  }}
-                                  className="p-3.5 rounded-xl border border-slate-200 bg-white flex items-center justify-between"
-                                >
-                                  <div>
-                                    <div className="font-extrabold text-sm text-slate-900">
-                                      {t.name}
-                                    </div>
-                                    <div className="text-[11px] text-slate-500">
-                                      Women: {t.women} • Men: {t.men}
-                                    </div>
-                                  </div>
-                                  <div className="text-2xl font-black font-mono text-slate-900">
-                                    {t.total}
-                                  </div>
+                          {/* Simulated Score Summary (Women & Men Highlighted, Combined Secondary) */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {simGenderView !== 'Men' && (
+                              <div className="p-3.5 rounded-xl border border-rose-200 bg-rose-50/40 space-y-2">
+                                <div className="text-[11px] font-extrabold uppercase tracking-wider text-rose-800">
+                                  Women&apos;s Projected Score
                                 </div>
-                              ))}
+                                <div className="space-y-1.5">
+                                  {Array.from(teamTotals.values())
+                                    .sort((a, b) => b.women - a.women)
+                                    .map((t) => (
+                                      <div
+                                        key={`sim-w-${t.code}`}
+                                        style={{
+                                          borderLeft: `4px solid ${getTeamHexColor(t.code, t.name)}`,
+                                        }}
+                                        className="px-3 py-2 rounded-lg bg-white border border-slate-200 flex items-center justify-between"
+                                      >
+                                        <span className="font-bold text-xs text-slate-900">
+                                          {t.name}
+                                        </span>
+                                        <span className="text-lg font-black font-mono text-slate-900">
+                                          {t.women}
+                                        </span>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {simGenderView !== 'Women' && (
+                              <div className="p-3.5 rounded-xl border border-sky-200 bg-sky-50/40 space-y-2">
+                                <div className="text-[11px] font-extrabold uppercase tracking-wider text-sky-800">
+                                  Men&apos;s Projected Score
+                                </div>
+                                <div className="space-y-1.5">
+                                  {Array.from(teamTotals.values())
+                                    .sort((a, b) => b.men - a.men)
+                                    .map((t) => (
+                                      <div
+                                        key={`sim-m-${t.code}`}
+                                        style={{
+                                          borderLeft: `4px solid ${getTeamHexColor(t.code, t.name)}`,
+                                        }}
+                                        className="px-3 py-2 rounded-lg bg-white border border-slate-200 flex items-center justify-between"
+                                      >
+                                        <span className="font-bold text-xs text-slate-900">
+                                          {t.name}
+                                        </span>
+                                        <span className="text-lg font-black font-mono text-slate-900">
+                                          {t.men}
+                                        </span>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
+
+                          {simGenderView === 'ALL' && (
+                            <div className="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                              <span className="font-bold uppercase tracking-wider text-[10px]">
+                                Combined Meet Total (Secondary)
+                              </span>
+                              <div className="flex flex-wrap items-center gap-3 font-mono">
+                                {Array.from(teamTotals.values())
+                                  .sort((a, b) => b.total - a.total)
+                                  .map((t) => (
+                                    <span key={`sim-comb-${t.code}`}>
+                                      <span className="font-sans font-semibold text-slate-700">
+                                        {t.name}:
+                                      </span>{' '}
+                                      <strong className="text-slate-800">{t.total}</strong>
+                                    </span>
+                                  ))}
+                              </div>
+                            </div>
+                          )}
 
                           {/* Per-Event Breakdown */}
                           <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
