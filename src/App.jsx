@@ -11222,8 +11222,8 @@ export default function App() {
                           {/* Simulated Score Summary (Women & Men Highlighted, Combined Secondary) */}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {simGenderView !== 'Men' && (
-                              <div className="p-3.5 rounded-xl border border-rose-200 bg-rose-50/40 space-y-2">
-                                <div className="text-[11px] font-extrabold uppercase tracking-wider text-rose-800">
+                              <div className="p-3.5 rounded-xl border border-orange-200 bg-orange-50/40 space-y-2">
+                                <div className="text-[11px] font-extrabold uppercase tracking-wider text-orange-800">
                                   Women&apos;s Projected Score
                                 </div>
                                 <div className="space-y-1.5">
