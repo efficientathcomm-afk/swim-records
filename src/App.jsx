@@ -1659,6 +1659,7 @@ export default function App() {
   const [sortConfig, setSortConfig] = useState({ key: 'eventNumber', direction: 'asc' });
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [copiedRecap, setCopiedRecap] = useState(false);
+  const [recapGenderFilter, setRecapGenderFilter] = useState('ALL'); // 'ALL' | 'Women' | 'Men'
 
   // Historical Database, Master Roster, Master Competitions, & Master Events State
   const [historicalRecords, setHistoricalRecords] = useState(() => {
@@ -7066,34 +7067,553 @@ export default function App() {
   // SID Post-Meet Recap Generator
   const generatedRecapText = useMemo(() => {
     if (!parsedData) return '';
-    const scoreLine = parsedData.teamScores
-      .map(
-        (t) =>
-          `${t.name}: Women ${t.womenPoints}, Men ${t.menPoints} (Total ${t.totalPoints})`
-      )
-      .join(' | ');
+
+    const primaryTeamCode =
+      selectedTeam && selectedTeam !== 'ALL'
+        ? selectedTeam
+        : parsedData.teams.find((t) => String(t.name || '').toLowerCase().includes('gettysburg'))
+            ?.code ||
+          parsedData.teams[0]?.code ||
+          '';
+    const primaryTeamObj = parsedData.teams.find((t) => t.code === primaryTeamCode);
+    const primaryTeamName = primaryTeamObj?.name || 'Our Program';
+
+    const matchesGender = (genderVal) =>
+      recapGenderFilter === 'ALL' || String(genderVal || '') === recapGenderFilter;
+
+    const gendersToBuild =
+      recapGenderFilter === 'ALL' ? ['Women', 'Men'] : [recapGenderFilter];
+
+    const headerTag =
+      recapGenderFilter === 'ALL' ? 'COMBINED' : recapGenderFilter.toUpperCase();
 
     const lines = [
-      `${parsedData.meetInfo.name.toUpperCase()} — POST-MEET RECAP`,
-      `Date: ${parsedData.meetInfo.startDate || 'TBD'} | Location: ${
+      `${parsedData.meetInfo.name.toUpperCase()} — ${headerTag} POST-MEET RECAP`,
+      `Program: ${primaryTeamName} | Date: ${parsedData.meetInfo.startDate || 'TBD'} | Location: ${
         [parsedData.meetInfo.city, parsedData.meetInfo.state].filter(Boolean).join(', ') || 'Pool'
       }`,
-      `Team Scores: ${scoreLine}`,
       '',
     ];
 
-    if (winSummary.athletes.length > 0) {
-      lines.push('EVENT WINNERS & MULTI-WIN LEADERS:');
-      winSummary.athletes.forEach((a) => {
-        const tot = a.indWins + a.relWins;
-        lines.push(
-          `• ${a.name} (${a.teamName}) — ${tot} Win${tot > 1 ? 's' : ''} (${a.indWins}I / ${a.relWins}R): ${a.events.join('; ')}`
+    // 1. TEAM SCORES & EVENT-BY-EVENT RUNNING PROGRESSION (per gender)
+    lines.push('=== TEAM SCORES & RUNNING PROGRESSION ===');
+    gendersToBuild.forEach((g) => {
+      const scoreKey = g === 'Women' ? 'womenPoints' : 'menPoints';
+      const sortedTeams = [...(parsedData.teamScores || [])].sort(
+        (a, b) => (b[scoreKey] || 0) - (a[scoreKey] || 0)
+      );
+      const finalScoreStr = sortedTeams
+        .map((t) => `${t.name} ${t[scoreKey] || 0}`)
+        .join(', ');
+      lines.push(`• ${g}'s Final Score: ${finalScoreStr || 'Unscored'}`);
+
+      // Build chronological event-by-event running score for dual/tri meets
+      const evMap = new Map();
+      const collectPts = (item, isRelay) => {
+        if (item.genderLabel !== g) return;
+        if (item.isExhibition || item.isTimeTrial || item.isSwimOff) return;
+        const evNum = Number(item.eventNumber) || 999;
+        const k = `${evNum}|${item.eventLabel}`;
+        if (!evMap.has(k)) {
+          evMap.set(k, {
+            num: evNum,
+            label: item.eventLabel.replace(/^(Women|Men)\s+/i, ''),
+            isRelay,
+            ptsByTeam: new Map(),
+          });
+        }
+        const pts = Number(item.points) || 0;
+        if (pts > 0) {
+          const cur = evMap.get(k).ptsByTeam.get(item.teamCode) || 0;
+          evMap.get(k).ptsByTeam.set(item.teamCode, cur + pts);
+        }
+      };
+      parsedData.individualResults.forEach((r) => collectPts(r, false));
+      parsedData.relayResults.forEach((r) => collectPts(r, true));
+
+      const orderedEvents = Array.from(evMap.values()).sort((a, b) => a.num - b.num);
+      const runningTotals = new Map();
+      parsedData.teams.forEach((t) => runningTotals.set(t.code, 0));
+
+      const progressionSteps = [];
+      let prevLeaderCode = null;
+      const totalPossiblePts = orderedEvents.reduce((sum, ev) => {
+        let evSum = 0;
+        ev.ptsByTeam.forEach((v) => {
+          evSum += v;
+        });
+        return sum + evSum;
+      }, 0);
+      const clinchThreshold = totalPossiblePts > 0 ? Math.floor(totalPossiblePts / 2) + 1 : Infinity;
+      let clinchedNote = '';
+
+      orderedEvents.forEach((ev) => {
+        let anyPts = false;
+        ev.ptsByTeam.forEach((pts, tCode) => {
+          if (pts > 0) anyPts = true;
+          runningTotals.set(tCode, (runningTotals.get(tCode) || 0) + pts);
+        });
+        if (!anyPts) return;
+
+        const standings = parsedData.teams
+          .map((t) => ({
+            code: t.code,
+            name: t.name,
+            pts: runningTotals.get(t.code) || 0,
+          }))
+          .sort((a, b) => b.pts - a.pts);
+
+        const leader = standings[0];
+        const runnerUp = standings[1];
+        const isTied = runnerUp && leader.pts === runnerUp.pts;
+        const curLeaderCode = isTied ? 'TIE' : leader?.code;
+
+        let tag = '';
+        if (prevLeaderCode && curLeaderCode !== prevLeaderCode) {
+          tag = curLeaderCode === 'TIE' ? ' [TIED]' : ' [LEAD CHANGE]';
+        }
+        prevLeaderCode = curLeaderCode;
+
+        if (
+          !clinchedNote &&
+          parsedData.teams.length === 2 &&
+          leader &&
+          leader.pts >= clinchThreshold
+        ) {
+          clinchedNote = ` [CLINCHED by ${leader.name}]`;
+          tag += clinchedNote;
+        }
+
+        const scoreSnap = standings.map((s) => `${s.name} ${s.pts}`).join(' – ');
+        progressionSteps.push(`After ${ev.label}: ${scoreSnap}${tag}`);
+      });
+
+      if (progressionSteps.length > 0) {
+        lines.push(`  Running Progression (${g}):`);
+        progressionSteps.forEach((step) => lines.push(`    - ${step}`));
+      }
+    });
+    lines.push('');
+
+    // 2. RECORDS BROKEN & ALL-TIME TOP-10 MARKS (Primary Program)
+    const recordAndTop10Bullets = [];
+    const seenRecKeys = new Set();
+
+    const inspectSwimForRecords = (swimmerName, eventLabel, timeStr, classYear, roundTag = '') => {
+      if (!timeStr || ['NT', 'DQ', 'SCR', 'NS'].includes(String(timeStr).toUpperCase())) return;
+      const tags = benchmarkIndex.evaluateSwim(swimmerName, eventLabel, timeStr, classYear);
+      const recTags = tags.filter((t) => t.type === 'TOP10' || t.type === 'FR');
+      if (recTags.length === 0) return;
+      const dedupKey = `${normalizeSwimmerKey(swimmerName)}|${normalizeEventKey(eventLabel)}|${timeStr}`;
+      if (seenRecKeys.has(dedupKey)) return;
+      seenRecKeys.add(dedupKey);
+      const labels = recTags.map((t) => t.label).join(' & ');
+      recordAndTop10Bullets.push(
+        `• ${swimmerName}${classYear ? ` (${classYear})` : ''} — ${eventLabel}: ${timeStr}${
+          roundTag ? ` (${roundTag})` : ''
+        } [${labels}]`
+      );
+    };
+
+    parsedData.individualResults.forEach((r) => {
+      if (r.teamCode !== primaryTeamCode || !matchesGender(r.genderLabel)) return;
+      const dispName = formatSwimmerDisplay(r.swimmerName, r.preferredFirst);
+      if (r.prelimTime && !['NT', 'DQ', 'SCR', 'NS'].includes(r.prelimTime)) {
+        inspectSwimForRecords(dispName, r.eventLabel, r.prelimTime, r.classYear, 'Prelims');
+      }
+      const finTime = r.prelimTime ? r.finalsOnlyTime : r.finalsTime;
+      if (finTime && !['NT', 'DQ', 'SCR', 'NS'].includes(finTime)) {
+        inspectSwimForRecords(
+          dispName,
+          r.eventLabel,
+          finTime,
+          r.classYear,
+          r.prelimTime ? 'Finals' : ''
+        );
+      }
+    });
+
+    // Check Relay Lead-Offs & Team Relay Marks for Records / Top-10
+    parsedData.relayResults.forEach((rel) => {
+      if (rel.teamCode !== primaryTeamCode || !matchesGender(rel.genderLabel)) return;
+      const breakdown = calculateRelayLegBreakdown(rel);
+      const leadOff = breakdown.find((l) => l.legOrder === 1);
+      if (leadOff && leadOff.swimmerName && leadOff.legTotalTime !== '-') {
+        const legDist = Math.round((Number(rel.distance) || 0) / 4);
+        const legStroke = String(rel.strokeName || '').includes('Medley')
+          ? 'Backstroke'
+          : 'Freestyle';
+        const leadName = formatSwimmerDisplay(leadOff.swimmerName, leadOff.preferredFirst);
+        inspectSwimForRecords(
+          leadName,
+          `${rel.genderLabel} ${legDist} ${legStroke}`,
+          leadOff.legTotalTime,
+          leadOff.classYear,
+          `Relay Lead-Off in ${rel.eventLabel}`
+        );
+      }
+
+      if (rel.finalsTime && !['NT', 'DQ', 'SCR', 'NS'].includes(rel.finalsTime)) {
+        const legsNames = (rel.legs || [])
+          .map((l) => formatSwimmerDisplay(l.swimmerName, l.preferredFirst))
+          .join(', ');
+        inspectSwimForRecords(
+          legsNames || rel.relayTitle,
+          rel.eventLabel,
+          rel.finalsTime,
+          '',
+          `"${rel.relayLetter || 'A'}" Relay`
+        );
+      }
+    });
+
+    lines.push('=== RECORDS BROKEN & ALL-TIME TOP-10 MARKS ===');
+    if (recordAndTop10Bullets.length > 0) {
+      recordAndTop10Bullets.forEach((b) => lines.push(b));
+    } else {
+      lines.push('• None recorded in this meet.');
+    }
+    lines.push('');
+
+    // 3. QUALIFYING STANDARDS & POOL RECORDS HIT (Primary Program)
+    const standardBullets = [];
+    const seenStdKeys = new Set();
+    parsedData.individualResults.forEach((r) => {
+      if (r.teamCode !== primaryTeamCode || !matchesGender(r.genderLabel)) return;
+      const dispName = formatSwimmerDisplay(r.swimmerName, r.preferredFirst);
+      [
+        { t: r.prelimTime, rnd: 'Prelims' },
+        { t: r.prelimTime ? r.finalsOnlyTime : r.finalsTime, rnd: r.prelimTime ? 'Finals' : '' },
+      ].forEach(({ t, rnd }) => {
+        if (!t || ['NT', 'DQ', 'SCR', 'NS'].includes(String(t).toUpperCase())) return;
+        const hits = evaluateStandardsForSwim(r.eventLabel, t);
+        hits.forEach((std) => {
+          const sk = `${normalizeSwimmerKey(dispName)}|${r.eventLabel}|${std.id}|${t}`;
+          if (seenStdKeys.has(sk)) return;
+          seenStdKeys.add(sk);
+          standardBullets.push(
+            `• ${dispName} — ${r.eventLabel}: ${t}${rnd ? ` (${rnd})` : ''} [${std.label} Cut: ${
+              std.time
+            }]`
+          );
+        });
+      });
+    });
+
+    parsedData.relayResults.forEach((rel) => {
+      if (rel.teamCode !== primaryTeamCode || !matchesGender(rel.genderLabel)) return;
+      if (!rel.finalsTime || ['NT', 'DQ', 'SCR', 'NS'].includes(rel.finalsTime)) return;
+      const hits = evaluateStandardsForSwim(rel.eventLabel, rel.finalsTime);
+      hits.forEach((std) => {
+        const legsNames = (rel.legs || [])
+          .map((l) => formatSwimmerDisplay(l.swimmerName, l.preferredFirst))
+          .join(', ');
+        standardBullets.push(
+          `• ${rel.relayTitle}${legsNames ? ` (${legsNames})` : ''} — ${rel.eventLabel}: ${
+            rel.finalsTime
+          } [${std.label} Cut: ${std.time}]`
         );
       });
+    });
+
+    lines.push('=== QUALIFYING STANDARDS & POOL RECORDS HIT ===');
+    if (standardBullets.length > 0) {
+      standardBullets.forEach((b) => lines.push(b));
+    } else {
+      lines.push('• None hit (or no qualifying standards configured in Section 3).');
+    }
+    lines.push('');
+
+    // 4. PROGRAM EVENT WINNERS & MULTI-WIN PERFORMERS
+    const progWinnersMap = new Map();
+    parsedData.individualResults.forEach((r) => {
+      if (r.teamCode !== primaryTeamCode || !matchesGender(r.genderLabel)) return;
+      if (Number(r.place) !== 1 || r.isTimeTrial || r.isSwimOff) return;
+      const name = formatSwimmerDisplay(r.swimmerName, r.preferredFirst);
+      if (!progWinnersMap.has(name)) {
+        progWinnersMap.set(name, { name, indWins: 0, relWins: 0, events: [] });
+      }
+      const entry = progWinnersMap.get(name);
+      entry.indWins += 1;
+      entry.events.push(`${r.eventLabel} (${r.finalsTime})`);
+    });
+
+    parsedData.relayResults.forEach((rel) => {
+      if (rel.teamCode !== primaryTeamCode || !matchesGender(rel.genderLabel)) return;
+      if (Number(rel.place) !== 1 || rel.isTimeTrial) return;
+      (rel.legs || []).forEach((leg) => {
+        const name = formatSwimmerDisplay(leg.swimmerName, leg.preferredFirst);
+        if (!progWinnersMap.has(name)) {
+          progWinnersMap.set(name, { name, indWins: 0, relWins: 0, events: [] });
+        }
+        const entry = progWinnersMap.get(name);
+        entry.relWins += 1;
+        entry.events.push(`${rel.eventLabel} — Leg ${leg.legOrder} (${rel.finalsTime})`);
+      });
+    });
+
+    const progWinnersList = Array.from(progWinnersMap.values()).sort(
+      (a, b) =>
+        b.indWins + b.relWins - (a.indWins + a.relWins) ||
+        b.indWins - a.indWins ||
+        compareByLastName(a.name, b.name)
+    );
+
+    lines.push(`=== ${primaryTeamName.toUpperCase()} EVENT WINNERS & TOP PERFORMERS ===`);
+    if (progWinnersList.length > 0) {
+      progWinnersList.forEach((a) => {
+        const tot = a.indWins + a.relWins;
+        lines.push(
+          `• ${a.name} — ${tot} Win${tot > 1 ? 's' : ''} (${a.indWins}I / ${
+            a.relWins
+          }R): ${a.events.join('; ')}`
+        );
+      });
+    } else {
+      lines.push('• No 1st-place finishes recorded.');
+    }
+    lines.push('');
+
+    // 5. EVENT SWEEPS (1-2 / 1-2-3) & CLOSE FINISHES (<= 0.25s)
+    const sweepAndCloseBullets = [];
+    const indByEvent = new Map();
+    parsedData.individualResults.forEach((r) => {
+      if (!matchesGender(r.genderLabel) || r.isTimeTrial || r.isSwimOff || r.isDq) return;
+      const k = `${Number(r.eventNumber) || 999}|${r.eventLabel}`;
+      if (!indByEvent.has(k)) indByEvent.set(k, []);
+      indByEvent.get(k).push(r);
+    });
+
+    Array.from(indByEvent.entries())
+      .sort((a, b) => Number(a[0].split('|')[0]) - Number(b[0].split('|')[0]))
+      .forEach(([, swims]) => {
+        const placed = swims
+          .filter((s) => typeof s.place === 'number' && s.place > 0)
+          .sort((a, b) => a.place - b.place);
+        if (placed.length < 2) return;
+
+        const first = placed[0];
+        const second = placed[1];
+        const third = placed[2];
+
+        // Check 1-2-3 or 1-2 sweep by primary program
+        if (first.teamCode === primaryTeamCode && second.teamCode === primaryTeamCode) {
+          if (third && third.teamCode === primaryTeamCode) {
+            const ptsSum = (first.points || 0) + (second.points || 0) + (third.points || 0);
+            sweepAndCloseBullets.push(
+              `• 1-2-3 SWEEP in ${first.eventLabel}: 1. ${formatSwimmerDisplay(
+                first.swimmerName,
+                first.preferredFirst
+              )} (${first.finalsTime}), 2. ${formatSwimmerDisplay(
+                second.swimmerName,
+                second.preferredFirst
+              )} (${second.finalsTime}), 3. ${formatSwimmerDisplay(
+                third.swimmerName,
+                third.preferredFirst
+              )} (${third.finalsTime})${ptsSum > 0 ? ` [+${ptsSum} pts]` : ''}`
+            );
+          } else {
+            const ptsSum = (first.points || 0) + (second.points || 0);
+            sweepAndCloseBullets.push(
+              `• 1-2 FINISH in ${first.eventLabel}: 1. ${formatSwimmerDisplay(
+                first.swimmerName,
+                first.preferredFirst
+              )} (${first.finalsTime}), 2. ${formatSwimmerDisplay(
+                second.swimmerName,
+                second.preferredFirst
+              )} (${second.finalsTime})${ptsSum > 0 ? ` [+${ptsSum} pts]` : ''}`
+            );
+          }
+        }
+
+        // Check close touch-out finish (<= 0.25s) involving our program
+        if (
+          isFinite(first.timeSeconds) &&
+          isFinite(second.timeSeconds) &&
+          (first.teamCode === primaryTeamCode || second.teamCode === primaryTeamCode)
+        ) {
+          const margin = Math.abs(second.timeSeconds - first.timeSeconds);
+          if (margin <= 0.25) {
+            const wonByOurs = first.teamCode === primaryTeamCode;
+            sweepAndCloseBullets.push(
+              `• CLOSE FINISH (${margin.toFixed(2)}s) in ${first.eventLabel}: ${
+                wonByOurs ? `${primaryTeamName} win` : `${primaryTeamName} runner-up`
+              } — 1. ${formatSwimmerDisplay(first.swimmerName, first.preferredFirst)} (${
+                first.teamName
+              }, ${first.finalsTime}) vs. 2. ${formatSwimmerDisplay(
+                second.swimmerName,
+                second.preferredFirst
+              )} (${second.teamName}, ${second.finalsTime})`
+            );
+          }
+        }
+      });
+
+    // Also check close finishes in relays (<= 0.25s)
+    const relByEvent = new Map();
+    parsedData.relayResults.forEach((rel) => {
+      if (!matchesGender(rel.genderLabel) || rel.isTimeTrial || rel.isDq) return;
+      const k = `${Number(rel.eventNumber) || 999}|${rel.eventLabel}`;
+      if (!relByEvent.has(k)) relByEvent.set(k, []);
+      relByEvent.get(k).push(rel);
+    });
+    relByEvent.forEach((rels) => {
+      const placed = rels
+        .filter((r) => typeof r.place === 'number' && r.place > 0)
+        .sort((a, b) => a.place - b.place);
+      if (placed.length < 2) return;
+      const [r1, r2] = placed;
+      if (
+        isFinite(r1.timeSeconds) &&
+        isFinite(r2.timeSeconds) &&
+        (r1.teamCode === primaryTeamCode || r2.teamCode === primaryTeamCode)
+      ) {
+        const margin = Math.abs(r2.timeSeconds - r1.timeSeconds);
+        if (margin <= 0.25) {
+          sweepAndCloseBullets.push(
+            `• CLOSE RELAY FINISH (${margin.toFixed(2)}s) in ${r1.eventLabel}: 1. ${
+              r1.relayTitle
+            } (${r1.finalsTime}) vs. 2. ${r2.relayTitle} (${r2.finalsTime})`
+          );
+        }
+      }
+    });
+
+    lines.push('=== SWEEPS & CLOSE FINISHES (≤ 0.25s) ===');
+    if (sweepAndCloseBullets.length > 0) {
+      sweepAndCloseBullets.forEach((b) => lines.push(b));
+    } else {
+      lines.push('• No 1-2 sweeps or ≤ 0.25s touch-out finishes recorded.');
+    }
+    lines.push('');
+
+    // 6. PERSONAL & SEASON BESTS (GROUPED BY ATHLETE — Primary Program)
+    const pbSbByAthlete = new Map();
+    parsedData.individualResults.forEach((r) => {
+      if (r.teamCode !== primaryTeamCode || !matchesGender(r.genderLabel)) return;
+      const dispName = formatSwimmerDisplay(r.swimmerName, r.preferredFirst);
+      const roundsToCheck = [];
+      if (r.prelimTime && !['NT', 'DQ', 'SCR', 'NS'].includes(r.prelimTime)) {
+        roundsToCheck.push({ timeStr: r.prelimTime, roundLbl: 'Prelims' });
+      }
+      const finStr = r.prelimTime ? r.finalsOnlyTime : r.finalsTime;
+      if (finStr && !['NT', 'DQ', 'SCR', 'NS'].includes(finStr)) {
+        roundsToCheck.push({ timeStr: finStr, roundLbl: r.prelimTime ? 'Finals' : '' });
+      }
+
+      roundsToCheck.forEach(({ timeStr, roundLbl }) => {
+        const tags = benchmarkIndex.evaluateSwim(dispName, r.eventLabel, timeStr, r.classYear);
+        const bestTag = tags.find((t) => t.type === 'PB' || t.type === 'SB');
+        if (!bestTag) return;
+
+        if (!pbSbByAthlete.has(dispName)) {
+          pbSbByAthlete.set(dispName, {
+            name: dispName,
+            classYear: r.classYear || '',
+            items: new Map(),
+          });
+        }
+        const shortEv = r.eventLabel.replace(/^(Women|Men)\s+/i, '');
+        const itemKey = `${shortEv}|${roundLbl}`;
+        pbSbByAthlete
+          .get(dispName)
+          .items.set(itemKey, `${shortEv}: ${timeStr}${roundLbl ? ` ${roundLbl}` : ''} (${bestTag.label})`);
+      });
+    });
+
+    const groupedBestAthletes = Array.from(pbSbByAthlete.values()).sort((a, b) =>
+      compareByLastName(a.name, b.name)
+    );
+
+    lines.push(`=== ${primaryTeamName.toUpperCase()} PERSONAL & SEASON BESTS (BY ATHLETE) ===`);
+    if (groupedBestAthletes.length > 0) {
+      groupedBestAthletes.forEach((ath) => {
+        const marks = Array.from(ath.items.values());
+        lines.push(
+          `• ${ath.name}${ath.classYear ? ` (${ath.classYear})` : ''} [${marks.length}]: ${marks.join(
+            '; '
+          )}`
+        );
+      });
+    } else {
+      lines.push('• No new career PBs or season bests vs. committed database.');
+    }
+    lines.push('');
+
+    // 7. OPPONENT MULTI-EVENT WINNERS
+    const oppWinnersMap = new Map();
+    parsedData.individualResults.forEach((r) => {
+      if (r.teamCode === primaryTeamCode || !matchesGender(r.genderLabel)) return;
+      if (Number(r.place) !== 1 || r.isTimeTrial || r.isSwimOff) return;
+      const name = formatSwimmerDisplay(r.swimmerName, r.preferredFirst);
+      const key = `${r.teamCode}|${name}`;
+      if (!oppWinnersMap.has(key)) {
+        oppWinnersMap.set(key, {
+          name,
+          teamName: r.teamName,
+          indWins: 0,
+          relWins: 0,
+          events: [],
+        });
+      }
+      const entry = oppWinnersMap.get(key);
+      entry.indWins += 1;
+      entry.events.push(`${r.eventLabel} (${r.finalsTime})`);
+    });
+
+    parsedData.relayResults.forEach((rel) => {
+      if (rel.teamCode === primaryTeamCode || !matchesGender(rel.genderLabel)) return;
+      if (Number(rel.place) !== 1 || rel.isTimeTrial) return;
+      (rel.legs || []).forEach((leg) => {
+        const name = formatSwimmerDisplay(leg.swimmerName, leg.preferredFirst);
+        const key = `${rel.teamCode}|${name}`;
+        if (!oppWinnersMap.has(key)) {
+          oppWinnersMap.set(key, {
+            name,
+            teamName: rel.teamName,
+            indWins: 0,
+            relWins: 0,
+            events: [],
+          });
+        }
+        const entry = oppWinnersMap.get(key);
+        entry.relWins += 1;
+        entry.events.push(`${rel.eventLabel} — Leg ${leg.legOrder} (${rel.finalsTime})`);
+      });
+    });
+
+    const oppMultiWinners = Array.from(oppWinnersMap.values())
+      .filter((a) => a.indWins + a.relWins >= 2)
+      .sort(
+        (a, b) =>
+          b.indWins + b.relWins - (a.indWins + a.relWins) ||
+          b.indWins - a.indWins ||
+          compareByLastName(a.name, b.name)
+      );
+
+    lines.push('=== OPPONENT MULTI-EVENT WINNERS (2+ WINS) ===');
+    if (oppMultiWinners.length > 0) {
+      oppMultiWinners.forEach((a) => {
+        const tot = a.indWins + a.relWins;
+        lines.push(
+          `• ${a.name} (${a.teamName}) — ${tot} Wins (${a.indWins}I / ${
+            a.relWins
+          }R): ${a.events.join('; ')}`
+        );
+      });
+    } else {
+      lines.push('• No opponent swimmers won multiple events.');
     }
 
     return lines.join('\n');
-  }, [parsedData, winSummary]);
+  }, [
+    parsedData,
+    selectedTeam,
+    recapGenderFilter,
+    benchmarkIndex,
+    qualStandards,
+    showPoolRecordBadges,
+  ]);
 
   const handleCopyRecap = () => {
     navigator.clipboard.writeText(generatedRecapText).then(() => {
@@ -13708,26 +14228,48 @@ export default function App() {
 
                   {/* Copyable SID Post-Meet Recap */}
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-4 flex flex-col">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                       <h3 className="text-base font-extrabold text-slate-900">
                         SID Post-Meet Recap Notes
                       </h3>
-                      <button
-                        onClick={handleCopyRecap}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
-                      >
-                        {copiedRecap ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            Copied!
-                          </>
-                        ) : (
-                          <>
-                            <ClipboardCopy className="w-3.5 h-3.5 text-cyan-400" />
-                            Copy Recap
-                          </>
-                        )}
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-bold">
+                          {[
+                            { id: 'ALL', label: 'Combined' },
+                            { id: 'Women', label: 'Women' },
+                            { id: 'Men', label: 'Men' },
+                          ].map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setRecapGenderFilter(opt.id)}
+                              className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                                recapGenderFilter === opt.id
+                                  ? 'bg-white text-slate-900 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={handleCopyRecap}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+                        >
+                          {copiedRecap ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <ClipboardCopy className="w-3.5 h-3.5 text-cyan-400" />
+                              Copy Recap
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     {/* Optional Away & Home Logos + Standalone Web Recap (.HTML) Export */}
