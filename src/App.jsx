@@ -9382,8 +9382,8 @@ export default function App() {
                                     </span>
 
                                     {/* Women's Live Score Pill */}
-                                    <div className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-950/60 border border-rose-500/40">
-                                      <span className="text-[10px] font-black uppercase tracking-wider text-rose-300">
+                                    <div className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-orange-950/60 border border-orange-500/40">
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-orange-300">
                                         Women
                                       </span>
                                       {liveMeetTracker.teamScores
@@ -9395,7 +9395,7 @@ export default function App() {
                                             className="inline-flex items-center gap-1 font-mono"
                                           >
                                             {idx > 0 && (
-                                              <span className="text-rose-400/60 mx-0.5">•</span>
+                                              <span className="text-orange-400/60 mx-0.5">•</span>
                                             )}
                                             <span
                                               className="w-2 h-2 rounded-full"
